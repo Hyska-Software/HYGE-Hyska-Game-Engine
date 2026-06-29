@@ -6,8 +6,8 @@
 //! [`wgpu::Queue`], the optional [`wgpu::Surface`] (and its
 //! [`wgpu::SurfaceConfiguration`]), the pre-built triangle
 //! pipeline + vertex buffer (R-024), and the per-frame
-//! [`hyge_render_graph::RenderGraph`]. Construction takes a
-//! [`RendererConfig`] and either a [`hyge_window::Window`] (for
+//! [`hyge_render_graph::prelude::RenderGraph`]. Construction takes a
+//! [`RendererConfig`] and either a `hyge_window::Window` (for
 //! the windowed / present-to-screen path) or nothing (for the
 //! headless / compute-only path used by tests).
 //!
@@ -51,9 +51,10 @@ use winit::window::Window as WinitWindow;
 
 use hyge_core::prelude::*;
 use hyge_render_graph::prelude::*;
-use hyge_window::Window;
+use hyge_window::prelude::Window;
 
 use crate::config::RendererConfig;
+use crate::profiler::{FrameStats, GpuProfiler};
 use crate::triangle::TrianglePass;
 
 /// The runtime renderer.
@@ -70,11 +71,13 @@ pub struct Renderer {
     /// pass (R-024). Created at construction time with the
     /// surface format (or `Rgba8UnormSrgb` for the headless
     /// path). `Clone` is cheap (reference-counted inside wgpu).
-    triangle_pipeline: wgpu::RenderPipeline,
+    triangle_pipeline: Arc<wgpu::RenderPipeline>,
     /// The pre-built vertex buffer for the first-triangle
     /// pass (R-024). Holds the three hardcoded vertices from
     /// `crate::triangle::VERTICES`.
-    triangle_vertex_buffer: wgpu::Buffer,
+    triangle_vertex_buffer: Arc<wgpu::Buffer>,
+    /// GPU timestamp profiler and latest frame statistics.
+    profiler: GpuProfiler,
     /// The `Arc<winit::Window>` that backs the surface. Stored
     /// here to keep the window alive for the surface's `'static`
     /// lifetime. `None` for the headless path.
@@ -141,9 +144,8 @@ impl Renderer {
             let static_ref: &'static WinitWindow = std::mem::transmute(winit_ref);
             instance
                 .create_surface_unsafe(
-                    wgpu::SurfaceTargetUnsafe::from_window(static_ref).map_err(|e| {
-                        HygeError::gpu(format!("surface target: {e}"))
-                    })?,
+                    wgpu::SurfaceTargetUnsafe::from_window(static_ref)
+                        .map_err(|e| HygeError::gpu(format!("surface target: {e}")))?,
                 )
                 .map_err(|e| HygeError::gpu(format!("create surface: {e}")))?
         };
@@ -153,14 +155,12 @@ impl Renderer {
             force_fallback_adapter: false,
             compatible_surface: Some(&surface),
         }))
-        .ok_or_else(|| {
-            HygeError::unsupported("no wgpu adapter compatible with surface")
-        })?;
+        .ok_or_else(|| HygeError::unsupported("no wgpu adapter compatible with surface"))?;
 
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some(&config.device_label),
-                required_features: wgpu::Features::empty(),
+                required_features: timestamp_features(&adapter),
                 required_limits: wgpu::Limits::downlevel_defaults(),
                 memory_hints: wgpu::MemoryHints::default(),
             },
@@ -199,6 +199,8 @@ impl Renderer {
         // build it once at startup rather than every frame.
         let triangle_pipeline = TrianglePass::create_pipeline(&device, surface_format);
         let triangle_vertex_buffer = TrianglePass::create_vertex_buffer(&device);
+        let timestamps_enabled = timestamp_queries_enabled(&device);
+        let profiler = GpuProfiler::new(&device, &queue, timestamps_enabled);
 
         Ok(Self {
             instance,
@@ -206,6 +208,7 @@ impl Renderer {
             queue,
             triangle_pipeline,
             triangle_vertex_buffer,
+            profiler,
             window_keepalive: Some(winit_arc),
             surface: Some(surface),
             surface_config: Some(surface_config),
@@ -226,7 +229,8 @@ impl Renderer {
     ///
     /// Returns [`HygeError::Gpu`] if device creation fails, or
     /// [`HygeError::Unsupported`] if no wgpu adapter is available.
-    pub(crate) fn new_headless(config: &RendererConfig) -> HygeResult<Self> {
+    #[allow(dead_code)]
+    pub fn new_headless(config: &RendererConfig) -> HygeResult<Self> {
         let instance = create_instance(config);
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: config.power_preference,
@@ -237,7 +241,7 @@ impl Renderer {
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some(&config.device_label),
-                required_features: wgpu::Features::empty(),
+                required_features: timestamp_features(&adapter),
                 required_limits: wgpu::Limits::downlevel_defaults(),
                 memory_hints: wgpu::MemoryHints::default(),
             },
@@ -253,6 +257,8 @@ impl Renderer {
         let triangle_pipeline =
             TrianglePass::create_pipeline(&device, wgpu::TextureFormat::Rgba8UnormSrgb);
         let triangle_vertex_buffer = TrianglePass::create_vertex_buffer(&device);
+        let timestamps_enabled = timestamp_queries_enabled(&device);
+        let profiler = GpuProfiler::new(&device, &queue, timestamps_enabled);
 
         Ok(Self {
             instance,
@@ -260,6 +266,7 @@ impl Renderer {
             queue,
             triangle_pipeline,
             triangle_vertex_buffer,
+            profiler,
             window_keepalive: None,
             surface: None,
             surface_config: None,
@@ -324,7 +331,9 @@ impl Renderer {
             .current_frame
             .as_ref()
             .ok_or_else(|| HygeError::gpu("current_frame_view: no current frame"))?;
-        Ok(frame.texture.create_view(&wgpu::TextureViewDescriptor::default()))
+        Ok(frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default()))
     }
 
     /// Returns the format the swapchain (or, for the headless
@@ -346,11 +355,11 @@ impl Renderer {
     #[must_use]
     pub fn build_triangle_graph(&self, clear_color: wgpu::Color) -> RenderGraph {
         let mut graph = RenderGraph::new();
-        let pass = TrianglePass {
-            pipeline: self.triangle_pipeline.clone(),
-            vertex_buffer: self.triangle_vertex_buffer.clone(),
+        let pass = TrianglePass::with_prebuilt(
+            self.triangle_pipeline.clone(),
+            self.triangle_vertex_buffer.clone(),
             clear_color,
-        };
+        );
         graph.add_pass(pass);
         graph
     }
@@ -369,6 +378,7 @@ impl Renderer {
     /// Returns [`HygeError::Gpu`] if the frame acquisition, the
     /// pipeline compile, or the queue submission fails.
     pub fn render_triangle(&mut self, clear_color: wgpu::Color) -> HygeResult<()> {
+        self.profiler.begin_frame();
         self.begin_frame()?;
         let mut encoder = self
             .device
@@ -380,13 +390,24 @@ impl Renderer {
         let mut frame_ctx = FrameContext::new(view, format);
         {
             let mut graph = self.build_triangle_graph(clear_color);
-            let compiled = graph.compile(&self.device)?;
-            compiled.execute(&mut encoder, Some(&mut frame_ctx));
+            let mut compiled = graph.compile(&self.device)?;
+            let pass_names = compiled
+                .passes()
+                .iter()
+                .map(|pass| pass.name().to_string())
+                .collect::<Vec<_>>();
+            compiled.execute_with_hooks(
+                &mut encoder,
+                Some(&mut frame_ctx),
+                |_, pass_index, encoder| self.profiler.write_pass_start(encoder, pass_index),
+                |_, pass_index, encoder| self.profiler.write_pass_end(encoder, pass_index),
+            );
+            self.profiler.resolve(&mut encoder, pass_names.len() as u32);
+            self.queue.submit(std::iter::once(encoder.finish()));
+            self.profiler.finish_frame(&self.device, &pass_names, 1, 1);
+            self.end_frame()?;
+            Ok(())
         }
-        self.queue
-            .submit(std::iter::once(encoder.finish()));
-        self.end_frame()?;
-        Ok(())
     }
 
     /// Renders the triangle into an off-screen [`wgpu::Texture`]
@@ -407,6 +428,7 @@ impl Renderer {
         target: &wgpu::Texture,
         clear_color: wgpu::Color,
     ) -> HygeResult<()> {
+        self.profiler.begin_frame();
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -417,15 +439,24 @@ impl Renderer {
         let mut frame_ctx = FrameContext::new(view, format);
         {
             let mut graph = self.build_triangle_graph(clear_color);
-            let compiled = graph.compile(&self.device)?;
-            compiled.execute(&mut encoder, Some(&mut frame_ctx));
+            let mut compiled = graph.compile(&self.device)?;
+            let pass_names = compiled
+                .passes()
+                .iter()
+                .map(|pass| pass.name().to_string())
+                .collect::<Vec<_>>();
+            compiled.execute_with_hooks(
+                &mut encoder,
+                Some(&mut frame_ctx),
+                |_, pass_index, encoder| self.profiler.write_pass_start(encoder, pass_index),
+                |_, pass_index, encoder| self.profiler.write_pass_end(encoder, pass_index),
+            );
+            self.profiler.resolve(&mut encoder, pass_names.len() as u32);
+            self.queue.submit(std::iter::once(encoder.finish()));
+            self.device.poll(wgpu::Maintain::Wait);
+            self.profiler.finish_frame(&self.device, &pass_names, 1, 1);
+            Ok(())
         }
-        self.queue
-            .submit(std::iter::once(encoder.finish()));
-        // Block until the GPU finishes so callers can map the
-        // texture immediately after.
-        self.device.poll(wgpu::Maintain::Wait);
-        Ok(())
     }
 
     /// Resizes the surface to the given width and height. A no-op
@@ -451,6 +482,12 @@ impl Renderer {
     #[must_use]
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
+    }
+
+    /// Returns the latest frame statistics produced by the profiler.
+    #[must_use]
+    pub fn frame_stats(&self) -> &FrameStats {
+        self.profiler.stats()
     }
 
     /// Returns the wgpu instance.
@@ -494,6 +531,24 @@ impl Renderer {
     }
 }
 
+/// Returns the optional timestamp feature set requested from the adapter.
+fn timestamp_features(adapter: &wgpu::Adapter) -> wgpu::Features {
+    let required =
+        wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+    if adapter.features().contains(required) {
+        required
+    } else {
+        wgpu::Features::empty()
+    }
+}
+
+/// Returns true when command-encoder timestamp writes are available.
+fn timestamp_queries_enabled(device: &wgpu::Device) -> bool {
+    let required =
+        wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+    device.features().contains(required)
+}
+
 /// Constructs the wgpu [`wgpu::Instance`] with the requested
 /// backends and the validation-layer toggle. The `Instance` is
 /// the root of every other wgpu object and is owned by the
@@ -535,15 +590,18 @@ mod tests {
     fn pick_present_mode_prefers_requested() {
         let caps = wgpu::SurfaceCapabilities {
             formats: vec![wgpu::TextureFormat::Rgba8UnormSrgb],
-            present_modes: vec![
-                wgpu::PresentMode::Fifo,
-                wgpu::PresentMode::Mailbox,
-            ],
+            present_modes: vec![wgpu::PresentMode::Fifo, wgpu::PresentMode::Mailbox],
             alpha_modes: vec![wgpu::CompositeAlphaMode::Auto],
             usages: wgpu::TextureUsages::RENDER_ATTACHMENT,
         };
-        assert_eq!(pick_present_mode(&caps, wgpu::PresentMode::Mailbox), wgpu::PresentMode::Mailbox);
-        assert_eq!(pick_present_mode(&caps, wgpu::PresentMode::Fifo), wgpu::PresentMode::Fifo);
+        assert_eq!(
+            pick_present_mode(&caps, wgpu::PresentMode::Mailbox),
+            wgpu::PresentMode::Mailbox
+        );
+        assert_eq!(
+            pick_present_mode(&caps, wgpu::PresentMode::Fifo),
+            wgpu::PresentMode::Fifo
+        );
     }
 
     #[test]
@@ -554,8 +612,14 @@ mod tests {
             alpha_modes: vec![wgpu::CompositeAlphaMode::Auto],
             usages: wgpu::TextureUsages::RENDER_ATTACHMENT,
         };
-        assert_eq!(pick_present_mode(&caps, wgpu::PresentMode::Mailbox), wgpu::PresentMode::Fifo);
-        assert_eq!(pick_present_mode(&caps, wgpu::PresentMode::Immediate), wgpu::PresentMode::Fifo);
+        assert_eq!(
+            pick_present_mode(&caps, wgpu::PresentMode::Mailbox),
+            wgpu::PresentMode::Fifo
+        );
+        assert_eq!(
+            pick_present_mode(&caps, wgpu::PresentMode::Immediate),
+            wgpu::PresentMode::Fifo
+        );
     }
 
     /// R-023 acceptance: "device init succeeds on a software
@@ -601,7 +665,10 @@ mod tests {
         };
         // The headless default format is sRGB. The test path
         // uses this to pick the off-screen render-target format.
-        assert_eq!(renderer.surface_format(), wgpu::TextureFormat::Rgba8UnormSrgb);
+        assert_eq!(
+            renderer.surface_format(),
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        );
     }
 
     /// R-024: an off-screen render of the triangle round-trips
@@ -617,7 +684,11 @@ mod tests {
         };
         let target = renderer.device().create_texture(&wgpu::TextureDescriptor {
             label: Some("test-target"),
-            size: wgpu::Extent3d { width: 64, height: 64, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -628,7 +699,12 @@ mod tests {
         renderer
             .render_triangle_to_texture(
                 &target,
-                wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+                wgpu::Color {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
             )
             .expect("render_triangle_to_texture should succeed");
     }

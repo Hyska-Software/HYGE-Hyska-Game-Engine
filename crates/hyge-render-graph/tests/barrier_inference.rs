@@ -49,8 +49,12 @@ fn snapshot_for(compiled: &CompiledGraph) -> Vec<SnapshotBarrier> {
     for (i, pass) in compiled.passes().iter().enumerate() {
         for barrier in pass.barriers() {
             let (kind, from, to) = match barrier {
-                Barrier::Texture { from, to, .. } => ("Texture", format!("{from:?}"), format!("{to:?}")),
-                Barrier::Buffer { from, to, .. } => ("Buffer", format!("{from:?}"), format!("{to:?}")),
+                Barrier::Texture { from, to, .. } => {
+                    ("Texture", format!("{from:?}"), format!("{to:?}"))
+                }
+                Barrier::Buffer { from, to, .. } => {
+                    ("Buffer", format!("{from:?}"), format!("{to:?}"))
+                }
             };
             out.push(SnapshotBarrier {
                 pass: format!("{i}:{}", pass.name()),
@@ -95,7 +99,7 @@ struct FixedPass {
     name_: &'static str,
     reads_: Vec<ResourceHandle>,
     writes_: Vec<ResourceHandle>,
-    tex_usage: Vec<(ResourceHandle, wgpu::TextureUses)>,
+    tex_usage: Vec<(ResourceHandle, wgpu::TextureUsages)>,
 }
 
 impl Pass for FixedPass {
@@ -108,7 +112,7 @@ impl Pass for FixedPass {
     fn writes(&self) -> Vec<ResourceHandle> {
         self.writes_.clone()
     }
-    fn texture_usages(&self) -> Vec<(ResourceHandle, wgpu::TextureUses)> {
+    fn texture_usages(&self) -> Vec<(ResourceHandle, wgpu::TextureUsages)> {
         self.tex_usage.clone()
     }
     fn record(&mut self, _ctx: &mut PassContext<'_>) {}
@@ -163,14 +167,20 @@ fn build_5_pass_graph() -> (RenderGraph, [ResourceHandle; 5]) {
         )),
         ResourceLifetime::Persistent,
     );
-    let handles = [shadow_map, gbuffer_color, gbuffer_depth, lighting_color, final_color];
+    let handles = [
+        shadow_map,
+        gbuffer_color,
+        gbuffer_depth,
+        lighting_color,
+        final_color,
+    ];
 
     // Pass 0: shadow — writes shadow_map with RENDER_ATTACHMENT.
     g.add_pass(FixedPass {
         name_: "shadow",
         reads_: Vec::new(),
         writes_: vec![shadow_map],
-        tex_usage: vec![(shadow_map, wgpu::TextureUses::RENDER_ATTACHMENT)],
+        tex_usage: vec![(shadow_map, wgpu::TextureUsages::RENDER_ATTACHMENT)],
     });
     // Pass 1: gbuffer — reads shadow_map (TEXTURE_BINDING), writes
     // gbuffer_color + gbuffer_depth with RENDER_ATTACHMENT.
@@ -179,9 +189,9 @@ fn build_5_pass_graph() -> (RenderGraph, [ResourceHandle; 5]) {
         reads_: vec![shadow_map],
         writes_: vec![gbuffer_color, gbuffer_depth],
         tex_usage: vec![
-            (shadow_map, wgpu::TextureUses::TEXTURE_BINDING),
-            (gbuffer_color, wgpu::TextureUses::RENDER_ATTACHMENT),
-            (gbuffer_depth, wgpu::TextureUses::RENDER_ATTACHMENT),
+            (shadow_map, wgpu::TextureUsages::TEXTURE_BINDING),
+            (gbuffer_color, wgpu::TextureUsages::RENDER_ATTACHMENT),
+            (gbuffer_depth, wgpu::TextureUsages::RENDER_ATTACHMENT),
         ],
     });
     // Pass 2: lighting — reads gbuffer_color + shadow_map as
@@ -192,9 +202,12 @@ fn build_5_pass_graph() -> (RenderGraph, [ResourceHandle; 5]) {
         reads_: vec![gbuffer_color, shadow_map],
         writes_: vec![lighting_color],
         tex_usage: vec![
-            (gbuffer_color, wgpu::TextureUses::TEXTURE_BINDING),
-            (shadow_map, wgpu::TextureUses::TEXTURE_BINDING),
-            (lighting_color, wgpu::TextureUses::RENDER_ATTACHMENT | wgpu::TextureUses::TEXTURE_BINDING),
+            (gbuffer_color, wgpu::TextureUsages::TEXTURE_BINDING),
+            (shadow_map, wgpu::TextureUsages::TEXTURE_BINDING),
+            (
+                lighting_color,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            ),
         ],
     });
     // Pass 3: tonemap — reads lighting_color (TEXTURE_BINDING),
@@ -205,8 +218,11 @@ fn build_5_pass_graph() -> (RenderGraph, [ResourceHandle; 5]) {
         reads_: vec![lighting_color],
         writes_: vec![final_color],
         tex_usage: vec![
-            (lighting_color, wgpu::TextureUses::TEXTURE_BINDING),
-            (final_color, wgpu::TextureUses::RENDER_ATTACHMENT | wgpu::TextureUses::TEXTURE_BINDING),
+            (lighting_color, wgpu::TextureUsages::TEXTURE_BINDING),
+            (
+                final_color,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            ),
         ],
     });
     // Pass 4: present — reads final_color as TEXTURE_BINDING.
@@ -214,7 +230,7 @@ fn build_5_pass_graph() -> (RenderGraph, [ResourceHandle; 5]) {
         name_: "present",
         reads_: vec![final_color],
         writes_: Vec::new(),
-        tex_usage: vec![(final_color, wgpu::TextureUses::TEXTURE_BINDING)],
+        tex_usage: vec![(final_color, wgpu::TextureUsages::TEXTURE_BINDING)],
     });
 
     (g, handles)
@@ -236,7 +252,10 @@ fn five_pass_graph_barrier_inference_snapshot() {
     // final_color (Persistent first-touch).
     assert_eq!(compiled.passes().len(), 5);
     let names: Vec<&str> = compiled.passes().iter().map(|p| p.name()).collect();
-    assert_eq!(names, ["shadow", "gbuffer", "lighting", "tonemap", "present"]);
+    assert_eq!(
+        names,
+        ["shadow", "gbuffer", "lighting", "tonemap", "present"]
+    );
 
     let snapshot = snapshot_for(&compiled);
     insta::assert_debug_snapshot!(snapshot);

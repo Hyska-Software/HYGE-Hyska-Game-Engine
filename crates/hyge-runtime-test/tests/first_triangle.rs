@@ -83,7 +83,12 @@ fn build_clear_reference() -> Vec<u8> {
 /// Sample a pixel's RGBA channels at `(x, y)`.
 fn pixel_at(pixels: &[u8], x: u32, y: u32) -> (u8, u8, u8, u8) {
     let idx = ((y * WIDTH + x) * 4) as usize;
-    (pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3])
+    (
+        pixels[idx],
+        pixels[idx + 1],
+        pixels[idx + 2],
+        pixels[idx + 3],
+    )
 }
 
 /// R-024 acceptance: "snapshot test in hyge-runtime-test

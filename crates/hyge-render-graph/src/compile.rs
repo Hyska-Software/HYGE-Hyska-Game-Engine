@@ -12,13 +12,11 @@
 //! emission is a TODO (R-021 will wire it up); the per-pass barrier
 //! list is fully computed and exposed for inspection.
 
-use hyge_core::prelude::*;
-
 use crate::allocator::TransientAllocator;
 use crate::barrier::Barrier;
-use crate::pass::{Pass, PassContext, ResourceTable};
-use crate::resource::{ResourceHandle, ResourceKind, ResourceLifetime};
 use crate::graph::ResourceEntry;
+use crate::pass::{Pass, PassContext, ResourceTable};
+use crate::resource::{ResourceHandle, ResourceKind};
 
 /// One pass in the compiled graph, plus the barriers that lead into it.
 pub struct CompiledPass {
@@ -31,7 +29,7 @@ pub struct CompiledPass {
     /// Cached writes.
     pub writes: Vec<ResourceHandle>,
     /// The pass implementation (taken from the graph by `compile`).
-    pass: Box<dyn Pass>,
+    pub(crate) pass: Box<dyn Pass>,
     /// Barriers emitted by the compiler just before this pass records.
     pub barriers_before: Vec<Barrier>,
 }
@@ -126,14 +124,16 @@ impl CompiledGraph {
     /// `set_texture` / `set_buffer` to install persistent resources
     /// before calling [`CompiledGraph::execute`].
     #[must_use]
-    pub fn table(&self) -> &ResourceTable {
+    #[allow(dead_code)]
+    pub(crate) fn table(&self) -> &ResourceTable {
         &self.table
     }
 
     /// Returns a mutable resource table for installing persistent
     /// resources before calling [`CompiledGraph::execute`].
     #[must_use]
-    pub fn table_mut(&mut self) -> &mut ResourceTable {
+    #[allow(dead_code)]
+    pub(crate) fn table_mut(&mut self) -> &mut ResourceTable {
         &mut self.table
     }
 
@@ -173,16 +173,41 @@ impl CompiledGraph {
     /// lazily in R-022.
     ///
     /// `frame` is the per-frame context built by
-    /// [`Renderer::begin_frame`](hyge_render::Renderer::begin_frame).
+    /// `Renderer::begin_frame`.
     /// Pass it as `Some(&mut frame_ctx)` from the windowed
     /// rendering path; pass `None` for the headless test path
     /// (where the encoder has no surface target).
     pub fn execute(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
-        frame: Option<&mut crate::frame::FrameContext<'_>>,
+        frame: Option<&mut crate::frame::FrameContext>,
+    ) {
+        self.execute_with_hooks(encoder, frame, |_, _, _| {}, |_, _, _| {});
+    }
+
+    /// Executes the compiled graph and calls hook closures before
+    /// and after each pass records.
+    ///
+    /// This is used by the renderer profiler to write timestamp
+    /// queries around every graph pass without making the render
+    /// graph depend on the renderer crate. The hook names are the
+    /// same names used for debug groups and tracing spans.
+    pub fn execute_with_hooks(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        mut frame: Option<&mut crate::frame::FrameContext>,
+        mut before_pass: impl FnMut(&str, u32, &mut wgpu::CommandEncoder),
+        mut after_pass: impl FnMut(&str, u32, &mut wgpu::CommandEncoder),
     ) {
         for pass in &mut self.passes {
+            let pass_index = pass.id.index();
+            before_pass(pass.name.as_str(), pass_index, encoder);
+            let span = tracing::info_span!(
+                "hyge.render.pass",
+                tracy.name = %pass.name,
+                pass.id = pass_index
+            );
+            let _entered = span.enter();
             encoder.push_debug_group(pass.name.as_str());
             for barrier in &pass.barriers_before {
                 tracing::debug!("barrier: {barrier}");
@@ -192,6 +217,7 @@ impl CompiledGraph {
                 pass.pass.record(&mut ctx);
             }
             encoder.pop_debug_group();
+            after_pass(pass.name.as_str(), pass_index, encoder);
         }
     }
 }
@@ -199,10 +225,12 @@ impl CompiledGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hyge_core::prelude::HygeError;
+
+    use crate::graph::PassId;
     use crate::graph::RenderGraph;
     use crate::pass::PassContext;
-    use crate::resource::{BufferDesc, TextureDesc};
-    use crate::graph::PassId;
+    use crate::resource::{BufferDesc, ResourceLifetime, TextureDesc};
 
     /// Records the pass name and the barriers it observed, so tests
     /// can inspect the compile output without a real `wgpu::Device`.
@@ -210,7 +238,7 @@ mod tests {
         name_: &'static str,
         reads_: Vec<ResourceHandle>,
         writes_: Vec<ResourceHandle>,
-        tex_usage: Vec<(ResourceHandle, wgpu::TextureUses)>,
+        tex_usage: Vec<(ResourceHandle, wgpu::TextureUsages)>,
     }
     impl Pass for NoopRecordPass {
         fn name(&self) -> &str {
@@ -222,7 +250,7 @@ mod tests {
         fn writes(&self) -> Vec<ResourceHandle> {
             self.writes_.clone()
         }
-        fn texture_usages(&self) -> Vec<(ResourceHandle, wgpu::TextureUses)> {
+        fn texture_usages(&self) -> Vec<(ResourceHandle, wgpu::TextureUsages)> {
             self.tex_usage.clone()
         }
         fn record(&mut self, _ctx: &mut PassContext<'_>) {}
@@ -296,30 +324,42 @@ mod tests {
             )),
             ResourceLifetime::Transient,
         );
+        let final_color = g.add_resource(
+            ResourceKind::Texture(TextureDesc::new_2d(
+                1920,
+                1080,
+                wgpu::TextureFormat::Rgba16Float,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            )),
+            ResourceLifetime::Transient,
+        );
 
         let gbuffer_id: PassId = g.add_pass(NoopRecordPass {
             name_: "gbuffer",
             reads_: Vec::new(),
             writes_: vec![color, depth],
             tex_usage: vec![
-                (color, wgpu::TextureUses::RENDER_ATTACHMENT),
-                (depth, wgpu::TextureUses::RENDER_ATTACHMENT),
+                (color, wgpu::TextureUsages::RENDER_ATTACHMENT),
+                (depth, wgpu::TextureUsages::RENDER_ATTACHMENT),
             ],
         });
         let _lighting_id: PassId = g.add_pass(NoopRecordPass {
             name_: "lighting",
             reads_: vec![color],
-            writes_: vec![color, exposure],
+            writes_: vec![exposure],
             tex_usage: vec![
-                (color, wgpu::TextureUses::RENDER_ATTACHMENT | wgpu::TextureUses::TEXTURE_BINDING),
-                (exposure, wgpu::TextureUses::RENDER_ATTACHMENT),
+                (color, wgpu::TextureUsages::TEXTURE_BINDING),
+                (exposure, wgpu::TextureUsages::RENDER_ATTACHMENT),
             ],
         });
         let _tonemap_id: PassId = g.add_pass(NoopRecordPass {
             name_: "tonemap",
             reads_: vec![color, exposure],
-            writes_: vec![color],
-            tex_usage: vec![(color, wgpu::TextureUses::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)],
+            writes_: vec![final_color],
+            tex_usage: vec![(
+                final_color,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            )],
         });
 
         let compiled = g.compile(&device).expect("compile should succeed");
@@ -400,7 +440,10 @@ mod tests {
         // a → b (via rb: a reads rb, b writes rb)
         // b → a (via ra: b reads ra, a writes ra)
         // ⇒ cycle a → b → a.
-        let err = g.compile(&device).expect_err("cycle must be rejected");
+        let err = match g.compile(&device) {
+            Ok(_) => panic!("cycle must be rejected"),
+            Err(err) => err,
+        };
         assert!(
             matches!(err, HygeError::RenderGraphCycle(_)),
             "expected RenderGraphCycle, got {err:?}",
@@ -430,7 +473,10 @@ mod tests {
             writes_: vec![r],
             tex_usage: Vec::new(),
         });
-        let err = g.compile(&device).expect_err("double writer must be rejected");
+        let err = match g.compile(&device) {
+            Ok(_) => panic!("double writer must be rejected"),
+            Err(err) => err,
+        };
         assert!(
             matches!(err, HygeError::InvalidArgument(_)),
             "expected InvalidArgument, got {err:?}",

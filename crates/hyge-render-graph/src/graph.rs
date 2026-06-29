@@ -1,7 +1,7 @@
 //! [`RenderGraph`]: the user-facing builder for a render-graph DAG.
 //!
-//! Internally a [`RenderGraph`] owns a [`petgraph::DiGraph`] of
-//! [`PassNode`]s, plus a side table of [`ResourceEntry`] (the
+//! Internally a [`RenderGraph`] owns a [`petgraph::graph::DiGraph`] of
+//! `PassNode`s, plus a side table of [`ResourceEntry`] (the
 //! descriptors declared via [`RenderGraph::add_resource`]). Edges
 //! between passes are inferred from each pass's `reads` / `writes`
 //! declarations: for every resource `R` written by pass `A` and
@@ -127,7 +127,11 @@ impl RenderGraph {
     /// pass→resource wiring and (b) drive the
     /// [`TransientAllocator`](crate::allocator::TransientAllocator)
     /// for transient lifetimes.
-    pub fn add_resource(&mut self, kind: ResourceKind, lifetime: ResourceLifetime) -> ResourceHandle {
+    pub fn add_resource(
+        &mut self,
+        kind: ResourceKind,
+        lifetime: ResourceLifetime,
+    ) -> ResourceHandle {
         let handle = ResourceHandle::from_index(self.next_resource_id);
         self.next_resource_id += 1;
         self.resources.insert(
@@ -257,7 +261,6 @@ impl RenderGraph {
         let topo = toposort(&self.graph, None).map_err(|cycle| {
             let node = cycle.node_id();
             let pid = self.graph[node];
-            let pid = *pid;
             let name = self
                 .pass_nodes
                 .get(&pid)
@@ -266,8 +269,8 @@ impl RenderGraph {
         })?;
 
         // Build a quick lookup of per-pass texture/buffer usage hints.
-        let mut tex_usage: HashMap<(PassId, ResourceHandle), wgpu::TextureUses> = HashMap::new();
-        let mut buf_usage: HashMap<(PassId, ResourceHandle), wgpu::BufferUses> = HashMap::new();
+        let mut tex_usage: HashMap<(PassId, ResourceHandle), wgpu::TextureUsages> = HashMap::new();
+        let mut buf_usage: HashMap<(PassId, ResourceHandle), wgpu::BufferUsages> = HashMap::new();
         for node in self.pass_nodes.values() {
             if let Some(pass) = node.pass.as_ref() {
                 for (h, u) in pass.texture_usages() {
@@ -314,7 +317,7 @@ impl RenderGraph {
         let mut pass_ids_in_order: Vec<PassId> = Vec::with_capacity(topo.len());
 
         for node_idx in &topo {
-            let pid = *self.graph[*node_idx];
+            let pid = self.graph[*node_idx];
             pass_ids_in_order.push(pid);
             let node = self
                 .pass_nodes
@@ -341,36 +344,41 @@ impl RenderGraph {
                         let to = tex_usage
                             .get(&(pid, *r))
                             .copied()
-                            .unwrap_or_else(wgpu::TextureUses::empty);
-                        let is_first_touch = state.get(r).is_none();
-                        let from = match state.get(r) {
-                            Some(crate::barrier::AccessState::Texture(u)) => *u,
-                            _ => wgpu::TextureUses::UNINITIALIZED,
+                            .unwrap_or_else(wgpu::TextureUsages::empty);
+                        let is_first_touch = state.get(*r).is_none();
+                        let from = match state.get(*r) {
+                            Some(crate::barrier::AccessState::Texture(u)) => u,
+                            _ => wgpu::TextureUsages::empty(),
                         };
                         // Emission rule (see module rustdoc):
-                        //   * first touch + Transient + to == UNINITIALIZED  -> no barrier
-                        //   * first touch + Transient + to != UNINITIALIZED  -> barrier
+                        //   * first touch + Transient + to == empty          -> no barrier
+                        //   * first touch + Transient + to != empty          -> barrier
                         //   * first touch + Persistent                       -> barrier (always)
                         //   * subsequent touch + from != to                  -> barrier
                         //   * subsequent touch + from == to                  -> no barrier
                         let should_emit = if is_first_touch {
-                            is_persistent || to != wgpu::TextureUses::UNINITIALIZED
+                            is_persistent || !to.is_empty()
                         } else {
-                            from != to
+                            !crate::barrier::AccessState::Texture(from)
+                                .matches(crate::barrier::AccessState::Texture(to))
                         };
                         if should_emit {
-                            barriers.push(Barrier::Texture { resource: *r, from, to });
+                            barriers.push(Barrier::Texture {
+                                resource: *r,
+                                from,
+                                to,
+                            });
                         }
-                        state.set(r, crate::barrier::AccessState::Texture(to));
+                        state.set(*r, crate::barrier::AccessState::Texture(to));
                     }
                     ResourceKind::Buffer(_) => {
                         let to = buf_usage
                             .get(&(pid, *r))
                             .copied()
                             .unwrap_or_else(wgpu::BufferUsages::empty);
-                        let is_first_touch = state.get(r).is_none();
-                        let from = match state.get(r) {
-                            Some(crate::barrier::AccessState::Buffer(u)) => *u,
+                        let is_first_touch = state.get(*r).is_none();
+                        let from = match state.get(*r) {
+                            Some(crate::barrier::AccessState::Buffer(u)) => u,
                             _ => wgpu::BufferUsages::empty(),
                         };
                         let should_emit = if is_first_touch {
@@ -379,14 +387,19 @@ impl RenderGraph {
                             // first touch of a Persistent buffer, and
                             // emit on a Transient buffer only when the
                             // requested usage is non-empty.
-                            is_persistent || to != wgpu::BufferUses::empty()
+                            is_persistent || !to.is_empty()
                         } else {
-                            from != to
+                            !crate::barrier::AccessState::Buffer(from)
+                                .matches(crate::barrier::AccessState::Buffer(to))
                         };
                         if should_emit {
-                            barriers.push(Barrier::Buffer { resource: *r, from, to });
+                            barriers.push(Barrier::Buffer {
+                                resource: *r,
+                                from,
+                                to,
+                            });
                         }
-                        state.set(r, crate::barrier::AccessState::Buffer(to));
+                        state.set(*r, crate::barrier::AccessState::Buffer(to));
                     }
                 }
             }

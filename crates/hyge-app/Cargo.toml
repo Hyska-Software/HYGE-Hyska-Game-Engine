@@ -11,6 +11,7 @@ description = "App builder, AppConfig, default_plugins. The only crate that wire
 bevy_ecs = { workspace = true }
 bevy_app = { workspace = true }
 winit = { workspace = true }
+wgpu = { workspace = true }
 tracing = { workspace = true }
 hyge-core = { workspace = true }
 hyge-ecs = { workspace = true }

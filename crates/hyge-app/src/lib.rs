@@ -242,10 +242,13 @@ impl ApplicationHandler for App {
             let Some(window) = self.window.as_ref() else {
                 return;
             };
-            let renderer_config = RendererConfig::default();
+            let renderer_config = hyge_render::config::RendererConfig::default();
             match Renderer::new(renderer_config, window) {
                 Ok(renderer) => {
                     tracing::info!("renderer initialized; first-triangle ready");
+                    self.inner
+                        .world_mut()
+                        .insert_resource(renderer.frame_stats().clone());
                     self.renderer = Some(renderer);
                 }
                 Err(e) => {
@@ -325,6 +328,10 @@ impl ApplicationHandler for App {
             };
             if let Err(e) = renderer.render_triangle(clear_color) {
                 tracing::warn!(error = %e, "render_triangle failed");
+            } else {
+                self.inner
+                    .world_mut()
+                    .insert_resource(renderer.frame_stats().clone());
             }
         }
 

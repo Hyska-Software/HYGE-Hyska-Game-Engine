@@ -26,7 +26,7 @@ pub struct PassContext<'a> {
     /// windowed `Renderer::render_frame` path); `None` for the
     /// headless test path (where the pass records into a
     /// user-provided `wgpu::CommandEncoder` with no surface).
-    frame: Option<&'a mut FrameContext<'a>>,
+    frame: Option<&'a mut FrameContext>,
 }
 
 impl<'a> PassContext<'a> {
@@ -35,12 +35,16 @@ impl<'a> PassContext<'a> {
     /// the optional per-frame context.
     #[inline]
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         resources: &'a ResourceTable,
         encoder: &'a mut wgpu::CommandEncoder,
-        frame: Option<&'a mut FrameContext<'a>>,
+        frame: Option<&'a mut FrameContext>,
     ) -> Self {
-        Self { resources, encoder, frame }
+        Self {
+            resources,
+            encoder,
+            frame,
+        }
     }
 
     /// Looks up the concrete `wgpu::Texture` backing a resource handle.
@@ -68,12 +72,22 @@ impl<'a> PassContext<'a> {
         self.encoder
     }
 
+    /// Returns the encoder and immutable per-frame context together.
+    ///
+    /// This split borrow is useful for render passes whose descriptor
+    /// needs a frame texture view while also beginning a pass on the
+    /// command encoder.
+    #[inline]
+    pub fn encoder_and_frame(&mut self) -> (&mut wgpu::CommandEncoder, Option<&FrameContext>) {
+        (self.encoder, self.frame.as_deref())
+    }
+
     /// Returns a mutable reference to the per-frame
     /// [`FrameContext`], or `None` if no surface is bound (the
     /// headless test path).
     #[inline]
     #[must_use]
-    pub fn frame(&mut self) -> Option<&mut FrameContext<'a>> {
+    pub fn frame(&mut self) -> Option<&mut FrameContext> {
         self.frame.as_deref_mut()
     }
 }
@@ -109,12 +123,14 @@ impl ResourceTable {
     }
 
     /// Installs a concrete `wgpu::Texture` at the given handle.
+    #[allow(dead_code)]
     pub(crate) fn set_texture(&mut self, handle: ResourceHandle, texture: wgpu::Texture) {
         self.ensure_texture_slot(handle);
         self.textures[handle.index() as usize] = Some(texture);
     }
 
     /// Installs a concrete `wgpu::Buffer` at the given handle.
+    #[allow(dead_code)]
     pub(crate) fn set_buffer(&mut self, handle: ResourceHandle, buffer: wgpu::Buffer) {
         self.ensure_buffer_slot(handle);
         self.buffers[handle.index() as usize] = Some(buffer);
@@ -123,13 +139,17 @@ impl ResourceTable {
     /// Borrows the texture at the given handle, if any.
     #[must_use]
     pub(crate) fn texture(&self, handle: ResourceHandle) -> Option<&wgpu::Texture> {
-        self.textures.get(handle.index() as usize).and_then(Option::as_ref)
+        self.textures
+            .get(handle.index() as usize)
+            .and_then(Option::as_ref)
     }
 
     /// Borrows the buffer at the given handle, if any.
     #[must_use]
     pub(crate) fn buffer(&self, handle: ResourceHandle) -> Option<&wgpu::Buffer> {
-        self.buffers.get(handle.index() as usize).and_then(Option::as_ref)
+        self.buffers
+            .get(handle.index() as usize)
+            .and_then(Option::as_ref)
     }
 }
 
@@ -147,8 +167,8 @@ impl ResourceTable {
 /// The default impls of [`Pass::texture_usages`] and
 /// [`Pass::buffer_usages`] return an empty list. Passes that want the
 /// graph to emit precise `wgpu` usage transitions for them should
-/// override these to declare the `wgpu::TextureUses` /
-/// `wgpu::BufferUses` they will read/write per resource; the
+/// override these to declare the `wgpu::TextureUsages` /
+/// `wgpu::BufferUsages` they will read/write per resource; the
 /// compiler threads those into the [`Barrier`](crate::barrier::Barrier)
 /// inference. Overrides are optional — passes that emit their own
 /// `wgpu` transitions inside `record` can ignore them.
@@ -168,19 +188,19 @@ pub trait Pass: Send + Sync + 'static {
     /// these declarations similarly to `reads`.
     fn writes(&self) -> Vec<ResourceHandle>;
 
-    /// Declares the `wgpu::TextureUses` this pass needs for each
+    /// Declares the `wgpu::TextureUsages` this pass needs for each
     /// texture it reads or writes. The default returns an empty
     /// list, which means "no declared usages" — the graph still emits
     /// a barrier marker but cannot fill in the precise `to` usage
     /// field; the pass is then expected to manage its own transitions.
-    fn texture_usages(&self) -> Vec<(ResourceHandle, wgpu::TextureUses)> {
+    fn texture_usages(&self) -> Vec<(ResourceHandle, wgpu::TextureUsages)> {
         Vec::new()
     }
 
-    /// Declares the `wgpu::BufferUses` this pass needs for each
+    /// Declares the `wgpu::BufferUsages` this pass needs for each
     /// buffer it reads or writes. Same semantics as
     /// [`Pass::texture_usages`].
-    fn buffer_usages(&self) -> Vec<(ResourceHandle, wgpu::BufferUses)> {
+    fn buffer_usages(&self) -> Vec<(ResourceHandle, wgpu::BufferUsages)> {
         Vec::new()
     }
 

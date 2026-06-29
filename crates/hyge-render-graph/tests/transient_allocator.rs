@@ -51,8 +51,7 @@ fn thousand_frames_no_leak_between_frames() {
     // resource count.
     for _ in 0..FRAMES {
         for (h, _) in &handles {
-            a.allocate(*h)
-                .expect("registered handle must allocate");
+            a.allocate(*h).expect("registered handle must allocate");
         }
         assert_eq!(
             a.live_count(),
@@ -94,7 +93,8 @@ fn thousand_frames_no_leak_between_frames() {
 fn reuses_free_slots_when_sizes_match() {
     let mut a = TransientAllocator::new();
     // Two handles with the *same* descriptor → same SlotKey → the
-    // allocator must reuse one slot for both.
+    // allocator must reuse free slots across frames, while keeping
+    // separate slots when both resources are live concurrently.
     let shared_desc = ResourceKind::Buffer(BufferDesc::new(256, wgpu::BufferUsages::VERTEX));
     let h0 = ResourceHandle::from_index(0);
     let h1 = ResourceHandle::from_index(1);
@@ -104,7 +104,11 @@ fn reuses_free_slots_when_sizes_match() {
     // Frame 1: both live.
     a.allocate(h0).expect("alloc 0");
     a.allocate(h1).expect("alloc 1");
-    assert_eq!(a.slot_count(), 1, "matching key must share a slot");
+    assert_eq!(
+        a.slot_count(),
+        2,
+        "concurrently-live resources need distinct slots"
+    );
     a.next_frame();
 
     // Frame 2: both live again — should reuse the same slot.
@@ -112,7 +116,7 @@ fn reuses_free_slots_when_sizes_match() {
     a.allocate(h1).expect("alloc 1 again");
     assert_eq!(
         a.slot_count(),
-        1,
+        2,
         "no new slots after reusing the free pool"
     );
     assert_eq!(a.peak_live(), 2, "peak still 2 (both live concurrently)");
@@ -120,10 +124,10 @@ fn reuses_free_slots_when_sizes_match() {
     a.next_frame();
 
     // Frame 3: same. total_allocations should be 6 (2 per frame ×
-    // 3 frames), and slot_count should still be 1.
+    // 3 frames), and slot_count should still be 2.
     a.allocate(h0).expect("alloc 0 frame 3");
     a.allocate(h1).expect("alloc 1 frame 3");
-    assert_eq!(a.slot_count(), 1, "still one slot after 3 frames");
+    assert_eq!(a.slot_count(), 2, "still two slots after 3 frames");
     assert_eq!(a.total_allocations(), 6, "6 allocations across 3 frames");
 }
 

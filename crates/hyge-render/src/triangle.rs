@@ -13,6 +13,8 @@
 //! MSL at `create_render_pipeline` time, so there is no
 //! build.rs / pre-compile step.
 
+use std::sync::Arc;
+
 use wgpu::util::DeviceExt;
 
 use hyge_render_graph::prelude::*;
@@ -35,9 +37,18 @@ pub struct Vertex {
 /// origin in clip space; spans the top half of the screen
 /// (apex at `y = +0.5`, base at `y = -0.5`).
 pub const VERTICES: &[Vertex] = &[
-    Vertex { position: [ 0.0,  0.5], color: [1.0, 0.0, 0.0] }, // top,    red
-    Vertex { position: [-0.5, -0.5], color: [0.0, 1.0, 0.0] }, // bottom, green
-    Vertex { position: [ 0.5, -0.5], color: [0.0, 0.0, 1.0] }, // bottom, blue
+    Vertex {
+        position: [0.0, 0.5],
+        color: [1.0, 0.0, 0.0],
+    }, // top,    red
+    Vertex {
+        position: [-0.5, -0.5],
+        color: [0.0, 1.0, 0.0],
+    }, // bottom, green
+    Vertex {
+        position: [0.5, -0.5],
+        color: [0.0, 0.0, 1.0],
+    }, // bottom, blue
 ];
 
 /// The vertex+fragment WGSL shader. Loaded into a
@@ -46,19 +57,19 @@ pub const VERTICES: &[Vertex] = &[
 /// The shader is intentionally minimal — no uniforms, no
 /// depth test, no instancing. R-040+ replace it with the
 /// clustered-forward PBR shader.
-pub const SHADER_SOURCE: &str = include_str!("../shader/triangle.wgsl");
+pub const SHADER_SOURCE: &str = include_str!("shader/triangle.wgsl");
 
 /// The render pass that clears the current frame's color
 /// attachment and draws the hardcoded triangle.
 ///
-/// Constructed by [`Renderer::triangle_pass`](crate::Renderer::triangle_pass).
+/// Constructed by [`Renderer::build_triangle_graph`](crate::renderer::Renderer::build_triangle_graph).
 /// The pass owns clones of the renderer's pre-built
 /// `wgpu::RenderPipeline` and `wgpu::Buffer` (both are
 /// reference-counted internally by wgpu, so the clones are
 /// cheap).
 pub struct TrianglePass {
-    pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
+    pipeline: Arc<wgpu::RenderPipeline>,
+    vertex_buffer: Arc<wgpu::Buffer>,
     clear_color: wgpu::Color,
 }
 
@@ -73,58 +84,88 @@ impl TrianglePass {
         surface_format: wgpu::TextureFormat,
         clear_color: wgpu::Color,
     ) -> Self {
+        let pipeline = Self::create_pipeline(device, surface_format);
+        let vertex_buffer = Self::create_vertex_buffer(device);
+
+        Self {
+            pipeline,
+            vertex_buffer,
+            clear_color,
+        }
+    }
+
+    /// Builds the render pipeline for the triangle pass.
+    pub fn create_pipeline(
+        device: &wgpu::Device,
+        surface_format: wgpu::TextureFormat,
+    ) -> Arc<wgpu::RenderPipeline> {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("hyge-render/triangle"),
             source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("hyge-render/triangle"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x2, // Vertex::position
-                        1 => Float32x3, // Vertex::color
-                    ],
-                }],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+        Arc::new(
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("hyge-render/triangle"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &wgpu::vertex_attr_array![
+                            0 => Float32x2, // Vertex::position
+                            1 => Float32x3, // Vertex::color
+                        ],
+                    }],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+        )
+    }
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("hyge-render/triangle-vertices"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+    /// Builds the static vertex buffer for the triangle pass.
+    pub fn create_vertex_buffer(device: &wgpu::Device) -> Arc<wgpu::Buffer> {
+        Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("hyge-render/triangle-vertices"),
+                contents: bytemuck::cast_slice(VERTICES),
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+        )
+    }
 
+    /// Creates a pass from renderer-owned prebuilt GPU objects.
+    #[must_use]
+    pub fn with_prebuilt(
+        pipeline: Arc<wgpu::RenderPipeline>,
+        vertex_buffer: Arc<wgpu::Buffer>,
+        clear_color: wgpu::Color,
+    ) -> Self {
         Self {
             pipeline,
             vertex_buffer,
@@ -167,12 +208,14 @@ impl Pass for TrianglePass {
         // `Renderer::render_triangle_to_texture` which routes
         // the off-screen render-target view through a custom
         // test harness rather than through this pass.
-        let frame = ctx
-            .frame()
-            .expect("TrianglePass::record requires a FrameContext (use Renderer::render_triangle)");
+        let (encoder, frame) = ctx.encoder_and_frame();
+        let Some(frame) = frame else {
+            tracing::error!("TrianglePass::record requires a FrameContext");
+            return;
+        };
         let view = frame.surface_view();
 
-        let mut render_pass = ctx.encoder().begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("hyge-render/triangle"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
@@ -201,10 +244,13 @@ mod tests {
     fn vertex_is_pod_and_zeroable() {
         // Compile-time guarantee that `Vertex` can be cast to
         // bytes for the GPU upload.
-        let v = Vertex { position: [0.5, -0.5], color: [0.25, 0.5, 0.75] };
+        let v = Vertex {
+            position: [0.5, -0.5],
+            color: [0.25, 0.5, 0.75],
+        };
         let bytes = bytemuck::bytes_of(&v);
         assert_eq!(bytes.len(), std::mem::size_of::<Vertex>());
-        let v2: Vertex = bytemuck::from_bytes(bytes);
+        let v2: Vertex = *bytemuck::from_bytes(bytes);
         assert_eq!(v.position, v2.position);
         assert_eq!(v.color, v2.color);
     }
@@ -224,9 +270,9 @@ mod tests {
             y_max = y_max.max(v.position[1]);
         }
         assert_eq!(x_min, -0.5);
-        assert_eq!(x_max,  0.5);
+        assert_eq!(x_max, 0.5);
         assert_eq!(y_min, -0.5);
-        assert_eq!(y_max,  0.5);
+        assert_eq!(y_max, 0.5);
     }
 
     #[test]

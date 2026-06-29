@@ -1,7 +1,7 @@
 //! Headless wgpu test renderer.
 //!
 //! [`TestRenderer`] is a thin wrapper over a headless
-//! [`hyge_render::Renderer`] (constructed via
+//! `hyge_render::Renderer` (constructed via
 //! `Renderer::new_headless`) plus a convenience method for
 //! rendering the first-triangle pass into a caller-supplied
 //! off-screen target.
@@ -17,7 +17,7 @@ use hyge_render::prelude::*;
 
 /// Headless wgpu renderer for snapshot tests.
 ///
-/// Wraps a [`hyge_render::Renderer`] constructed via
+/// Wraps a `hyge_render::Renderer` constructed via
 /// `Renderer::new_headless` (no surface, software adapter
 /// preferred). Use [`TestRenderer::new`] to create; the
 /// underlying wgpu device / queue can be accessed via
@@ -80,7 +80,7 @@ impl TestRenderer {
     ///
     /// After this call returns, the target has been rendered and
     /// the GPU has been polled (`Maintain::Wait`), so the caller
-    /// can immediately call [`capture_frame`] to read the bytes
+    /// can immediately call [`crate::capture::capture_frame`] to read the bytes
     /// back.
     ///
     /// # Errors

@@ -16,7 +16,8 @@
 //!   between passes, and returns a
 //!   [`CompiledGraph`](compile::CompiledGraph).
 //! - [`CompiledGraph::execute`](compile::CompiledGraph::execute)
-//!   records each pass into a `wgpu::CommandEncoder`, with the
+//!   records each pass into a `wgpu::CommandEncoder`, wrapping it
+//!   in tracing spans and debug groups, with the
 //!   transient allocator in the
 //!   [`TransientAllocator`](allocator::TransientAllocator) handling
 //!   first-touch allocation for `ResourceLifetime::Transient`

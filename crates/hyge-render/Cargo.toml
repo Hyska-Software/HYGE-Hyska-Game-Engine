@@ -17,7 +17,9 @@ bitflags = { workspace = true }
 naga = { workspace = true }
 winit = { workspace = true }
 hyge-core = { workspace = true }
+hyge-ecs = { workspace = true }
 hyge-render-graph = { workspace = true }
 hyge-window = { workspace = true }
 tracing = { workspace = true }
 pollster = { workspace = true }
+egui = { workspace = true }

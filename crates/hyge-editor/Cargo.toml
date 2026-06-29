@@ -9,3 +9,5 @@ description = "egui-based editor: viewport, hierarchy, inspector, content browse
 
 [dependencies]
 hyge-core = { workspace = true }
+hyge-render = { workspace = true }
+egui = { workspace = true }

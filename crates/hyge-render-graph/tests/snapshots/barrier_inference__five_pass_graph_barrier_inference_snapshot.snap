@@ -1,0 +1,70 @@
+---
+source: crates/hyge-render-graph/tests/barrier_inference.rs
+assertion_line: 261
+expression: snapshot
+---
+[
+    SnapshotBarrier {
+        pass: "0:shadow",
+        resource: 0,
+        kind: "Texture",
+        from: "TextureUsages(0x0)",
+        to: "TextureUsages(RENDER_ATTACHMENT)",
+    },
+    SnapshotBarrier {
+        pass: "1:gbuffer",
+        resource: 0,
+        kind: "Texture",
+        from: "TextureUsages(RENDER_ATTACHMENT)",
+        to: "TextureUsages(TEXTURE_BINDING)",
+    },
+    SnapshotBarrier {
+        pass: "1:gbuffer",
+        resource: 1,
+        kind: "Texture",
+        from: "TextureUsages(0x0)",
+        to: "TextureUsages(RENDER_ATTACHMENT)",
+    },
+    SnapshotBarrier {
+        pass: "1:gbuffer",
+        resource: 2,
+        kind: "Texture",
+        from: "TextureUsages(0x0)",
+        to: "TextureUsages(RENDER_ATTACHMENT)",
+    },
+    SnapshotBarrier {
+        pass: "2:lighting",
+        resource: 1,
+        kind: "Texture",
+        from: "TextureUsages(RENDER_ATTACHMENT)",
+        to: "TextureUsages(TEXTURE_BINDING)",
+    },
+    SnapshotBarrier {
+        pass: "2:lighting",
+        resource: 3,
+        kind: "Texture",
+        from: "TextureUsages(0x0)",
+        to: "TextureUsages(TEXTURE_BINDING | RENDER_ATTACHMENT)",
+    },
+    SnapshotBarrier {
+        pass: "3:tonemap",
+        resource: 3,
+        kind: "Texture",
+        from: "TextureUsages(TEXTURE_BINDING | RENDER_ATTACHMENT)",
+        to: "TextureUsages(TEXTURE_BINDING)",
+    },
+    SnapshotBarrier {
+        pass: "3:tonemap",
+        resource: 4,
+        kind: "Texture",
+        from: "TextureUsages(0x0)",
+        to: "TextureUsages(TEXTURE_BINDING | RENDER_ATTACHMENT)",
+    },
+    SnapshotBarrier {
+        pass: "4:present",
+        resource: 4,
+        kind: "Texture",
+        from: "TextureUsages(TEXTURE_BINDING | RENDER_ATTACHMENT)",
+        to: "TextureUsages(TEXTURE_BINDING)",
+    },
+]

@@ -1,4 +1,4 @@
-//! Configuration for the runtime [`Renderer`](crate::Renderer).
+//! Configuration for the runtime [`Renderer`](crate::renderer::Renderer).
 //!
 //! The config covers the wgpu backends to enable, the present mode
 //! (vsync), power-preference for adapter selection, and the
@@ -7,16 +7,14 @@
 //! build profile (on in debug, off in release) so a debug build
 //! always gets the validation layer automatically.
 
-use hyge_core::prelude::*;
-
 /// The user-facing configuration for the runtime renderer.
 ///
 /// All fields are public so callers can override individual settings
 /// after cloning the default. None of the fields are validated at
 /// construction time — invalid combinations (e.g. requesting a
 /// present mode the surface doesn't support) are reported by
-/// [`Renderer::new`](crate::Renderer::new) as a
-/// [`HygeError::Unsupported`].
+/// [`Renderer::new`](crate::renderer::Renderer::new) as an unsupported
+/// configuration error.
 #[derive(Debug, Clone)]
 pub struct RendererConfig {
     /// The wgpu backends to enable. Defaults to
@@ -88,7 +86,10 @@ impl RendererConfig {
     pub fn with_present_mode(mut self, mode: wgpu::PresentMode) -> Self {
         self.present_mode = mode;
         // Explicit present_mode overrides the vsync-derived default.
-        self.vsync = matches!(mode, wgpu::PresentMode::Fifo | wgpu::PresentMode::FifoRelaxed);
+        self.vsync = matches!(
+            mode,
+            wgpu::PresentMode::Fifo | wgpu::PresentMode::FifoRelaxed
+        );
         self
     }
 
@@ -191,12 +192,4 @@ mod tests {
         assert_eq!(a.present_mode, b.present_mode);
         assert_eq!(a.validation, b.validation);
     }
-}
-
-// `HygeResult` is imported for downstream consumers; this stub
-// keeps the `use` line and silences the unused-import warning if
-// the macro/test path is stripped by `cfg`.
-#[allow(dead_code)]
-fn _ensure_hyge_result_in_scope() -> HygeResult<()> {
-    Ok(())
 }

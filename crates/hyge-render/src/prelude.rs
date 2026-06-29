@@ -4,5 +4,6 @@
 //! scope without naming them individually.
 
 pub use crate::config::RendererConfig;
+pub use crate::profiler::{debug_overlay, fps_from_duration, FrameStats, GpuProfiler, PassStats};
 pub use crate::renderer::Renderer;
 pub use crate::triangle::{TrianglePass, Vertex, SHADER_SOURCE, VERTICES};

@@ -7,7 +7,7 @@
 //! bindless table, clustered forward pipeline, cascaded shadows,
 //! meshlet culling, post-process, and IBL.
 //!
-//! # R-023 (skeleton) + R-024 (first triangle)
+//! # R-023 (skeleton), R-024 (first triangle), R-025 (profiler)
 //!
 //! The public surface:
 //!
@@ -26,6 +26,8 @@
 //! - [`TrianglePass`](triangle::TrianglePass) — the first
 //!   render-graph pass. The WGSL shader lives at
 //!   `src/shader/triangle.wgsl`.
+//! - [`FrameStats`](profiler::FrameStats) — the per-frame profiling
+//!   resource populated by timestamp queries and draw counters.
 //!
 //! See `docs/architecture.md` §6.4 for the full planned surface,
 //! and `docs/roadmap.toml` for the R-024+ roadmap (bindless,
@@ -34,6 +36,7 @@
 #![warn(missing_docs)]
 
 pub mod config;
+pub mod profiler;
 pub mod renderer;
 pub mod triangle;
 

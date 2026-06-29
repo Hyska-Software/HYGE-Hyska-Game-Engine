@@ -29,7 +29,13 @@
 /// let expected = vec![255u8; 16];  // 2x2 white
 /// hyge_runtime_test::assert_image_matches(&actual, &expected, 2, 2, 0.01);
 /// ```
-pub fn assert_image_matches(actual: &[u8], expected: &[u8], width: u32, height: u32, tolerance: f32) {
+pub fn assert_image_matches(
+    actual: &[u8],
+    expected: &[u8],
+    width: u32,
+    height: u32,
+    tolerance: f32,
+) {
     assert!(
         (0.0..=1.0).contains(&tolerance),
         "tolerance must be in [0, 1], got {tolerance}"

@@ -20,7 +20,13 @@ use wgpu::util::align_to;
 /// the bytes are guaranteed to be valid by the time the caller
 /// reads them.
 #[must_use]
-pub fn capture_frame(device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::Texture) -> Vec<u8> {
+pub fn capture_frame(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    target: &wgpu::Texture,
+) -> Vec<u8> {
+    use std::sync::mpsc;
+
     let width = target.width();
     let height = target.height();
     let bytes_per_pixel = 4u32;
@@ -56,11 +62,19 @@ pub fn capture_frame(device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::
     );
     queue.submit(std::iter::once(encoder.finish()));
 
+    let slice = staging.slice(..);
+    let (tx, rx) = mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx.send(result);
+    });
+
     // Block until the GPU finishes so the map_async callback
     // has fired by the time we touch the mapped range.
     device.poll(wgpu::Maintain::Wait);
+    let Ok(Ok(())) = rx.recv() else {
+        return Vec::new();
+    };
 
-    let slice = staging.slice(..);
     let mapped = slice.get_mapped_range();
     let padded_bytes = mapped.to_vec();
     drop(mapped);
@@ -68,8 +82,7 @@ pub fn capture_frame(device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::
 
     // Strip the row padding so the output is exactly
     // `width * height * 4` bytes.
-    let mut unpadded =
-        Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
+    let mut unpadded = Vec::with_capacity((unpadded_bytes_per_row * height) as usize);
     for row in 0..height as usize {
         let start = row * padded_bytes_per_row as usize;
         let end = start + unpadded_bytes_per_row as usize;

@@ -15,7 +15,7 @@
 //! 2. **Allocate** — at execute time, when a pass first touches a
 //!    transient resource, the executor calls
 //!    [`TransientAllocator::allocate`]. This pops a free slot with
-//!    a matching [`SlotKey`] off the per-key free stack, or creates
+//!    a matching `SlotKey` off the per-key free stack, or creates
 //!    a new one if the stack is empty. The slot is then bound to
 //!    the resource handle and marked live.
 //! 3. **Deallocate** (optional, in-frame) — a pass that knows a
@@ -31,7 +31,7 @@
 //!
 //! # Memory ceiling
 //!
-//! The slot count is bounded by the number of distinct [`SlotKey`]s
+//! The slot count is bounded by the number of distinct `SlotKey`s
 //! ever seen. Within a single resource type, the slot count is
 //! bounded by `peak_live()` for that key. Resources with
 //! non-matching keys can never share a slot, so a graph that uses
@@ -114,13 +114,13 @@ pub struct Slot {
     /// Whether the slot is live (allocated) in the current frame.
     pub live: bool,
     /// The descriptor this slot was created for. A slot will only
-    /// be reused for resources with a matching [`SlotKey`].
+    /// be reused for resources with a matching `SlotKey`.
     pub desc: ResourceKind,
 }
 
 /// Arena allocator for transient resources.
 ///
-/// Constructed by [`CompiledGraph::from_parts`](crate::compile::CompiledGraph::from_parts)
+/// Constructed by the compiled graph during graph compilation
 /// during graph compile. Driven frame-to-frame by the render
 /// executor: each frame calls
 /// [`TransientAllocator::allocate`] for every transient resource a
@@ -177,7 +177,7 @@ impl TransientAllocator {
     }
 
     /// Allocates a slot for `handle` (first-touch semantics). If a
-    /// free slot with a matching [`SlotKey`] exists, it is reused;
+    /// free slot with a matching `SlotKey` exists, it is reused;
     /// otherwise a new slot is created.
     ///
     /// Returns the slot index on success, or `None` if `handle` was
@@ -186,19 +186,23 @@ impl TransientAllocator {
     pub fn allocate(&mut self, handle: ResourceHandle) -> Option<usize> {
         let desc = self.descriptors.get(&handle)?.clone();
         let key = SlotKey::from_kind(&desc);
-        // Pop a free slot of the matching key, or push a new one.
-        let slot_idx = if let Some(free_list) = self.free_by_key.get_mut(&key) {
-            free_list.pop()
-        } else {
-            let idx = self.slots.len();
-            self.slots.push(Slot {
-                owner: None,
-                live: false,
-                desc: desc.clone(),
-            });
-            Some(idx)
+        if let Some(slot_idx) = self.active.get(&handle).copied() {
+            return Some(slot_idx);
         }
-        .expect("either the free list yielded an index or we just pushed one");
+        // Pop a free slot of the matching key, or push a new one.
+        let slot_idx = self
+            .free_by_key
+            .get_mut(&key)
+            .and_then(Vec::pop)
+            .unwrap_or_else(|| {
+                let idx = self.slots.len();
+                self.slots.push(Slot {
+                    owner: None,
+                    live: false,
+                    desc: desc.clone(),
+                });
+                idx
+            });
         let slot = &mut self.slots[slot_idx];
         slot.owner = Some(handle);
         slot.live = true;
@@ -215,7 +219,7 @@ impl TransientAllocator {
     /// free pool early (before [`TransientAllocator::next_frame`]).
     /// The slot can then be reused by the next
     /// [`TransientAllocator::allocate`] call for a resource with a
-    /// matching [`SlotKey`].
+    /// matching `SlotKey`.
     ///
     /// Returns the slot index on success, or `None` if `handle` is
     /// not currently allocated.
@@ -350,8 +354,10 @@ mod tests {
         assert_eq!(a.free_count(), 2);
         // Re-allocating the same two resources should reuse the two
         // existing slots — no new slots are created.
-        a.allocate(ResourceHandle::from_index(0)).expect("alloc 0 again");
-        a.allocate(ResourceHandle::from_index(1)).expect("alloc 1 again");
+        a.allocate(ResourceHandle::from_index(0))
+            .expect("alloc 0 again");
+        a.allocate(ResourceHandle::from_index(1))
+            .expect("alloc 1 again");
         assert_eq!(a.slot_count(), 2, "matching-key slots must be reused");
         assert_eq!(a.peak_live(), live_after_first_frame);
     }
@@ -363,7 +369,11 @@ mod tests {
         a.register(ResourceHandle::from_index(1), buffer_desc(128));
         a.allocate(ResourceHandle::from_index(0)).expect("alloc 0");
         a.allocate(ResourceHandle::from_index(1)).expect("alloc 1");
-        assert_eq!(a.slot_count(), 2, "distinct keys must each get their own slot");
+        assert_eq!(
+            a.slot_count(),
+            2,
+            "distinct keys must each get their own slot"
+        );
     }
 
     #[test]
@@ -383,7 +393,10 @@ mod tests {
     fn peak_live_tracks_max_concurrent() {
         let mut a = TransientAllocator::new();
         for i in 0..5 {
-            a.register(ResourceHandle::from_index(i), buffer_desc(64 * (i as u64 + 1)));
+            a.register(
+                ResourceHandle::from_index(i),
+                buffer_desc(64 * (i as u64 + 1)),
+            );
         }
         for i in 0..3 {
             a.allocate(ResourceHandle::from_index(i)).expect("alloc");
@@ -405,11 +418,13 @@ mod tests {
         a.allocate(ResourceHandle::from_index(0)).expect("alloc 0");
         a.allocate(ResourceHandle::from_index(1)).expect("alloc 1");
         assert_eq!(a.live_count(), 2);
-        a.deallocate(ResourceHandle::from_index(0)).expect("dealloc 0");
+        a.deallocate(ResourceHandle::from_index(0))
+            .expect("dealloc 0");
         assert_eq!(a.live_count(), 1);
         assert_eq!(a.free_count(), 1);
         // The deallocated slot is immediately available for reuse.
-        a.allocate(ResourceHandle::from_index(0)).expect("re-alloc 0");
+        a.allocate(ResourceHandle::from_index(0))
+            .expect("re-alloc 0");
         assert_eq!(a.slot_count(), 2, "deallocated slot must be reused");
     }
 
@@ -432,7 +447,8 @@ mod tests {
         a.allocate(ResourceHandle::from_index(0)).expect("alloc");
         assert_eq!(a.total_allocations(), 1);
         a.next_frame();
-        a.allocate(ResourceHandle::from_index(0)).expect("alloc again");
+        a.allocate(ResourceHandle::from_index(0))
+            .expect("alloc again");
         assert_eq!(a.total_allocations(), 2);
     }
 
@@ -451,8 +467,9 @@ mod tests {
         a.register(ResourceHandle::from_index(0), d1);
         a.register(ResourceHandle::from_index(1), d2);
         a.allocate(ResourceHandle::from_index(0)).expect("alloc 0");
+        a.next_frame();
         a.allocate(ResourceHandle::from_index(1)).expect("alloc 1");
-        // Two resources with matching key (size + usage) → one slot reused.
+        // Two resources with matching key (size + usage) reuse one slot across frames.
         assert_eq!(a.slot_count(), 1);
     }
 
@@ -481,6 +498,7 @@ mod tests {
         a.register(ResourceHandle::from_index(1), d2);
         a.register(ResourceHandle::from_index(2), d3);
         a.allocate(ResourceHandle::from_index(0)).expect("alloc 0");
+        a.next_frame();
         a.allocate(ResourceHandle::from_index(1)).expect("alloc 1");
         a.allocate(ResourceHandle::from_index(2)).expect("alloc 2");
         // d1 and d2 share a key (everything matches). d3 has a

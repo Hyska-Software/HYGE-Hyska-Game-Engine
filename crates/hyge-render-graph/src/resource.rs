@@ -23,13 +23,14 @@ use std::fmt;
 pub struct ResourceHandle(u32);
 
 impl ResourceHandle {
-    /// Constructs a `ResourceHandle` from a raw index. Used internally
-    /// by [`RenderGraph::add_resource`](crate::graph::RenderGraph::add_resource);
-    /// downstream code should treat the handle as opaque and not synthesize
-    /// indices on its own.
+    /// Constructs a `ResourceHandle` from a raw index.
+    ///
+    /// This is primarily for tests and tooling that need deterministic
+    /// handles without building a full graph. Runtime code should prefer
+    /// handles returned by [`RenderGraph::add_resource`](crate::graph::RenderGraph::add_resource).
     #[inline]
     #[must_use]
-    pub(crate) fn from_index(idx: u32) -> Self {
+    pub fn from_index(idx: u32) -> Self {
         Self(idx)
     }
 
@@ -78,7 +79,12 @@ pub struct TextureDesc {
 impl TextureDesc {
     /// Convenience constructor for a 2D, single-mip, single-sample texture.
     #[must_use]
-    pub fn new_2d(width: u32, height: u32, format: wgpu::TextureFormat, usage: wgpu::TextureUsages) -> Self {
+    pub fn new_2d(
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        usage: wgpu::TextureUsages,
+    ) -> Self {
         Self {
             width,
             height,
@@ -108,7 +114,11 @@ impl BufferDesc {
     /// Convenience constructor.
     #[must_use]
     pub fn new(size: u64, usage: wgpu::BufferUsages) -> Self {
-        Self { size, usage, label: None }
+        Self {
+            size,
+            usage,
+            label: None,
+        }
     }
 }
 
@@ -199,7 +209,12 @@ mod tests {
 
     #[test]
     fn texture_desc_2d_constructor() {
-        let d = TextureDesc::new_2d(1920, 1080, wgpu::TextureFormat::Rgba8UnormSrgb, wgpu::TextureUsages::RENDER_ATTACHMENT);
+        let d = TextureDesc::new_2d(
+            1920,
+            1080,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+        );
         assert_eq!(d.width, 1920);
         assert_eq!(d.height, 1080);
         assert_eq!(d.depth, 1);
@@ -216,7 +231,12 @@ mod tests {
 
     #[test]
     fn resource_kind_predicates() {
-        let tex = ResourceKind::Texture(TextureDesc::new_2d(1, 1, wgpu::TextureFormat::R8Unorm, wgpu::TextureUsages::TEXTURE_BINDING));
+        let tex = ResourceKind::Texture(TextureDesc::new_2d(
+            1,
+            1,
+            wgpu::TextureFormat::R8Unorm,
+            wgpu::TextureUsages::TEXTURE_BINDING,
+        ));
         let buf = ResourceKind::Buffer(BufferDesc::new(16, wgpu::BufferUsages::STORAGE));
         assert!(tex.is_texture());
         assert!(!tex.is_buffer());
