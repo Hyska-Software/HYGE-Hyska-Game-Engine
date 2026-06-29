@@ -163,6 +163,10 @@ insta = "1.41"
 proptest = "1.5"
 criterion = { version = "0.5", features = ["html_reports"] }
 serial_test = "3.1"
+# Minimal executor for blocking on wgpu async APIs (request_adapter,
+# request_device) inside tests. Used by hyge-render-graph and
+# hyge-render test harnesses.
+pollster = "0.4"
 
 # ============================================================================
 # Internal hyge-* crates (path + workspace)

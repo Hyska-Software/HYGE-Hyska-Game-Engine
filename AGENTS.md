@@ -6,6 +6,42 @@
 
 ---
 
+## 0.0 Local Toolchain (this machine)
+
+> **Always invoke `cargo`, `rustc`, and `rustup` via the rustup-managed
+> shims in the user's local cargo bin directory — do NOT rely on
+> `cargo` being on `PATH` (the PowerShell session may not have it).
+> The shims are stable across rustup upgrades because they read
+> `rust-toolchain.toml` (channel = `stable`) and pick the matching
+> toolchain.
+
+- **Cargo / rustc / rustup shim:** `C:\Users\estev\.cargo\bin\`
+  (i.e. `C:\Users\estev\.cargo\bin\cargo.exe`, `…\rustc.exe`, `…\rustup.exe`)
+- **Active stable toolchain:** `C:\Users\estev\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\`
+
+When this file or the section "3. Build, Test, Lint, Format" below
+shows a bare `cargo …` / `rustup …` command, run it as:
+
+```bash
+& "C:\Users\estev\.cargo\bin\cargo.exe" …
+```
+
+(Use the call operator `&` because the path contains spaces; quoting
+the path is required.) The same convention applies to `rustc` and
+`rustup`. If the user's toolchain is ever reinstalled in a different
+location, update the path in this section and the rest of the file
+keeps working unchanged.
+
+If you do not have permission to call the binary by full path
+(e.g. some sandboxes strip filesystem access outside the workspace),
+fall back to the toolchain's direct path:
+
+```bash
+& "C:\Users\estev\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\cargo.exe" …
+```
+
+---
+
 ## 0. Project at a Glance
 
 - **Name:** Hyge

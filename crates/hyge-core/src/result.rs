@@ -51,6 +51,13 @@ pub enum HygeError {
     /// current feature configuration, or by the active backend.
     #[error("operation not supported: {0}")]
     Unsupported(String),
+
+    /// A cycle was detected in a render-graph DAG during `compile()`.
+    /// The string names the offending node (pass or resource label).
+    /// Cycles are programmer errors: review the `reads`/`writes`
+    /// declarations on your passes.
+    #[error("render graph cycle: {0}")]
+    RenderGraphCycle(String),
 }
 
 impl HygeError {
@@ -82,6 +89,12 @@ impl HygeError {
     /// Constructs a [`HygeError::Unsupported`] from anything `Into<String>`.
     pub fn unsupported<S: Into<String>>(msg: S) -> Self {
         HygeError::Unsupported(msg.into())
+    }
+
+    /// Constructs a [`HygeError::RenderGraphCycle`] from anything `Into<String>`.
+    /// The string names the offending node in the render graph DAG.
+    pub fn render_graph_cycle<S: Into<String>>(msg: S) -> Self {
+        HygeError::RenderGraphCycle(msg.into())
     }
 }
 
