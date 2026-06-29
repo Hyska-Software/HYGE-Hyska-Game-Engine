@@ -10,4 +10,10 @@ description = "CLI: hyge-tools {import, cook, headless, inspect, serve, doctor}.
 [dependencies]
 clap = { workspace = true }
 tracing = { workspace = true }
+blake3 = { workspace = true }
 hyge-core = { workspace = true }
+hyge-asset = { workspace = true }
+
+[[bin]]
+name = "hyge-tools"
+path = "src/main.rs"

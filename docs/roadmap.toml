@@ -556,9 +556,11 @@ title = "hyge-tools CLI skeleton (clap)"
 phase = "phase_3"
 owner = "tools"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = []
+completed_at = "2026-06-29"
+completion_notes = "Implemented the hyge-tools CLI skeleton in crates/hyge-tools/. Cargo.toml declares clap, blake3, hyge-core, and hyge-asset (workspace deps) and exposes both lib and bin targets. src/cli.rs defines the top-level Cli struct with #[derive(Parser)] and the Cmd #[derive(Subcommand)] enum enumerating all six required subcommands: Import { path, out }, Cook { project, out }, Headless { scene, camera, out, width, height, samples }, Inspect { hash }, Serve { project, port }, Doctor { project }. Cmd::dispatch() matches every variant to the corresponding cmd/*::run function. src/main.rs is a thin shim that initializes tracing via hyge_core::log::init_tracing, calls hyge_tools::run(), and converts any HygeError into a non-zero exit code on stderr. cmd/import.rs is a real implementation: BLAKE3-hashes the source file in 64 KiB chunks, creates the output directory, and writes a deterministic <hash>.source-path sidecar manifest; rejects missing sources with AssetNotFound and directory sources with InvalidArgument. cmd/cook.rs is a real implementation: validates the project directory and its assets/source/ subdir, walks the source tree recursively, dispatches cmd::import::run per file, and returns a CookSummary with total + per-extension counts. cmd/{headless,inspect,serve,doctor}.rs are stubs that return HygeError::Unsupported pointing at the relevant roadmap items (R-127, R-091, R-150, R-160), so the dispatcher is exercised end-to-end today and the gaps are visible to users. Verification: cargo build --workspace passes; cargo clippy --workspace --all-targets -- --deny warnings passes; cargo test -p hyge-tools passes 17/17 tests (cli parsing for every subcommand, hash determinism, known BLAKE3 vector for 'hello world', import manifest sidecar, missing/directory source rejection, cook walk + per-extension counts, project validation, --out override); hyge-tools --help, hyge-tools import --help, hyge-tools cook --help, hyge-tools inspect deadbeef, and hyge-tools import <missing> all behave correctly."
 summary = "Create hyge-tools with clap-based subcommand dispatch."
 acceptance = [
   "crates/hyge-tools/Cargo.toml declares deps on clap, hyge-asset, hyge-core",

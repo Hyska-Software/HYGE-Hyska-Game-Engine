@@ -1312,7 +1312,9 @@ dependencies = [
 name = "hyge-tools"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "clap",
+ "hyge-asset",
  "hyge-core",
  "tracing",
 ]
