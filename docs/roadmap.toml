@@ -514,10 +514,12 @@ title = "AssetDb (SQLite content-addressed store)"
 phase = "phase_3"
 owner = "asset"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-030"]
 summary = "Implement the content-addressed SQLite asset database."
+completed_at = "2026-06-29"
+completion_notes = "Implemented crates/hyge-asset/src/db.rs with AssetDb backed by rusqlite. AssetDb::open(path) creates/opens the SQLite file, enables PRAGMA journal_mode=WAL and foreign_keys=ON, and runs a migration runner using db_version. Schema v1 creates db_version, assets(hash BLOB PRIMARY KEY, path TEXT, imported_at), dependency_edges(parent_hash, child_hash, PK, FK cascade), and a child index. Public API covers lookup(&AssetId) -> Option<PathBuf>, insert(&AssetId, &Path) -> HygeResult<()>, dependencies(&AssetId) -> Vec<AssetId>, add_dependency(&AssetId, &AssetId) -> HygeResult<()>, and cache_dir(). AssetDb is exported through lib.rs and prelude. Added serial_test as a dev-dependency and six #[serial_test::serial] tests for WAL/schema creation, insert/lookup, replacement, dependency round-trip/deduplication, FK rejection for missing endpoints, and reopen/migration persistence. Verification: cargo test -p hyge-asset -- --test-threads=1 (14 passed), cargo clippy -p hyge-asset --all-targets -- --deny warnings, RUSTDOCFLAGS='-D warnings' cargo doc -p hyge-asset --no-deps, and cargo fmt --all -- --check passed (rustfmt emitted existing stable-channel warnings for nightly-only rustfmt.toml options)."
 acceptance = [
   "AssetDb.open(path) opens with WAL mode and sets up the schema",
   "AssetDb.lookup(hash) returns Option<PathBuf>",

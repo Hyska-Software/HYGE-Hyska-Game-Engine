@@ -14,11 +14,13 @@
 
 pub mod asset;
 pub mod context;
+pub mod db;
 pub mod handle;
 pub mod plugin;
 pub mod prelude;
 
 pub use asset::{Asset, AssetId};
 pub use context::LoadContext;
+pub use db::AssetDb;
 pub use handle::{Handle, LoadedAsset};
 pub use plugin::AssetPlugin;
