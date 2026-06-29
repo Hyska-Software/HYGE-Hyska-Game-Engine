@@ -18,9 +18,11 @@ pub mod db;
 pub mod handle;
 pub mod plugin;
 pub mod prelude;
+pub mod watcher;
 
 pub use asset::{Asset, AssetId};
 pub use context::LoadContext;
 pub use db::AssetDb;
 pub use handle::{Handle, LoadedAsset};
 pub use plugin::AssetPlugin;
+pub use watcher::{FileWatcher, ReloadQueue};

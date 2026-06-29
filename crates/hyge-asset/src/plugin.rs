@@ -2,6 +2,8 @@
 
 use hyge_ecs::plugin::HygePlugin;
 
+use crate::watcher::ReloadQueue;
+
 /// Asset subsystem plugin.
 ///
 /// R-030 only establishes asset identity and handle types, so this plugin is
@@ -15,7 +17,9 @@ impl HygePlugin for AssetPlugin {
         "hyge-asset"
     }
 
-    fn build(&self, _app: &mut bevy_app::App) {}
+    fn build(&self, app: &mut bevy_app::App) {
+        app.insert_resource(ReloadQueue::default());
+    }
 }
 
 #[cfg(test)]
@@ -30,5 +34,6 @@ mod tests {
         let mut app = App::new();
         app.add_hyge_plugin(AssetPlugin);
         assert_eq!(AssetPlugin.name(), "hyge-asset");
+        assert!(app.world().get_resource::<ReloadQueue>().is_some());
     }
 }

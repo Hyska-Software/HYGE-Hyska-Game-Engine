@@ -536,10 +536,12 @@ title = "FileWatcher (notify-based)"
 phase = "phase_3"
 owner = "asset"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-030"]
 summary = "Implement the file watcher using notify::RecommendedWatcher."
+completed_at = "2026-06-29"
+completion_notes = "Implemented crates/hyge-asset/src/watcher.rs with FileWatcher wrapping notify::RecommendedWatcher and ReloadQueue as a hyge_ecs Resource backed by Arc<Mutex<Vec<(PathBuf, AssetId)>>. FileWatcher supports watch_paths, watch_paths_with_debounce, and watch_asset_dirs(project_root) which creates and recursively watches assets/source/ and assets/scripts/. Notify callbacks filter create/modify/remove events, resolve Path -> AssetId through an injected resolver closure, coalesce burst writes through a 100 ms debounce window, and push debounced reload candidates to ReloadQueue. AssetPlugin now registers ReloadQueue. Exported FileWatcher and ReloadQueue through lib.rs and prelude. Added tests for real file write observation within 500 ms, burst-write debouncing, required asset-dir creation/watching, and queue drain ordering. Verification: cargo test -p hyge-asset -- --test-threads=1 (18 passed), cargo clippy -p hyge-asset --all-targets -- --deny warnings, and RUSTDOCFLAGS='-D warnings' cargo doc -p hyge-asset --no-deps passed. cargo fmt --all ran successfully with existing stable-channel warnings for nightly-only rustfmt.toml options."
 acceptance = [
   "FileWatcher wraps notify::RecommendedWatcher",
   "events flow into a ReloadQueue (Mutex<Vec<(PathBuf, AssetId)>>)",
