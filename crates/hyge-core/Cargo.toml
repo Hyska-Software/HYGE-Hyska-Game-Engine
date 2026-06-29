@@ -10,5 +10,8 @@ description = "Foundational types: math (glam wrappers), color spaces, log, asse
 [dependencies]
 glam = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 bytemuck = { workspace = true }
+blake3 = { workspace = true }
+serde = { workspace = true }

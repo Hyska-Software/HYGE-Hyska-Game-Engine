@@ -245,10 +245,12 @@ title = "hyge-core crate skeleton"
 phase = "phase_1"
 owner = "core"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-004"]
 summary = "Create hyge-core with math, color, log, id, result modules."
+completed_at = "2026-06-29"
+completion_notes = "Implemented hyge-core with six modules: math (Aabb, Plane, Frustum, Ray, plus glam re-exports of Mat2/3/4, Quat, Vec2/3/4, IVec*/UVec*), color (LinearRGB and Srgb with IEC 61966-2-1 piecewise transfer function), log (init_tracing() with EnvFilter from RUST_LOG, default 'info,hyge=debug', guarded by Once), id (AssetId newtype around [u8;32] with From<blake3::Hash>, From<[u8;32]>, Display/Debug, hex_serde for serde transparency, hex round-trip, null sentinel), result (HygeError enum with Io, Parse, Gpu, AssetNotFound, PluginConflict, InvalidArgument, Unsupported variants + convenience constructors, HygeResult<T> alias), prelude (re-exports AssetId, LinearRGB, Srgb, Aabb, Frustum, Plane, Ray, Vec2/3/4, Mat3/4, Quat, HygeError, HygeResult). lib.rs declares the 6 modules in the spec order (math, color, log, id, result, prelude), exposes hyge_log! macro at the crate root that re-exports tracing level macros (info/warn/error/debug/trace). #![forbid(unsafe_code)] and #![warn(missing_docs)] at crate root. Cargo.toml updated with blake3, tracing-subscriber, serde deps (all workspace=true). Tests: color round-trip within 0.5% budget, BLAKE3 determinism, Aabb merge/contains/intersects/empty, Frustum::from_view_proj smoke test, Ray AABB hit/miss, AssetId hex round-trip with/without 0x prefix, null sentinel, Display match. All 12 acceptance bullets satisfied."
 acceptance = [
   "crates/hyge-core/Cargo.toml declares deps on glam, tracing, thiserror, bytemuck",
   "lib.rs declares modules math, color, log, id, result, prelude",
