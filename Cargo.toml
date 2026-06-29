@@ -121,7 +121,7 @@ lz4_flex = "0.11"
 zstd = "0.13"
 
 # glTF + meshopt (meshlet baking)
-gltf = "1.3"
+gltf = { version = "1.4", default-features = false, features = ["import", "names", "KHR_lights_punctual", "extensions", "extras"] }
 meshopt = { version = "0.3", features = ["decode", "encode", "simplifier", "cluster"] }
 
 # Physics

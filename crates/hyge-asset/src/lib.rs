@@ -16,6 +16,7 @@ pub mod asset;
 pub mod context;
 pub mod db;
 pub mod handle;
+pub mod importer;
 pub mod plugin;
 pub mod prelude;
 pub mod watcher;

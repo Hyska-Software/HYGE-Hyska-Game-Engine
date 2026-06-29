@@ -182,15 +182,18 @@ mod tests {
 
     #[test]
     fn cook_walks_assets_source_and_writes_manifests() {
+        // Non-glTF sources go through the passthrough path
+        // (the glTF path is covered by hyge-asset's golden
+        // tests; see crates/hyge-asset/src/importer/golden.rs).
         let project = tempdir();
         let src_dir = project.join(ASSETS_SOURCE_DIR);
-        write_file(&src_dir.join("cube.gltf"), b"gltf-cube");
-        write_file(&src_dir.join("nested/sphere.gltf"), b"gltf-sphere");
+        write_file(&src_dir.join("scene.lua"), b"lua-scene");
+        write_file(&src_dir.join("nested/anim.lua"), b"lua-anim");
         write_file(&src_dir.join("readme.txt"), b"text");
 
         let summary = run(&project, None).expect("cook must succeed");
         assert_eq!(summary.total, 3);
-        assert_eq!(summary.by_ext.get("gltf"), Some(&2));
+        assert_eq!(summary.by_ext.get("lua"), Some(&2));
         assert_eq!(summary.by_ext.get("txt"), Some(&1));
 
         let cook_dir = project.join(ASSETS_COOK_DIR);
@@ -226,7 +229,7 @@ mod tests {
     fn cook_respects_out_override() {
         let project = tempdir();
         let src_dir = project.join(ASSETS_SOURCE_DIR);
-        write_file(&src_dir.join("a.gltf"), b"g");
+        write_file(&src_dir.join("a.lua"), b"lua");
 
         let out = tempdir().join("custom-cook");
         let summary = run(&project, Some(&out)).expect("cook with --out must succeed");

@@ -128,6 +128,69 @@ impl AssetDb {
             .map_err(sqlite_error("insert asset dependency"))?;
         Ok(())
     }
+
+    /// Atomically records a batch of asset rows plus dependency edges.
+    ///
+    /// Every `assets` entry is `INSERT OR REPLACE`d; every edge is
+    /// `INSERT OR IGNORE`d (duplicates are no-ops). Both lists are
+    /// applied inside a single SQLite transaction so importers never
+    /// leave the database in a half-imported state when an error
+    /// aborts the run.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HygeError`] when SQLite rejects the transaction,
+    /// including the FK constraint on a dependency edge that
+    /// references an asset hash not present in `assets`.
+    pub fn record_with_dependencies<I, J>(&mut self, assets: I, edges: J) -> HygeResult<()>
+    where
+        I: IntoIterator<Item = (AssetId, std::path::PathBuf)>,
+        J: IntoIterator<Item = (AssetId, AssetId)>,
+    {
+        let assets: Vec<(AssetId, std::path::PathBuf)> = assets.into_iter().collect();
+        let edges: Vec<(AssetId, AssetId)> = edges.into_iter().collect();
+
+        let transaction = self
+            .db
+            .transaction()
+            .map_err(sqlite_error("begin record_with_dependencies transaction"))?;
+
+        {
+            let mut insert_stmt = transaction
+                .prepare("INSERT OR REPLACE INTO assets (hash, path) VALUES (?1, ?2)")
+                .map_err(sqlite_error("prepare batch asset insert"))?;
+            for (hash, path) in &assets {
+                insert_stmt
+                    .execute(params![
+                        hash.as_bytes().as_slice(),
+                        path.to_string_lossy().as_ref()
+                    ])
+                    .map_err(sqlite_error("batch insert asset path"))?;
+            }
+        }
+
+        {
+            let mut edge_stmt = transaction
+                .prepare(
+                    "INSERT OR IGNORE INTO dependency_edges (parent_hash, child_hash) \
+                     VALUES (?1, ?2)",
+                )
+                .map_err(sqlite_error("prepare batch dependency insert"))?;
+            for (parent, child) in &edges {
+                edge_stmt
+                    .execute(params![
+                        parent.as_bytes().as_slice(),
+                        child.as_bytes().as_slice()
+                    ])
+                    .map_err(sqlite_error("batch insert dependency edge"))?;
+            }
+        }
+
+        transaction
+            .commit()
+            .map_err(sqlite_error("commit record_with_dependencies transaction"))?;
+        Ok(())
+    }
 }
 
 fn run_migrations(db: &mut Connection) -> HygeResult<()> {
