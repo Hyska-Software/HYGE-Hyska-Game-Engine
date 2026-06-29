@@ -1,0 +1,1497 @@
+version = 1
+title = "Hyge Engine Implementation Roadmap"
+updated_at = "2026-06-29T13:42Z"
+status_scale = ["not_started", "in_progress", "blocked", "complete"]
+priority_scale = ["P0", "P1", "P2", "P3"]
+risk_scale = ["low", "medium", "high"]
+
+[metadata]
+source_architecture = "docs/architecture.md"
+source_agents = "AGENTS.md"
+target_state = "v0.1.0 — production-ready 3D game engine with full editor"
+msrv = "1.80"
+channel = "stable only (no nightly)"
+
+[[phases]]
+id = "phase_0"
+name = "Governance and Foundation"
+goal = "Establish repository governance, ADR process, ownership map, CI pipeline, and the full workspace + 14 crates with shared infrastructure."
+
+[[phases]]
+id = "phase_1"
+name = "ECS Core and App Skeleton"
+goal = "Implement `hyge-core`, `hyge-ecs`, `hyge-window`, and `hyge-app` so that `App::run()` opens a window and clears a color."
+
+[[phases]]
+id = "phase_2"
+name = "Render Graph and First Triangle"
+goal = "Implement `hyge-render-graph` (DAG, barrier inference, transient allocator) and `hyge-render` device init. One hardcoded triangle on screen."
+
+[[phases]]
+id = "phase_3"
+name = "Asset Pipeline and Importer"
+goal = "Implement `hyge-asset` (BLAKE3 DB, hot-reload), `hyge-tools` CLI, glTF import, meshlet bake, KTX2 transcode. A lit sphere loaded from a glTF at runtime."
+
+[[phases]]
+id = "phase_4"
+name = "Bindless PBR Clustered Forward IBL"
+goal = "Bindless descriptor heap, PBR with IBL, clustered forward shading, light grid compute. 1000+ materials + 64 dynamic lights visible."
+
+[[phases]]
+id = "phase_5"
+name = "Shadows Post-Process Animation and Culling"
+goal = "Cascade shadow maps, per-light shadow atlas, TAA, SMAA, Bloom, ACES tonemap, skinning, CPU frustum + GPU meshlet culling, LOD."
+
+[[phases]]
+id = "phase_6"
+name = "Scene Prefab Instancing"
+goal = "`hyge-scene` with glTF scene loader, `.hyge-world` / `.hyge-prefab` formats, hierarchical prefab system with override, instancing extraction, component catalog."
+
+[[phases]]
+id = "phase_7"
+name = "Physics Audio Input Scripting"
+goal = "`hyge-physics` (rapier3d), `hyge-audio` (kira + HRTF), `hyge-input` (Action<T> + TOML + raw input), `hyge-script` (Lua + bevy_reflect + sandbox). 5 prefab instance scene with full systems."
+
+[[phases]]
+id = "phase_8"
+name = "Full Visual Editor"
+goal = "`hyge-editor` with viewport, hierarchy, inspector (reflect-driven), content browser, asset graph, console, profiler, undo/redo, docking persistence."
+
+[[phases]]
+id = "phase_9"
+name = "Polish Sandbox mdbook Performance Release"
+goal = "`hyge-sandbox` example, headless screenshot tool, mdbook site (4 tutorials), performance baseline (144 FPS at 1080p on RTX 3060), v0.1.0 release."
+
+# =============================================================================
+# PHASE 0 — Governance and Foundation
+# =============================================================================
+
+[[items]]
+id = "R-001"
+title = "ADR Foundation"
+phase = "phase_0"
+owner = "ecosystem"
+priority = "P0"
+status = "complete"
+risk = "medium"
+dependencies = []
+summary = "Create decision records for the 14 closed architectural decisions in docs/architecture.md §4."
+completed_at = "2026-06-29"
+completion_notes = "Created docs/adr/ with README index + 14 ADRs (0001..0014), each with Status, Context, Decision, Consequences, Alternatives Considered, and References sections."
+acceptance = [
+  "docs/adr/ exists with at least 14 files",
+  "ADR-0001 covers wgpu choice with alternatives considered (ash, raw DX12)",
+  "ADR-0002 covers bevy_ecs choice with alternatives considered (shipyard, custom)",
+  "ADR-0003 covers render stack (bindless + render graph + clustered forward)",
+  "ADR-0004 covers workspace structure (14 fat crates)",
+  "ADR-0005 covers concurrency model (dedicated render thread + FrameSnapshot)",
+  "ADR-0006 covers asset pipeline (BLAKE3 + glTF source + .hyge-world + hot-reload)",
+  "ADR-0007 covers scene/prefab (BLAKE3-keyed hierarchical + instancing)",
+  "ADR-0008 covers scripting (mlua + bevy_reflect, WASM deferred)",
+  "ADR-0009 covers physics (rapier3d behind feature flag)",
+  "ADR-0010 covers audio (kira + spatial 3D + HRTF optional)",
+  "ADR-0011 covers windowing/input (winit + gilrs + raw input + TOML bindings)",
+  "ADR-0012 covers networking out-of-scope decision (v0.2 plan)",
+  "ADR-0013 covers editor scope (full editor in v0.1)",
+  "ADR-0014 covers build constraints (stable only, MSRV 1.80)",
+  "Each ADR has Status, Context, Decision, Consequences, Alternatives sections"
+]
+
+[[items]]
+id = "R-002"
+title = "Ownership Map"
+phase = "phase_0"
+owner = "ecosystem"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-001"]
+summary = "Define owners and review responsibilities across all top-level crates."
+acceptance = [
+  "docs/ownership.md exists",
+  "each of the 14 crates has a primary owner group",
+  "each crate has at least one named delegate",
+  "PR routing rules documented"
+]
+
+[[items]]
+id = "R-003"
+title = "Roadmap Reporting Script"
+phase = "phase_0"
+owner = "tooling"
+priority = "P1"
+status = "not_started"
+risk = "low"
+dependencies = []
+summary = "Create a script that reads roadmap.toml and emits phase-grouped progress reports."
+acceptance = [
+  "tools/roadmap_report/ exists with a binary",
+  "script validates roadmap.toml against the v1 schema",
+  "script outputs phase-grouped progress (e.g. 'phase_0  3/3 complete  100%')",
+  "CI runs the script and posts a comment on the milestone tracking issue"
+]
+
+[[items]]
+id = "R-004"
+title = "Workspace Cargo.toml"
+phase = "phase_0"
+owner = "build"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = []
+summary = "Create the root workspace Cargo.toml with resolver = '2' and [workspace.dependencies] single-versioning policy."
+acceptance = [
+  "Cargo.toml at workspace root defines [workspace] with members = ['crates/*', 'examples/*']",
+  "[workspace.package] sets version, edition, rust-version, license, repository",
+  "[workspace.dependencies] declares every external dep with version",
+  "all member crates reference external deps as `dep = { workspace = true }`",
+  "cargo metadata succeeds with no warnings",
+  "cargo build --workspace succeeds with no errors (even if crates are empty placeholders)"
+]
+
+[[items]]
+id = "R-005"
+title = "Workspace Toolchain Pin"
+phase = "phase_0"
+owner = "build"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = []
+summary = "Pin Rust toolchain to stable, MSRV 1.80."
+acceptance = [
+  "rust-toolchain.toml sets channel = 'stable' and components = ['clippy', 'rustfmt']",
+  "rustfmt.toml at root sets unstable_features = true, imports_granularity = 'Crate', group_imports = 'StdExternalCrate'",
+  "clippy.toml at root allows module_name_repetitions, must_use_candidate, missing_errors_doc",
+  "MSRV documented in README and Cargo.toml"
+]
+
+[[items]]
+id = "R-006"
+title = "CI Matrix (Windows + Linux)"
+phase = "phase_0"
+owner = "build"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-004"]
+summary = "GitHub Actions CI with Windows + Linux matrix on stable + beta."
+acceptance = [
+  ".github/workflows/ci.yml exists with matrix: windows-latest x {stable, beta} + ubuntu-latest x {stable}",
+  "steps run cargo fmt --check, cargo clippy --workspace --all-targets -- -D warnings, cargo test --workspace, cargo build --release, cargo doc --no-deps -- -D warnings",
+  "Swatinem/rust-cache used for ~/.cargo and target/",
+  "headless render smoke test runs on ubuntu-latest with Vulkan ICD",
+  "green PRs mergeable"
+]
+
+[[items]]
+id = "R-007"
+title = "Nightly Job (miri, udeps, fuzz build)"
+phase = "phase_0"
+owner = "build"
+priority = "P1"
+status = "not_started"
+risk = "low"
+dependencies = ["R-006"]
+summary = "Nightly CI job for unsafe audit, unused-deps, fuzz build."
+acceptance = [
+  ".github/workflows/nightly.yml exists",
+  "runs cargo +nightly udeps --workspace",
+  "runs cargo +nightly miri test -p hyge-render",
+  "runs cargo +nightly miri test -p hyge-render-graph",
+  "runs cargo +nightly fuzz build (no run)",
+  "results posted to the milestone tracking issue"
+]
+
+[[items]]
+id = "R-008"
+title = "Conventional Commits and CHANGELOG"
+phase = "phase_0"
+owner = "build"
+priority = "P1"
+status = "not_started"
+risk = "low"
+dependencies = []
+summary = "Wire up conventional commit enforcement and git-cliff CHANGELOG generation."
+acceptance = [
+  ".gitlint or commitlint config in repo",
+  "cliff.toml configured to read commits and emit CHANGELOG.md",
+  "CI runs git-cliff --unreleased and fails if there are unreleased breaking changes without an ADR",
+  "sample CHANGELOG.md generated"
+]
+
+# =============================================================================
+# PHASE 1 — ECS Core and App Skeleton
+# =============================================================================
+
+[[items]]
+id = "R-010"
+title = "hyge-core crate skeleton"
+phase = "phase_1"
+owner = "core"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-004"]
+summary = "Create hyge-core with math, color, log, id, result modules."
+acceptance = [
+  "crates/hyge-core/Cargo.toml declares deps on glam, tracing, thiserror, bytemuck",
+  "lib.rs declares modules math, color, log, id, result, prelude",
+  "prelude re-exports the most-used types",
+  "AssetId is a newtype around [u8; 32] with From<blake3::Hash>",
+  "color::LinearRGB / Srgb conversion round-trips with < 0.5% error",
+  "math::Aabb::merge, math::Frustum::from_view_proj are implemented",
+  "HygeError enum covers at minimum: Io, Parse, Gpu, AssetNotFound, PluginConflict",
+  "HygeResult<T> = Result<T, HygeError>",
+  "unit tests for color round-trip, Aabb ops, BLAKE3 determinism pass",
+  "rustdoc on every public item"
+]
+
+[[items]]
+id = "R-011"
+title = "hyge-ecs crate (re-exports bevy_ecs)"
+phase = "phase_1"
+owner = "ecs"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-010"]
+summary = "Create hyge-ecs that re-exports bevy_ecs and defines HygePlugin trait + Schedule + SystemSet enums."
+acceptance = [
+  "crates/hyge-ecs/Cargo.toml declares deps on bevy_ecs, bevy_tasks, bevy_utils, hyge-core",
+  "lib.rs re-exports bevy_ecs::prelude, bevy_tasks, bevy_reflect",
+  "HygePlugin trait with name() and build(&self, app: &mut App) defined",
+  "schedule::Label enum (First, PreUpdate, FixedUpdate, Update, RenderExtract, Render, Last) implements ScheduleLabel",
+  "set::TransformSet, InputSet, AssetSet, PhysicsSet, AudioSet, ScriptSet, EditorSet enums defined and derive SystemSet",
+  "unit tests for plugin registration order and label uniqueness pass",
+  "rustdoc on every public item"
+]
+
+[[items]]
+id = "R-012"
+title = "hyge-window crate (winit + raw input)"
+phase = "phase_1"
+owner = "window"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-011"]
+summary = "Create hyge-window with winit event loop, raw input (Windows), surface."
+acceptance = [
+  "crates/hyge-window/Cargo.toml declares deps on winit, raw-window-handle, windows-sys (windows-only), hyge-ecs, hyge-core",
+  "WindowPlugin implements HygePlugin and registers Window resource + events",
+  "WindowConfig struct with title, width, height, resizable, vsync, raw_input",
+  "events module: WindowResized, WindowCloseRequested, WindowFocused, DeviceEvent, DeviceEventKind",
+  "raw_input.rs uses RegisterRawInputDevices on Windows (cfg(windows))",
+  "Surface is owned by Window and exposed via &wgpu::Surface when integrated with hyge-render",
+  "unit tests for events translation pass; raw-input tests are cfg(windows)-only",
+  "rustdoc on every public item"
+]
+
+[[items]]
+id = "R-013"
+title = "hyge-app crate (App builder + default plugins)"
+phase = "phase_1"
+owner = "app"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-011"]
+summary = "Create hyge-app with AppBuilder trait, AppConfig, default_plugins set."
+acceptance = [
+  "crates/hyge-app/Cargo.toml declares deps on hyge-ecs, hyge-window, hyge-core",
+  "App struct wraps bevy App + window + render thread handle (render thread placeholder in M1)",
+  "AppConfig with window, renderer (placeholder), assets (placeholder), physics, audio, input, script, editor fields",
+  "AppBuilder trait with new(config), add_plugin, run methods",
+  "default_plugins() returns a set of Box<dyn HygePlugin> containing WindowPlugin (others registered as phases land)",
+  "run() starts winit event loop, runs First/PreUpdate/Update/Last schedules",
+  "A minimal example opens a window and clears to a configurable color",
+  "unit test for default_plugins loading without conflict passes",
+  "rustdoc on every public item"
+]
+
+[[items]]
+id = "R-014"
+title = "M0 smoke test: window opens + clears color"
+phase = "phase_1"
+owner = "app"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-013"]
+summary = "M0 Definition of Done: App::new().add_plugins(...).run() opens a window and clears to a configurable color."
+acceptance = [
+  "example or test exists that boots App and verifies a window is created",
+  "default clear color is configurable via AppConfig",
+  "cargo test --workspace green on Windows + Linux CI",
+  "AGENTS.md §5.2 M0 DoD checklist satisfied"
+]
+
+# =============================================================================
+# PHASE 2 — Render Graph and First Triangle
+# =============================================================================
+
+[[items]]
+id = "R-020"
+title = "hyge-render-graph crate skeleton"
+phase = "phase_2"
+owner = "render-graph"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-010", "R-012"]
+summary = "Create hyge-render-graph with DAG, Pass trait, ResourceHandle, CompiledGraph, transient allocator."
+acceptance = [
+  "crates/hyge-render-graph/Cargo.toml declares deps on wgpu, petgraph, indexmap, hyge-core",
+  "RenderGraph struct internally uses petgraph DiGraph",
+  "Pass trait with name, reads, writes, record methods",
+  "ResourceHandle, ResourceKind, ResourceLifetime enums defined",
+  "CompiledGraph struct + compile(device) + execute(encoder) API",
+  "petgraph DiGraph cycle detection in compile() returns HygeError::RenderGraphCycle",
+  "unit test: build a 3-pass graph, compile, verify topological order and barrier emission",
+  "rustdoc on every public item"
+]
+
+[[items]]
+id = "R-021"
+title = "Barrier inference algorithm"
+phase = "phase_2"
+owner = "render-graph"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-020"]
+summary = "Implement automatic barrier inference from pass reads/writes."
+acceptance = [
+  "for each pass in topological order, walk all reads/writes",
+  "for each resource touched, if previous pass wrote it (or it was Persistent), emit a barrier matching (texture usage, buffer usage) transition",
+  "insta snapshot test for a fixed 5-pass graph shows correct barriers",
+  "miri test passes (no UB in unsafe barrier code)",
+  "documented in module rustdoc"
+]
+
+[[items]]
+id = "R-022"
+title = "Transient resource allocator"
+phase = "phase_2"
+owner = "render-graph"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-020"]
+summary = "Implement arena allocator for transient (frame-scoped) resources."
+acceptance = [
+  "for Transient resources, an internal arena allocator is used; first-touch allocates, last-release frees",
+  "no leaks between frames (verified by an integration test running 1000 frames and asserting memory ceiling)",
+  "allocator reuses free slots when sizes match",
+  "unit test covers fragment-as-fraction of peak-usage case"
+]
+
+[[items]]
+id = "R-023"
+title = "hyge-render crate skeleton (device init)"
+phase = "phase_2"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-020"]
+summary = "Create hyge-render with Renderer, RendererConfig, device init, surface, swapchain."
+acceptance = [
+  "crates/hyge-render/Cargo.toml declares deps on wgpu, bytemuck, bitflags, naga, hyge-core, hyge-render-graph",
+  "Renderer struct holds device, queue, surface, swapchain, render graph",
+  "RendererConfig with backend (wgpu::Backends), vsync, present_mode",
+  "new(config, window) returns HygeResult<Self>",
+  "resize(w, h) updates swapchain",
+  "wgpu validation layer enabled in debug, off in release",
+  "unit test: device init succeeds on a software adapter (when available) or skips when not",
+  "rustdoc on every public item"
+]
+
+[[items]]
+id = "R-024"
+title = "First-triangle render pass"
+phase = "phase_2"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-023"]
+summary = "Implement a hardcoded triangle rendered via the render graph."
+acceptance = [
+  "a single RenderGraph pass that clears + draws a hardcoded triangle",
+  "triangle visible at center of screen",
+  "validation layer reports no errors in release",
+  "hyge-app wired so main App::run() shows the triangle (replacing the M0 clear-color smoke)",
+  "snapshot test in hyge-runtime-test captures a reference frame and asserts within tolerance"
+]
+
+[[items]]
+id = "R-025"
+title = "GPU profiler overlay"
+phase = "phase_2"
+owner = "render"
+priority = "P1"
+status = "not_started"
+risk = "low"
+dependencies = ["R-024"]
+summary = "Frame-time, GPU-time, and draw-call counter overlay."
+acceptance = [
+  "wgpu::QuerySet::Timestamp per pass",
+  "FrameStats resource updated each frame: total GPU time, per-pass time, draw calls, instance count",
+  "tracing spans wrap each pass with names compatible with tracy",
+  "debug overlay (egui) shows: frame time, FPS, GPU time, draw calls (top-left corner, 200x80 px)",
+  "frame stats are accessible to the editor profiler panel placeholder"
+]
+
+# =============================================================================
+# PHASE 3 — Asset Pipeline and Importer
+# =============================================================================
+
+[[items]]
+id = "R-030"
+title = "hyge-asset crate skeleton (Asset trait, Handle, AssetId)"
+phase = "phase_3"
+owner = "asset"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-010"]
+summary = "Create hyge-asset with the foundational Asset trait, Handle<A>, AssetId."
+acceptance = [
+  "crates/hyge-asset/Cargo.toml declares deps on rusqlite, blake3, notify, lz4_flex, zstd, serde, rmp-serde, hyge-ecs, hyge-core",
+  "Asset trait with type Data, hash, extensions, load methods",
+  "AssetId newtype [u8; 32] with From<blake3::Hash>, Eq, Hash, Copy",
+  "Handle<A> = { id: AssetId, _marker: PhantomData<A> } with Copy",
+  "LoadedAsset<A> { asset: Arc<A>, version: u64 }",
+  "unit tests pass"
+]
+
+[[items]]
+id = "R-031"
+title = "AssetDb (SQLite content-addressed store)"
+phase = "phase_3"
+owner = "asset"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-030"]
+summary = "Implement the content-addressed SQLite asset database."
+acceptance = [
+  "AssetDb.open(path) opens with WAL mode and sets up the schema",
+  "AssetDb.lookup(hash) returns Option<PathBuf>",
+  "AssetDb.insert(hash, path) returns HygeResult<()>",
+  "AssetDb.dependencies(hash) returns Vec<AssetId>",
+  "AssetDb.add_dependency(parent, child) records the edge",
+  "schema migration runner (db_version table)",
+  "tests use #[serial_test::serial] to avoid contention; CI uses --test-threads=1"
+]
+
+[[items]]
+id = "R-032"
+title = "FileWatcher (notify-based)"
+phase = "phase_3"
+owner = "asset"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-030"]
+summary = "Implement the file watcher using notify::RecommendedWatcher."
+acceptance = [
+  "FileWatcher wraps notify::RecommendedWatcher",
+  "events flow into a ReloadQueue (Mutex<Vec<(PathBuf, AssetId)>>)",
+  "debounce window of 100 ms to coalesce burst writes",
+  "recursive watching for assets/source/ and assets/scripts/",
+  "unit test: write a file, assert the event is observed within 500 ms"
+]
+
+[[items]]
+id = "R-033"
+title = "hyge-tools CLI skeleton (clap)"
+phase = "phase_3"
+owner = "tools"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = []
+summary = "Create hyge-tools with clap-based subcommand dispatch."
+acceptance = [
+  "crates/hyge-tools/Cargo.toml declares deps on clap, hyge-asset, hyge-core",
+  "Cli struct with Parser derive and Cmd subcommand enum",
+  "main.rs dispatches to cmd/* implementations",
+  "all subcommands defined: Import, Cook, Headless, Inspect, Serve, Doctor (only Import and Cook are implemented in this phase)"
+]
+
+[[items]]
+id = "R-034"
+title = "glTF importer"
+phase = "phase_3"
+owner = "asset"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-031", "R-033"]
+summary = "Parse glTF 2.0, extract meshes + materials + textures, write to .hyge-asset cache."
+acceptance = [
+  "uses the `gltf` crate to parse",
+  "supports extensions: KHR_mesh_quantization, KHR_texture_basisu, KKR_lights_punctual",
+  "writes <blake3>.hyge-mesh, <blake3>.hyge-mat, <blake3>.ktx2, <blake3>.hyge-meta.json",
+  "updates AssetDb with hash, path, and dependencies",
+  "golden test: import a small glTF, assert the output files are deterministic and within size bounds"
+]
+
+[[items]]
+id = "R-035"
+title = "Meshlet bake (meshopt)"
+phase = "phase_3"
+owner = "scene"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-034"]
+summary = "Bake meshlets (64-128 verts, 126 tri cap) and LOD chain during import."
+acceptance = [
+  "uses meshopt_buildMeshlets with target 64 verts, 126 tri cap",
+  "computes meshlet bounds (cone + AABB)",
+  "generates LOD chain via meshopt_simplify (0.5, 0.25, 0.1 ratios)",
+  "serializes to .hyge-mesh binary format (header + meshlet data + LOD data)",
+  "deterministic: same input glTF produces identical .hyge-mesh bytes (verified by test)"
+]
+
+[[items]]
+id = "R-036"
+title = "KTX2 transcode (basis-universal)"
+phase = "phase_3"
+owner = "asset"
+priority = "P0"
+status = "medium"
+risk = "medium"
+dependencies = ["R-034"]
+summary = "Transcode source textures to KTX2 with BasisU compression."
+acceptance = [
+  "PNG/JPG/EXR inputs transcode to KTX2 with BC7 (desktop) or ASTC 4x4 (mobile-class)",
+  "uses basis-universal (or toktx CLI invoked from the importer)",
+  "output <blake3>.ktx2 stored in the cache",
+  "mip chain generated and verified"
+]
+
+[[items]]
+id = "R-037"
+title = "BindlessTable and GPU upload path"
+phase = "phase_3"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-023", "R-030"]
+summary = "Bindless descriptor heap in hyge-render, with GPU upload on AsyncComputeTaskPool."
+acceptance = [
+  "BindlessTable in hyge-render with the slot layout from docs/architecture.md §8.1",
+  "GpuUploadTask runs on AsyncComputeTaskPool, creates wgpu::Buffer/Texture, registers in BindlessTable",
+  "AssetServer::load returns a Handle<A> that resolves to a LoadedAsset<A> with bindless IDs",
+  "refcount bump on load, decrement on drop; refcount zero schedules GPU release",
+  "test: load 1000 meshes, 1000 materials, assert no descriptor thrash (no wgpu validation errors)"
+]
+
+[[items]]
+id = "R-038"
+title = "M2 smoke test: lit sphere loaded from glTF at runtime"
+phase = "phase_3"
+owner = "asset"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-037"]
+summary = "M2 Definition of Done: glTF import → bindless GPU resource → lit sphere (Lambert first, PBR in M3)."
+acceptance = [
+  "imports a glTF sphere with one mesh + one texture",
+  "displays the sphere with Lambert lighting at runtime",
+  "hot-reload: edit the glTF in Blender, the sphere updates without restart",
+  "BLAKE3 hashing stable, LZ4 compression on, SQLite DB created and queried",
+  "AGENTS.md §5.2 M2 DoD checklist satisfied"
+]
+
+# =============================================================================
+# PHASE 4 — Bindless PBR Clustered Forward IBL
+# =============================================================================
+
+[[items]]
+id = "R-040"
+title = "PBR shader (pbr.wgsl)"
+phase = "phase_4"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-038"]
+summary = "Vertex + fragment shader implementing GGX BRDF with metallic-roughness PBR."
+acceptance = [
+  "vertex shader pulls from bindless buffer, outputs world position, normal, tangent, UV",
+  "fragment shader evaluates GGX BRDF (metallic-roughness, IBL prefilter + irradiance)",
+  "supports emissive map",
+  "alpha test (cutout) and alpha blend modes",
+  "naga validation passes on all wgpu backends"
+]
+
+[[items]]
+id = "R-041"
+title = "IBL prefilter and irradiance bake"
+phase = "phase_4"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-040"]
+summary = "Bake IBL from a glTF environment cubemap (prefilter roughness mip chain + irradiance convolution)."
+acceptance = [
+  "prefilter.wgsl computes roughness mip chain from environment cubemap",
+  "irradiance.wgsl computes irradiance via spherical convolution",
+  "offline bake path invoked at import time when an .hdr/.exr is detected in the scene",
+  "online bake path supports runtime-loaded environments",
+  "test: bake the Khronos environment cubemap, assert output hash stable"
+]
+
+[[items]]
+id = "R-042"
+title = "Clustered forward pipeline"
+phase = "phase_4"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-040"]
+summary = "Clustered forward shading with Z clusters + XY tiles, light grid compute."
+acceptance = [
+  "Z split: 16 slices uniform in camera space",
+  "XY tile: 16x16 screen tiles",
+  "BuildLightGrid compute shader: 1 thread per tile, iterates lights, writes LightGrid SSBO + LightIndexList SSBO",
+  "PBR fragment samples LightGrid for the (cluster, tile) and iterates lights",
+  "1 sun + 64 dynamic point/spot lights visible in a test scene",
+  "memory: light grid (1920x1080 / 16 / 16) * 16 * (offset+count) = ~512 KB",
+  "snapshot test of reference scene within SSIM 0.99"
+]
+
+[[items]]
+id = "R-043"
+title = "Bindless table integration with ECS"
+phase = "phase_4"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-037", "R-042"]
+summary = "RenderExtract reads ECS components and produces DrawCommand list for the render thread."
+acceptance = [
+  "RenderExtract runs in schedule::Label::RenderExtract before the render thread",
+  "queries With<StaticMesh>, resolves Handle<Mesh> + Handle<Material> to bindless IDs",
+  "groups by (mesh_id, material_id) into DrawCommand with instance_count",
+  "1000+ meshes + 1000+ materials in test scene; no descriptor thrash; FPS target 60+ on RTX 3060"
+]
+
+[[items]]
+id = "R-044"
+title = "M3 smoke test: PBR matches DamagedHelmet reference"
+phase = "phase_4"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-043"]
+summary = "M3 Definition of Done: PBR matches glTF DamagedHelmet reference scene visually."
+acceptance = [
+  "imports glTF-Sample-Models DamagedHelmet",
+  "renders with PBR + IBL + 1 sun + 64 dynamic lights",
+  "snapshot test: reference scene renders to expected hash within SSIM 0.99",
+  "AGENTS.md §5.2 M3 DoD checklist satisfied"
+]
+
+# =============================================================================
+# PHASE 5 — Shadows Post-Process Animation and Culling
+# =============================================================================
+
+[[items]]
+id = "R-050"
+title = "Cascade shadow maps (CSM)"
+phase = "phase_5"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-043"]
+summary = "4-split cascade shadow maps for the sun, with PCF soft sampling in the main pass."
+acceptance = [
+  "CSM split using fit-to-scene or uniform lambda blend",
+  "depth-only render pass for the sun POV per cascade",
+  "PCF soft (5x5 or 3x3 + Poisson) in clustered_forward.wgsl",
+  "PCF kernel samples the correct cascade via view-space Z",
+  "test: compare CSM-only frame vs reference image with SSIM > 0.95"
+]
+
+[[items]]
+id = "R-051"
+title = "Per-light shadow atlas (point/spot)"
+phase = "phase_5"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-050"]
+summary = "Atlas that packs shadow maps of point/spot lights, with 6-face cubemap for point lights."
+acceptance = [
+  "atlas is a 4096x4096 R32Float texture (or Depth32Float)",
+  "point lights use cubemap layout, spot lights use 2D",
+  "sub-rect allocation with first-fit",
+  "test: 16 shadow-casting point lights in a scene render correctly"
+]
+
+[[items]]
+id = "R-052"
+title = "TAA (temporal anti-aliasing)"
+phase = "phase_5"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-043"]
+summary = "History reprojection + variance clipping + temporal blend."
+acceptance = [
+  "taa.wgsl: history reprojection via motion vectors, neighborhood clamp (variance clip), 1/8 history + 7/8 current blend",
+  "history buffer is a separate texture persistent across frames",
+  "TAA history resets on camera cut (detected by view matrix change > threshold)",
+  "test: pixel-level check that TAA reduces temporal noise (compare frame N vs frame N+1 variance)"
+]
+
+[[items]]
+id = "R-053"
+title = "SMAA (subpixel morphological anti-aliasing)"
+phase = "phase_5"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-052"]
+summary = "3-pass SMAA: edge detection, blending weights, neighborhood blending."
+acceptance = [
+  "smaa.wgsl with three passes (edge, blend weights, neighborhood)",
+  "lookup textures (area, search) embedded as Rust arrays",
+  "test: visual sanity check (no jaggies on a hard edge)"
+]
+
+[[items]]
+id = "R-054"
+title = "Bloom (dual Kawase)"
+phase = "phase_5"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-043"]
+summary = "5-level downsample + upsample with tent filter."
+acceptance = [
+  "bloom.wgsl: downsample 5 levels with dual Kawase, upsample with tent filter, accumulate",
+  "added to scene before tonemap",
+  "configurable: intensity, threshold, levels",
+  "test: bloom adds energy to bright pixels (mean luma increases when intensity > 0)"
+]
+
+[[items]]
+id = "R-055"
+title = "ACES tonemap"
+phase = "phase_5"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-043"]
+summary = "ACES filmic tonemap."
+acceptance = [
+  "tonemap.wgsl with Narkowicz ACES approximation",
+  "applied in the post-process chain",
+  "test: linear input 1.0 -> sRGB output ~0.8"
+]
+
+[[items]]
+id = "R-056"
+title = "Skeletal animation (skinning compute)"
+phase = "phase_5"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-043"]
+summary = "Skinning compute pass with 4-influence skinning."
+acceptance = [
+  "skinning.wgsl: 4-influence per vertex, transforms vertex to skinned position",
+  "animation component: SkeletalAnimation { clip, time, root_motion }",
+  "matrices computed from skeleton (joint hierarchy + clip sampling)",
+  "output to skinned vertex buffer consumed by SkinnedMesh path",
+  "test: skin a rigged glTF, assert vertex output matches expected within tolerance"
+]
+
+[[items]]
+id = "R-057"
+title = "CPU frustum culling for static meshes"
+phase = "phase_5"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-043"]
+summary = "CPU-side frustum culling on the main thread, fed to the render thread."
+acceptance = [
+  "Frustum extracted from view-projection",
+  "Per-entity AABB intersection test",
+  "Culled entities are not emitted in FrameSnapshot.opaque",
+  "test: 10k static instances, assert 90%+ culled in a typical camera"
+]
+
+[[items]]
+id = "R-058"
+title = "GPU meshlet culling and LOD selection"
+phase = "phase_5"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-057"]
+summary = "Compute shader that culls meshlets and selects LOD, writes MultiDrawIndirect args."
+acceptance = [
+  "meshlet_cull.wgsl: 64 threads per group, one meshlet each",
+  "frustum cull + screen-space error LOD selection",
+  "writes visible_meshlet count to MultiDrawIndirect arg buffer",
+  "test: 10k meshlets, ~30% visible after frustum cull"
+]
+
+[[items]]
+id = "R-059"
+title = "M4 performance baseline: 10k instances at 144 FPS"
+phase = "phase_5"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-058"]
+summary = "M4 Definition of Done: 10k static instances scene at >=144 FPS on RTX 3060 with full features."
+acceptance = [
+  "test scene with 10k static instances, 64 dynamic lights, full PBR + IBL + CSM + TAA + SMAA + Bloom + ACES + skinning + culling",
+  "measured FPS >= 144 at 1080p on RTX 3060",
+  "docs/perf/baseline.json records the numbers",
+  "criterion benchmark in cargo bench measures each pass",
+  "AGENTS.md §5.2 M4 DoD checklist satisfied"
+]
+
+# =============================================================================
+# PHASE 6 — Scene Prefab Instancing
+# =============================================================================
+
+[[items]]
+id = "R-060"
+title = "hyge-scene crate skeleton"
+phase = "phase_6"
+owner = "scene"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-010", "R-011"]
+summary = "Create hyge-scene with components module + transform system."
+acceptance = [
+  "crates/hyge-scene/Cargo.toml declares deps on gltf, meshopt, serde, rmp-serde, ron, hyge-ecs, hyge-asset, hyge-core",
+  "components module defines Transform, GlobalTransform, Parent, Children, Name, PersistOnReload (all Component + Reflect + Default)",
+  "TransformPropagate system in set::TransformSet::Propagate",
+  "rustdoc + tests"
+]
+
+[[items]]
+id = "R-061"
+title = "Component catalog (lights, camera, audio, script ref, physics)"
+phase = "phase_6"
+owner = "scene"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-060"]
+summary = "Implement the full canonical component catalog."
+acceptance = [
+  "PointLight, SpotLight, DirectionalLight, AmbientLight components (all Reflect)",
+  "Camera, EditorCamera, AudioSource, AudioListener components",
+  "ScriptRef { path, table, enabled }",
+  "RigidBody, Collider, CharacterController, Joint (delegated to hyge-physics in phase 7, but type stubs live here)",
+  "PostProcessVolume, FogVolume placeholders",
+  "test: Reflect round-trip for each component"
+]
+
+[[items]]
+id = "R-062"
+title = "Prefab system (.hyge-prefab)"
+phase = "phase_6"
+owner = "scene"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-061"]
+summary = "Hierarchical prefab with BLAKE3-keyed, msgpack-encoded .hyge-prefab format."
+acceptance = [
+  "Prefab struct with root, assets, prefab_id (BLAKE3-keyed)",
+  "PrefabNode with name, components (overrides), children, persist",
+  "ComponentOverride with type_name + partial Reflect value",
+  "Prefab::instantiate(world, transform, parent) returns root Entity",
+  "PrefabLoader loads from .hyge-prefab",
+  "test: round-trip a known prefab through serialization"
+]
+
+[[items]]
+id = "R-063"
+title = "Scene format (.hyge-world)"
+phase = "phase_6"
+owner = "scene"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-062"]
+summary = ".hyge-world binary format with environment, prefab instances, post-process profile."
+acceptance = [
+  "World struct with env, root_prefab_instances, post_process",
+  "Environment with skybox, sun, fog, ambient",
+  "WorldLoader loads .hyge-world into ECS World",
+  "test: round-trip a known scene"
+]
+
+[[items]]
+id = "R-064"
+title = "Instancing extraction (StaticMesh path)"
+phase = "phase_6"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-063", "R-043"]
+summary = "RenderExtract groups StaticMesh entities by (mesh_id, material_id) into DrawCommand."
+acceptance = [
+  "Query With<StaticMesh> iterates entities",
+  "Handle resolution -> mesh_id, material_id from BindlessTable",
+  "Group by (mesh_id, material_id), sort by material_id, emit one DrawCommand per group",
+  "test: 1000 entities with same mesh+material yield 1 DrawCommand with instance_count=1000"
+]
+
+[[items]]
+id = "R-065"
+title = "M6 prep smoke: 5 prefab instance scene renders correctly"
+phase = "phase_6"
+owner = "scene"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-064"]
+summary = "M5/M6 prep: a .hyge-world with 5 prefab instances of a complex asset renders correctly with all features from phase 4 and 5."
+acceptance = [
+  ".hyge-world with 5 prefab instances of a complex asset (e.g. glTF SciFiHelmet) loads and renders",
+  "all phase 4+5 features apply (PBR, IBL, shadows, post, skinning)",
+  "hot-reload of the .hyge-world file diffs the scene and reapplies"
+]
+
+# =============================================================================
+# PHASE 7 — Physics Audio Input Scripting
+# =============================================================================
+
+[[items]]
+id = "R-070"
+title = "hyge-physics crate skeleton (rapier3d behind feature flag)"
+phase = "phase_7"
+owner = "physics"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-061"]
+summary = "Create hyge-physics with rapier3d behind feature flag, components, events, query trait."
+acceptance = [
+  "crates/hyge-physics/Cargo.toml declares optional dep on rapier3d, feature flag 'physics-rapier'",
+  "components::RigidBody, Collider, CharacterController (all Reflect)",
+  "ColliderShape enum (Ball, Cuboid, Capsule, Cylinder, Cone, ConvexHull, Trimesh, Heightfield)",
+  "events::CollisionEvent, ContactForceEvent",
+  "query::SpatialQuery trait (cast_ray, cast_shape, intersections_with)",
+  "PhysicsConfig, PhysicsTime resources",
+  "test: Reflect round-trip for components; raycast against static box"
+]
+
+[[items]]
+id = "R-071"
+title = "rapier3d integration and fixed timestep"
+phase = "phase_7"
+owner = "physics"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-070"]
+summary = "Wire rapier3d to ECS via fixed-timestep schedule, with worker-thread island build."
+acceptance = [
+  "rapier_impl module behind cfg(feature = 'physics-rapier')",
+  "PhysicsStep system in schedule::Label::FixedUpdate, consumes PhysicsTime accumulator",
+  "Worker thread runs island build, returns Island to main",
+  "max substeps 5 default; configurable in PhysicsConfig",
+  "test: 100 dynamic rigid bodies, simulate 10s, assert deterministic ball drop landing position"
+]
+
+[[items]]
+id = "R-072"
+title = "hyge-audio crate skeleton (kira)"
+phase = "phase_7"
+owner = "audio"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-061"]
+summary = "Create hyge-audio with kira backend, bus mixer, spatial 3D."
+acceptance = [
+  "crates/hyge-audio/Cargo.toml declares deps on kira, kira-spatial-audio, hyge-ecs, hyge-core",
+  "AudioServer wraps kira::AudioManager",
+  "AudioBuses: master, sfx, voice, ui, ambient, music",
+  "components::AudioSource, AudioListener (Reflect)",
+  "events::PlaySound, StopSound",
+  "test: bus volume inheritance math, distance attenuation math (mocked)"
+]
+
+[[items]]
+id = "R-073"
+title = "Spatial 3D audio + HRTF (feature flag)"
+phase = "phase_7"
+owner = "audio"
+priority = "P1"
+status = "not_started"
+risk = "low"
+dependencies = ["R-072"]
+summary = "Spatial 3D audio with HRTF gated by 'audio-hrtf' feature."
+acceptance = [
+  "kira-spatial-audio listener + emitter setup",
+  "HRTF gated by feature = 'audio-hrtf' (uses oddio or kira-hrtf if available)",
+  "default off; KEMAR-derived dataset if shipped",
+  "test: distance attenuation matches expected (mocked)"
+]
+
+[[items]]
+id = "R-074"
+title = "hyge-input crate skeleton (Action<T>, TOML, raw input)"
+phase = "phase_7"
+owner = "input"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-012", "R-061"]
+summary = "Create hyge-input with Action<T>, TOML bindings, hot-reload, raw input."
+acceptance = [
+  "crates/hyge-input/Cargo.toml declares deps on toml, serde, notify, hyge-ecs, hyge-window, hyge-core",
+  "ActionMap with actions + bindings",
+  "Action::Button, Axis, Vec2",
+  "Binding enum (Keyboard, MouseButton, MouseAxis, MouseDelta, GamepadButton, GamepadAxis)",
+  "TOML parsing matches schema in docs/architecture.md §6.10",
+  "translate system reads DeviceEvents, updates ActionMap",
+  "hot-reload of the .toml file rebinds without restart",
+  "test: edge detection, scale aggregation"
+]
+
+[[items]]
+id = "R-075"
+title = "Raw input (Windows) and gilrs (gamepad)"
+phase = "phase_7"
+owner = "input"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-074"]
+summary = "Raw input via RegisterRawInputDevices on Windows, gilrs for gamepad on all platforms."
+acceptance = [
+  "Windows: RegisterRawInputDevices integrated into winit event loop",
+  "Linux/macOS: evdev direct (or winit fallback) behind same RawInput trait",
+  "gilrs 0.10+ for gamepad (GamepadConnected/Disconnected events, axes, buttons)",
+  "test: bind WASD to a vec2 action, assert values update when keys pressed (mocked)"
+]
+
+[[items]]
+id = "R-076"
+title = "hyge-script crate skeleton (mlua, sandbox, bevy_reflect)"
+phase = "phase_7"
+owner = "script"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-061"]
+summary = "Create hyge-script with mlua engine, sandbox, bevy_reflect bindings, hot-reload."
+acceptance = [
+  "crates/hyge-script/Cargo.toml declares deps on mlua, bevy_reflect, hyge-ecs, hyge-core",
+  "ScriptEngine wraps mlua::Lua",
+  "Sandbox strips os, io, debug, package, require (raw)",
+  "hyge.* API: log, world.entity.new/destroy, world.get/set (via Reflect), event.send, input.action, audio.play, time.delta",
+  "ScriptRef component",
+  "events::ScriptError",
+  "test: forbidden stdlib actually stripped; component get/set round-trip"
+]
+
+[[items]]
+id = "R-077"
+title = "Script hot-reload and on_reload hook"
+phase = "phase_7"
+owner = "script"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-076"]
+summary = "Notify-based hot-reload of Lua scripts, calling on_reload on the entity."
+acceptance = [
+  "notify watches assets/scripts/",
+  "on change: re-parse; if OK, replace ScriptState, call on_reload(old_state)",
+  "if parse fails, push ScriptError event, keep old script running",
+  "test: modify a .lua file, assert ScriptState replaces and on_reload is called (mocked)"
+]
+
+[[items]]
+id = "R-078"
+title = "M5 smoke test: full systems scene with 5 prefabs"
+phase = "phase_7"
+owner = "app"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-071", "R-072", "R-074", "R-076"]
+summary = "M5 Definition of Done: scene with 5 prefab instances, 100 physics bodies, audio, input, Lua all hot-reloadable."
+acceptance = [
+  ".hyge-world with 5 prefab instances of a complex asset",
+  "100 dynamic rapier3d rigid bodies, 1 character controller, collision events flow into ECS",
+  "16 spatial audio emitters, music stream, bus mixer",
+  "WASD + mouse look + gamepad mapped via TOML",
+  "Lua: assets/scripts/player.lua controlling a cube via input + rigid body",
+  "hot-reload of scripts, scene, input bindings, asset changes",
+  "AGENTS.md §5.2 M5 DoD checklist satisfied"
+]
+
+# =============================================================================
+# PHASE 8 — Full Visual Editor
+# =============================================================================
+
+[[items]]
+id = "R-080"
+title = "hyge-editor crate skeleton (egui + docking)"
+phase = "phase_8"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-013"]
+summary = "Create hyge-editor with egui + egui_dock + egui_tiles, EditorPlugin, default layout."
+acceptance = [
+  "crates/hyge-editor/Cargo.toml declares deps on egui, egui_dock, egui_tiles, hyge-app, hyge-ecs, hyge-render, hyge-scene, hyge-core",
+  "EditorPlugin implements HygePlugin",
+  "EditorUi resource with panel_state, selection, clipboard, history",
+  "default layout per docs/architecture.md §12.1",
+  "test: editor plugin loads in headless mode without panicking"
+]
+
+[[items]]
+id = "R-081"
+title = "Viewport panel"
+phase = "phase_8"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-080", "R-043"]
+summary = "Editor viewport running the same render graph with editor camera + gizmos."
+acceptance = [
+  "owns a wgpu::Surface (or sub-region of main surface)",
+  "runs the same RenderGraph as runtime with EditorCamera",
+  "selection outline (stencil + outline pass)",
+  "gizmos: translate, rotate, scale (per-entity handles)",
+  "test: viewport renders a scene, selection outline visible on selected entity (snapshot)"
+]
+
+[[items]]
+id = "R-082"
+title = "Hierarchy panel"
+phase = "phase_8"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-080", "R-061"]
+summary = "Tree view of World, drag-drop to reparent."
+acceptance = [
+  "tree from Parent/Children components, Name for labels",
+  "drag-drop to reparent via Command::Reparent",
+  "right-click context menu (add component, remove, duplicate, delete)",
+  "test: reparent entity, assert hierarchy updated, undo restores"
+]
+
+[[items]]
+id = "R-083"
+title = "Inspector panel (reflect-driven)"
+phase = "phase_8"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-080", "R-061"]
+summary = "Reflect-driven component editor; auto-generates fields from TypeRegistry."
+acceptance = [
+  "reads TypeRegistry, for each component of selected entity generates field editor from Reflect::ReflectRef",
+  "f32/i32/u32/bool -> slider/drag/check",
+  "Vec3/Quat/Mat4 -> multi-slider with gizmo",
+  "String -> text edit",
+  "Handle<A> -> drag-drop thumbnail + open-in-browser button",
+  "nested Reflect -> collapsible group",
+  "modifications emit Command::EditComponent for undo/redo",
+  "test: modify a component value via inspector, undo, assert value restored"
+]
+
+[[items]]
+id = "R-084"
+title = "Content browser panel"
+phase = "phase_8"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-080", "R-031"]
+summary = "File tree of assets/, thumbnails, double-click to open."
+acceptance = [
+  "file tree of assets/",
+  "thumbnails via PreviewRenderJob (headless renderer captures 256x256)",
+  "double-click: select; on .hyge-world open scene; on .hyge-prefab instantiate; on .hyge-mesh preview",
+  "test: open the content browser, assert file tree populated"
+]
+
+[[items]]
+id = "R-085"
+title = "Asset graph panel"
+phase = "phase_8"
+owner = "editor"
+priority = "P1"
+status = "not_started"
+risk = "low"
+dependencies = ["R-084", "R-031"]
+summary = "Visualization of the BLAKE3 dependency graph."
+acceptance = [
+  "egui::Graph view of the BLAKE3 dependency DAG",
+  "pan/zoom, click to inspect",
+  "highlights cascade when an asset is selected",
+  "test: render the asset graph for a known scene, assert nodes match expected count"
+]
+
+[[items]]
+id = "R-086"
+title = "Console + Profiler panels"
+phase = "phase_8"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-080", "R-025"]
+summary = "Console (tracing ring buffer) + Profiler (frame stats sparkline)."
+acceptance = [
+  "Console: ring buffer of last 1000 log lines, filter by level/target, click to navigate",
+  "Profiler: live sparkline of frame time, GPU time, draw calls, instance count, memory (egui::plot::Plot)",
+  "test: emit a tracing event, assert it appears in console buffer"
+]
+
+[[items]]
+id = "R-087"
+title = "Selection and undo/redo"
+phase = "phase_8"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-080"]
+summary = "Selection resource, command stack, Ctrl+Z / Ctrl+Y bindings."
+acceptance = [
+  "Selection resource: Vec<Entity>, multi-select with shift",
+  "CommandHistory with undo/redo Vec<Box<dyn Command>>",
+  "Commands: EditComponent, Reparent, Instantiate, Destroy, Duplicate, AddComponent, RemoveComponent",
+  "Ctrl+Z pops undo, applies Command::revert, pushes to redo",
+  "Ctrl+Y opposite",
+  "test: 10 commands, undo 5, redo 3, assert state correct at each step"
+]
+
+[[items]]
+id = "R-088"
+title = "Editor camera gizmos + theme + docking persistence"
+phase = "phase_8"
+owner = "editor"
+priority = "P1"
+status = "not_started"
+risk = "low"
+dependencies = ["R-081"]
+summary = "Camera gizmos (translate/rotate/scale handles), dark theme, docking layout save/load."
+acceptance = [
+  "gizmos: translate (3-axis arrows), rotate (3 circles), scale (3 cubes)",
+  "dark theme default, light toggle",
+  "docking layout serialized to user_data/editor_layout.json",
+  "on editor start, layout restored; on close, layout saved",
+  "test: serialize + deserialize dock tree, assert equality"
+]
+
+[[items]]
+id = "R-089"
+title = "M6 smoke test: editor + hot-reload of scene"
+phase = "phase_8"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-088"]
+summary = "M6 Definition of Done: editor renders scene, hierarchy/inspector edit live, scene hot-reload preserves PersistOnReload."
+acceptance = [
+  "viewport rendering runtime scene with editor camera",
+  "hierarchy + inspector editing components live (via Reflect)",
+  "content browser shows assets/ with thumbnails",
+  "hot-reload of .hyge-world preserves PersistOnReload entities",
+  "undo/redo across all editor actions",
+  "profiler panel pulling frame stats from runtime",
+  "docking layout persists across sessions",
+  "AGENTS.md §5.2 M6 DoD checklist satisfied"
+]
+
+# =============================================================================
+# PHASE 9 — Polish Sandbox mdbook Performance Release
+# =============================================================================
+
+[[items]]
+id = "R-090"
+title = "hyge-runtime-test crate"
+phase = "phase_9"
+owner = "tooling"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-023"]
+summary = "Create hyge-runtime-test with headless wgpu harness, capture, compare, hash utilities."
+acceptance = [
+  "crates/hyge-runtime-test/Cargo.toml declares deps on wgpu, image, hyge-render, hyge-core",
+  "TestRenderer struct (no surface)",
+  "ReferenceImage { width, height, bytes }",
+  "create_test_renderer(), capture_frame(), assert_image_matches(actual, expected_path, tolerance), hash_image()",
+  "test: capture a frame from a known scene, assert hash stable"
+]
+
+[[items]]
+id = "R-091"
+title = "Headless screenshot tool (hyge-tools headless)"
+phase = "phase_9"
+owner = "tools"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-090", "R-063"]
+summary = "CLI subcommand that boots App, loads a scene, captures a frame to PNG."
+acceptance = [
+  "hyge-tools headless --scene <path> --width W --height H --out <path>",
+  "boots App with hidden (offscreen) wgpu surface",
+  "loads .hyge-world, runs N frames, captures the Nth to PNG",
+  "test: render a known scene, assert the output PNG is byte-stable"
+]
+
+[[items]]
+id = "R-092"
+title = "Snapshot tests for renderer output"
+phase = "phase_9"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-090", "R-058"]
+summary = "Reference scenes with golden PNGs, snapshot diff in CI."
+acceptance = [
+  "assets/tests/reference/ contains golden scenes (DamagedHelmet, SciFiHelmet, CubeField)",
+  "tests/snapshots/ contains golden PNGs",
+  "CI runs assert_image_matches on every PR",
+  "tolerance configurable per test, default SSIM 0.99",
+  "test: verify all goldens still match (post-cleanup test)"
+]
+
+[[items]]
+id = "R-093"
+title = "examples/hyge-sandbox full demo"
+phase = "phase_9"
+owner = "examples"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-088"]
+summary = "Full demo: PBR scene with IBL, shadows, post, animation, physics, Lua AI, audio, editor-driven."
+acceptance = [
+  "examples/hyge-sandbox/ is a binary crate",
+  "loads a .hyge-world with a complex scene",
+  "demonstrates every system from phases 1-8",
+  "runs without warnings on cargo build --release",
+  "smoke test: cargo run --example hyge-sandbox -p hyge-sandbox --release boots and renders"
+]
+
+[[items]]
+id = "R-094"
+title = "mdbook documentation site"
+phase = "phase_9"
+owner = "docs"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = []
+summary = "mdbook site with 4 tutorials published to GitHub Pages."
+acceptance = [
+  "docs/mdbook/ contains book.toml and src/ with SUMMARY.md",
+  "Tutorial 1: Setup (install Rust, build, run hyge-sandbox)",
+  "Tutorial 2: First scene (load glTF, place in .hyge-world)",
+  "Tutorial 3: Scripting (Lua binding to ECS, hot-reload)",
+  "Tutorial 4: Editor (open scene, edit component, hot-reload)",
+  "GitHub Actions deploys to gh-pages on tag v0.1.0",
+  "test: mdbook build succeeds with no broken links"
+]
+
+[[items]]
+id = "R-095"
+title = "Performance baseline + criterion benchmarks"
+phase = "phase_9"
+owner = "tooling"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-090", "R-058"]
+summary = "Capture performance baseline and integrate criterion benchmarks."
+acceptance = [
+  "docs/perf/baseline.json captures frame time, GPU time, draw calls for hyge-sandbox on RTX 3060",
+  "cargo bench --workspace runs criterion for meshlet bake, BLAKE3 hashing, light grid build, GPU pass timing",
+  "CI alerts on >10% regression in any benchmark",
+  "test: criterion runs to completion, baseline.json validates against the schema"
+]
+
+[[items]]
+id = "R-096"
+title = "v0.1.0 release tag and GitHub release"
+phase = "phase_9"
+owner = "release"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-095"]
+summary = "Tagged release on GitHub with auto-generated notes."
+acceptance = [
+  "CHANGELOG.md generated by git-cliff",
+  "git tag v0.1.0 created and pushed",
+  "GitHub release published with auto-generated notes",
+  "binary artifacts (hyge-tools, hyge-sandbox) attached to release",
+  "all acceptance bullets in this phase's DoD met"
+]
+
+[[items]]
+id = "R-097"
+title = "M7 final DoD: 144 FPS at 1080p on RTX 3060"
+phase = "phase_9"
+owner = "release"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-096"]
+summary = "M7 Definition of Done: final performance + quality gate before v0.1.0."
+acceptance = [
+  "performance: 144 FPS at 1080p on RTX 3060 with hyge-sandbox scene (10k static instances + 64 dynamic lights)",
+  "cargo +stable build, no nightly",
+  "no unsafe outside hyge-render/hyge-render-graph, each with // SAFETY: comment",
+  "AGENTS.md §5.3 v0.1.0 DoD checklist 100% satisfied"
+]
