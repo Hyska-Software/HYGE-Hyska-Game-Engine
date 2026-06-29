@@ -343,7 +343,17 @@ pub fn write(path: &Path, mesh: &MeshData) -> HygeResult<()> {
 /// orchestrator when it needs both the bytes (for content-
 /// addressing) and the on-disk file (for the cache).
 pub fn to_bytes(mesh: &MeshData) -> HygeResult<Vec<u8>> {
-    let mut buf: Vec<u8> = Vec::new();
+    // Pre-size the buffer to the exact on-disk length so the
+    // inner writer never reallocates. Layout (see module docs):
+    //   header(24) + vertices*32 + indices*4
+    //   + meshlets*(8 + 256 + 24 + 44)
+    //   + lods*8
+    let capacity = 24
+        + mesh.vertices.len() * 32
+        + mesh.indices.len() * 4
+        + mesh.meshlets.len() * (8 + 256 + 24 + 44)
+        + mesh.lods.len() * 8;
+    let mut buf: Vec<u8> = Vec::with_capacity(capacity);
     write_into(&mut buf, mesh)?;
     Ok(buf)
 }
@@ -387,10 +397,12 @@ fn write_into<W: Write>(w: &mut W, mesh: &MeshData) -> HygeResult<()> {
             .map_err(io_error("write meshlet count"))?;
     }
     for m in &mesh.meshlets {
-        for &vi in &m.vertex_indices {
-            w.write_all(vi.to_le_bytes().as_slice())
-                .map_err(io_error("write meshlet vertex index"))?;
-        }
+        // The 64-entry local vertex table is a fixed-stride
+        // `[u32; 64]`; cast the whole slice and emit in one
+        // write_all (saves 63 syscalls per meshlet on the
+        // 10k-meshlet M4 scenes).
+        w.write_all(bytemuck::cast_slice(&m.vertex_indices))
+            .map_err(io_error("write meshlet vertex indices"))?;
     }
     for m in &mesh.meshlets {
         let mins = m.aabb_min;

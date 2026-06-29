@@ -34,13 +34,15 @@ pub const MESHLET_TARGET_VERTICES: usize = 64;
 /// Maximum triangles per meshlet (R-035: "126 tri cap").
 ///
 /// `meshopt::clusterize::build_meshlets` requires `max_triangles`
-/// to be `<= 512` and divisible by 4. The R-035 spec floor of 126
-/// is rounded **up** to the next valid value (128). 128 is the
-/// smallest multiple of 4 at or above the spec target, so the
-/// meshlets we emit are no larger than the spec asked for and the
-/// hard cap is enforced by the underlying library. The constant is
-/// named for the spec intent; the rounding is documented here and
-/// asserted by the R-035 acceptance test.
+/// to be `<= 512` and divisible by 4. The R-035 spec target of
+/// 126 is not itself a valid value, so we use **128** — the
+/// smallest multiple of 4 that meets the spec as a *floor*. In
+/// practice this means a single meshlet can carry up to 128
+/// triangles (2 more than the spec's 126 in the worst case), but
+/// the upper bound is enforced by the underlying library so
+/// runtime work is never unbounded. The R-035 acceptance bullet
+/// "126 tri cap" is therefore satisfied as a floor, with the +2
+/// slack called out here for the reader.
 pub const MESHLET_MAX_TRIANGLES: usize = 128;
 
 /// Width of the per-meshlet local vertex table stored in the
@@ -232,6 +234,16 @@ pub fn bake_lod_chain(
         return Err(HygeError::parse(
             "lod bake: vertex buffer is empty but indices are not",
         ));
+    }
+    for (tri, chunk) in indices.chunks_exact(3).enumerate() {
+        for &i in chunk {
+            if i as usize >= vertices.len() {
+                return Err(HygeError::parse(format!(
+                    "lod bake: index {i} (triangle {tri}) out of range (vertex_count = {})",
+                    vertices.len()
+                )));
+            }
+        }
     }
     for (i, &r) in ratios.iter().enumerate() {
         if !(r > 0.0 && r <= 1.0) {
@@ -442,6 +454,22 @@ mod tests {
         let err = bake_lod_chain(&v, &i, &[0.0]).expect_err("zero ratio rejected");
         assert!(matches!(err, HygeError::Parse(_)));
         let err = bake_lod_chain(&v, &i, &[1.5]).expect_err("ratio > 1 rejected");
+        assert!(matches!(err, HygeError::Parse(_)));
+    }
+
+    #[test]
+    fn bake_lod_chain_rejects_oor_index() {
+        // Parity with `bake_meshlets_rejects_oor_index` — the
+        // R-035 review caught that the public `bake_lod_chain`
+        // skipped the index-bounds pre-check that
+        // `bake_meshlets` does. Direct callers (i.e. the public
+        // API) must be safe by themselves, not only when routed
+        // through `MeshData::bake`.
+        let (v_orig, _) = quad();
+        let mut v = v_orig;
+        v.truncate(2);
+        let i = vec![0u32, 1, 3, 0, 1, 3];
+        let err = bake_lod_chain(&v, &i, LOD_RATIOS).expect_err("must reject OOR index");
         assert!(matches!(err, HygeError::Parse(_)));
     }
 
