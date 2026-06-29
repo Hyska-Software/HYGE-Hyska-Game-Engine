@@ -5,15 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Render graph: DAG of passes with automatic barrier inference and transient resource allocation."
+description = "Render graph: DAG of passes with automatic barrier inference and transient resource allocation. Implementation deferred to M2 (see roadmap R-020..R-022)."
+
+[lints.rust]
+unsafe_code = "allow"
 
 [dependencies]
-wgpu = { workspace = true }
-petgraph = { workspace = true }
-indexmap = { workspace = true }
-bytemuck = { workspace = true }
 hyge-core = { workspace = true }
-
-[lints]
-workspace = true
-unsafe_code = "allow"

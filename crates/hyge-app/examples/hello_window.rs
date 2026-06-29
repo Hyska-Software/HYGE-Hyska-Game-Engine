@@ -7,7 +7,7 @@
 //! `winit` event loop. The window stays open until the user closes it.
 
 use hyge_app::prelude::*;
-use hyge_window::WindowConfig;
+use hyge_window::prelude::WindowConfig;
 
 fn main() {
     let config = AppConfig {

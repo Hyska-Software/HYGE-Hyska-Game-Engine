@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use bevy_ecs::prelude::Resource;
+use bevy_app::App;
 use hyge_ecs::prelude::*;
 use winit::window::Window as WinitWindow;
 
@@ -80,7 +80,8 @@ impl WindowState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_ecs::prelude::{App, Events};
+    use bevy_app::App;
+    use bevy_ecs::event::Events;
 
     #[test]
     fn plugin_registers_events_and_config() {
@@ -99,7 +100,9 @@ mod tests {
             "WindowResized events must be registered"
         );
         assert!(
-            world.get_resource::<Events<WindowCloseRequested>>().is_some(),
+            world
+                .get_resource::<Events<WindowCloseRequested>>()
+                .is_some(),
             "WindowCloseRequested events must be registered"
         );
         assert!(

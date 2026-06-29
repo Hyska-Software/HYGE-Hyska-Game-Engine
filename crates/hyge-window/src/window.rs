@@ -7,7 +7,7 @@ use winit::event_loop::ActiveEventLoop;
 use winit::window::Window as WinitWindow;
 
 use crate::config::WindowConfig;
-use crate::result::HygeError;
+use hyge_core::result::HygeError;
 
 /// The application window.
 ///

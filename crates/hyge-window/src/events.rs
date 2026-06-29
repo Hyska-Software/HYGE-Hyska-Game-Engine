@@ -4,7 +4,7 @@
 //! [`translate_window_event`]. `DeviceEvent`s are not translated here —
 //! that happens in `hyge-input` (R-074) once the input layer is in place.
 
-use bevy_ecs::prelude::Event;
+use bevy_ecs::event::Event;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent as WinitWindowEvent;
 
@@ -109,12 +109,12 @@ pub enum HygeWindowEvent {
 /// by `hyge-input` and are not produced by this function.
 pub fn translate_window_event(event: &WinitWindowEvent) -> Option<HygeWindowEvent> {
     match event {
-        WinitWindowEvent::Resized(PhysicalSize { width, height }) => Some(HygeWindowEvent::Resized(
-            WindowResized {
+        WinitWindowEvent::Resized(PhysicalSize { width, height }) => {
+            Some(HygeWindowEvent::Resized(WindowResized {
                 width: *width,
                 height: *height,
-            },
-        )),
+            }))
+        }
         WinitWindowEvent::CloseRequested => {
             Some(HygeWindowEvent::CloseRequested(WindowCloseRequested))
         }
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn ignores_cursor_moved() {
         let event = WindowEvent::CursorMoved {
-            device_id: unsafe { std::mem::zeroed() },
+            device_id: winit::event::DeviceId::dummy(),
             position: PhysicalPosition::new(0.0, 0.0),
         };
         assert!(translate_window_event(&event).is_none());

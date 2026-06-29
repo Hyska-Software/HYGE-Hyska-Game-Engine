@@ -13,7 +13,7 @@
 
 use hyge_app::prelude::*;
 use hyge_ecs::schedule::Label;
-use hyge_window::{WindowConfig, WindowState};
+use hyge_window::prelude::{WindowConfig, WindowState};
 
 /// `App::new(AppConfig::default())` must succeed without panicking, install
 /// the default plugins, and register the 7 canonical schedules.
@@ -92,7 +92,7 @@ fn m0_app_accepts_custom_window_title() {
 /// used to abstract over the engine entry point.
 #[test]
 fn m0_app_satisfies_app_builder_trait() {
-    fn assert_app_builder<T: AppBuilder + ?Sized>(_: T) {}
+    fn assert_app_builder<T: AppBuilder>(_: T) {}
     assert_app_builder(App::new(AppConfig::default()));
 }
 

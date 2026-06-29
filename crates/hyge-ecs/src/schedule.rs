@@ -88,6 +88,9 @@ mod tests {
     #[test]
     fn label_debug_is_informative() {
         let s = format!("{:?}", Label::RenderExtract);
-        assert!(s.contains("RenderExtract"), "debug should contain the variant name: {s}");
+        assert!(
+            s.contains("RenderExtract"),
+            "debug should contain the variant name: {s}"
+        );
     }
 }

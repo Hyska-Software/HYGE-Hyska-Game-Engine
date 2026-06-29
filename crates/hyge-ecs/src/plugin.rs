@@ -1,6 +1,6 @@
 //! The [`HygePlugin`] trait and the [`App`] extension that installs plugins.
 
-use bevy_ecs::prelude::App;
+use bevy_app::App;
 
 /// A Hyge plugin: a unit of engine subsystem registration.
 ///
@@ -12,14 +12,14 @@ use bevy_ecs::prelude::App;
 ///
 /// ```no_run
 /// use hyge_ecs::prelude::*;
-/// use bevy_ecs::prelude::*;
+/// use bevy_app::App;
 ///
 /// struct PhysicsPlugin;
 ///
 /// impl HygePlugin for PhysicsPlugin {
 ///     fn name(&self) -> &'static str { "hyge-physics" }
 ///     fn build(&self, app: &mut App) {
-///         app.add_systems(Update, step_physics);
+///         app.add_systems(Label::Update, step_physics);
 ///     }
 /// }
 ///
@@ -95,7 +95,7 @@ mod tests {
         fn build(&self, app: &mut App) {
             // A must have run before B.
             assert!(
-                app.get_resource::<PluginRanA>().is_some(),
+                app.world().get_resource::<PluginRanA>().is_some(),
                 "TestPluginA must be registered before TestPluginB"
             );
             app.insert_resource(PluginRanB);
@@ -107,8 +107,8 @@ mod tests {
         let mut app = App::new();
         app.add_hyge_plugin(TestPluginA);
         app.add_hyge_plugin(TestPluginB);
-        assert!(app.get_resource::<PluginRanA>().is_some());
-        assert!(app.get_resource::<PluginRanB>().is_some());
+        assert!(app.world().get_resource::<PluginRanA>().is_some());
+        assert!(app.world().get_resource::<PluginRanB>().is_some());
     }
 
     #[test]
@@ -130,7 +130,7 @@ mod tests {
         let mut app = App::new();
         app.add_hyge_plugin(TestPluginA)
             .add_hyge_plugin(TestPluginB);
-        assert!(app.get_resource::<PluginRanA>().is_some());
-        assert!(app.get_resource::<PluginRanB>().is_some());
+        assert!(app.world().get_resource::<PluginRanA>().is_some());
+        assert!(app.world().get_resource::<PluginRanB>().is_some());
     }
 }

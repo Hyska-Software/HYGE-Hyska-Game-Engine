@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "crates/*",
-    "examples/*",
 ]
 
 [workspace.package]
@@ -96,6 +95,7 @@ bitflags = "2.6"
 
 # ECS (bevy)
 bevy_ecs = "0.14"
+bevy_app = "0.14"
 bevy_tasks = "0.14"
 bevy_utils = "0.14"
 bevy_reflect = "0.14"
@@ -127,10 +127,8 @@ meshopt = { version = "0.3", features = ["decode", "encode", "simplifier", "clus
 # Physics
 rapier3d = "0.18"
 
-# Audio
-kira = "0.9"
-kira-spatial-audio = "0.9"
-oddio = "0.7"
+# Audio (deferred to M7 — see roadmap R-160+; declared as workspace dep
+# when hyge-audio is wired up to actually use these crates).
 
 # Windowing + input
 winit = "0.30"

@@ -6,10 +6,13 @@
 /// care about. `WindowConfig` is `Clone` so the [`crate::plugin::WindowPlugin`]
 /// can keep a copy of the config after the user passes it in.
 ///
+/// Implements [`hyge_ecs::Resource`] so it can be stored in the
+/// [`bevy_app::App`]'s `World` and read back by systems.
+///
 /// # Example
 ///
 /// ```
-/// use hyge_window::WindowConfig;
+/// use hyge_window::prelude::WindowConfig;
 ///
 /// let config = WindowConfig {
 ///     title: "My Game".to_string(),
@@ -18,7 +21,7 @@
 ///     ..WindowConfig::default()
 /// };
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, hyge_ecs::Resource)]
 pub struct WindowConfig {
     /// Window title (shown in the title bar and task bar).
     pub title: String,

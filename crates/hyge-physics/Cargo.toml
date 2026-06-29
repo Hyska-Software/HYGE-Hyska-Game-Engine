@@ -5,16 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "rapier3d wrapper behind a feature flag: rigid bodies, colliders, joints, character controller, spatial queries, fixed-timestep events."
+description = "rapier3d wrapper behind a feature flag. Implementation deferred to M7 (see roadmap R-070..R-071)."
 
 [features]
-default = ["physics-rapier"]
-physics-rapier = ["dep:rapier3d"]
+default = []
+physics-rapier = []
 
 [dependencies]
-rapier3d = { workspace = true, optional = true }
-bevy_ecs = { workspace = true }
-bevy_reflect = { workspace = true }
-tracing = { workspace = true }
-thiserror = { workspace = true }
 hyge-core = { workspace = true }

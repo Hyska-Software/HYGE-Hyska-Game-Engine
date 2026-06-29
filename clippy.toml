@@ -8,13 +8,3 @@
 # (e.g. `manual_strip`, `redundant_closure_for_method_calls`, etc.). Keep this
 # in sync with `rust-version` in [workspace.package].
 msrv = "1.80"
-
-# Allow these pedantic lints at the project level (in addition to the
-# matching `[workspace.lints.clippy]` allow entries in Cargo.toml). Listed
-# here so `cargo clippy -- -A ...` overrides from the CLI do not surprise
-# contributors; the project-level allow is the source of truth.
-allow = [
-    "module_name_repetitions",
-    "must_use_candidate",
-    "missing_errors_doc",
-]

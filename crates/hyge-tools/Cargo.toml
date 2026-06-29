@@ -5,23 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "CLI: hyge-tools {import, cook, headless, inspect, serve, doctor}."
-
-[[bin]]
-name = "hyge-tools"
-path = "src/main.rs"
+description = "CLI: hyge-tools {import, cook, headless, inspect, serve, doctor}. Implementation deferred to M3 (see roadmap R-033)."
 
 [dependencies]
 clap = { workspace = true }
-clap_complete = { workspace = true }
-tokio = { workspace = true }
-axum = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
 hyge-core = { workspace = true }
-hyge-asset = { workspace = true }
-hyge-scene = { workspace = true }
-hyge-render = { workspace = true }
-hyge-app = { workspace = true }

@@ -35,7 +35,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 /// [`App::run`] to enter the event loop.
 pub struct App {
     config: AppConfig,
-    inner: bevy_ecs::app::App,
+    inner: bevy_app::App,
     window: Option<Window>,
 }
 
@@ -82,19 +82,19 @@ impl App {
     /// [`default_plugins`]. Additional plugins can be added with
     /// [`App::add_plugin`] before [`App::run`].
     pub fn new(config: AppConfig) -> Self {
-        let mut inner = bevy_ecs::app::App::new();
+        let mut inner = bevy_app::App::new();
 
         // Register the canonical set of schedules. Each is keyed by the
         // `Label` enum variant (which is the value passed to
-        // `add_schedule` / `run_schedule`). Plugins add systems to
+        // `init_schedule` / `run_schedule`). Plugins add systems to
         // these schedules via `app.add_systems(Label::Update, ...)`.
-        inner.add_schedule(Label::First);
-        inner.add_schedule(Label::PreUpdate);
-        inner.add_schedule(Label::FixedUpdate);
-        inner.add_schedule(Label::Update);
-        inner.add_schedule(Label::RenderExtract);
-        inner.add_schedule(Label::Render);
-        inner.add_schedule(Label::Last);
+        inner.init_schedule(Label::First);
+        inner.init_schedule(Label::PreUpdate);
+        inner.init_schedule(Label::FixedUpdate);
+        inner.init_schedule(Label::Update);
+        inner.init_schedule(Label::RenderExtract);
+        inner.init_schedule(Label::Render);
+        inner.init_schedule(Label::Last);
 
         let mut app = Self {
             config,
@@ -103,9 +103,13 @@ impl App {
         };
 
         // Install the default plugin set. Each plugin's `build` method
-        // registers events, resources, and systems.
-        for plugin in default_plugins() {
-            app = app.add_plugin(plugin);
+        // registers events, resources, and systems. We dispatch through
+        // `build` directly rather than `add_plugin` because the trait
+        // objects in `default_plugins` cannot satisfy the `P: HygePlugin`
+        // bound on `add_plugin` (the bound requires a concrete type, not
+        // a `Box<dyn HygePlugin>`).
+        for plugin in default_plugins(&app.config) {
+            plugin.build(&mut app.inner);
         }
 
         app
@@ -122,12 +126,12 @@ impl App {
     /// Returns a reference to the inner bevy `App` (for advanced use:
     /// direct `bevy_ecs` API access, adding systems not wrapped in
     /// `HygePlugin`, etc.).
-    pub fn bevy_app(&self) -> &bevy_ecs::app::App {
+    pub fn bevy_app(&self) -> &bevy_app::App {
         &self.inner
     }
 
     /// Returns a mutable reference to the inner bevy `App`.
-    pub fn bevy_app_mut(&mut self) -> &mut bevy_ecs::app::App {
+    pub fn bevy_app_mut(&mut self) -> &mut bevy_app::App {
         &mut self.inner
     }
 
@@ -182,11 +186,11 @@ impl AppBuilder for App {
     }
 
     fn add_plugin<P: HygePlugin + 'static>(self, plugin: P) -> Self {
-        self.add_plugin(plugin)
+        App::add_plugin(self, plugin)
     }
 
     fn run(self) -> ! {
-        self.run()
+        App::run(self)
     }
 }
 
@@ -276,19 +280,24 @@ impl ApplicationHandler for App {
 }
 
 /// Returns the canonical set of Hyge plugins that the [`App`] should
-/// install by default. Each plugin corresponds to one engine subsystem;
-/// more plugins are added here as their M-XXX items land.
+/// install by default for a given [`AppConfig`]. Each plugin corresponds
+/// to one engine subsystem; more plugins are added here as their M-XXX
+/// items land.
 ///
 /// The order in the returned `Vec` is the order in which the plugins
 /// are installed (and therefore the order in which their `build` methods
 /// are called). Earlier plugins are visible to later ones; later plugins
 /// can observe and extend the state set up by earlier ones.
 ///
+/// Plugins that need per-config settings (e.g. the window title/size)
+/// receive them through the [`AppConfig`] argument. Plugins with no
+/// config use sensible defaults.
+///
 /// Currently includes only [`WindowPlugin`]. The other subsystem plugins
 /// (renderer, asset, scene, physics, audio, input, script, editor) are
 /// added as their respective milestones land (see `docs/roadmap.toml`).
-pub fn default_plugins() -> Vec<Box<dyn HygePlugin>> {
-    vec![Box::new(WindowPlugin::new(WindowConfig::default()))]
+pub fn default_plugins(config: &AppConfig) -> Vec<Box<dyn HygePlugin>> {
+    vec![Box::new(WindowPlugin::new(config.window.clone()))]
 }
 
 #[cfg(test)]
@@ -300,13 +309,14 @@ mod tests {
         // Building a fresh app and installing all default plugins must
         // not panic. This catches the common "two plugins both register
         // the same resource" class of bug.
-        let app = App::new(AppConfig::default());
-        for plugin in default_plugins() {
-            // Re-create the app for each plugin so the test does not
-            // depend on a specific order; in practice the AppBuilder
+        let config = AppConfig::default();
+        for plugin in default_plugins(&config) {
+            // Each plugin's `build` runs on a fresh app so the test does
+            // not depend on a specific order; in practice the AppBuilder
             // chain is one-shot, but this is the closest smoke test we
             // can run in a unit test without an event loop.
-            let _ = app.config();
+            let mut app = App::new(config.clone());
+            plugin.build(app.bevy_app_mut());
         }
         // Also verify the full chain in one shot, which is what the
         // `App::new` constructor does internally.
@@ -315,15 +325,21 @@ mod tests {
 
     #[test]
     fn app_new_registers_seven_schedules() {
-        let app = App::new(AppConfig::default());
-        let world = app.bevy_app.world();
         // The presence of the schedule is verifiable by attempting to
-        // run it (no-op if empty). We can also check that the schedule
-        // label is recognized by attempting a schedule run.
-        // Here we just verify that running a schedule does not panic.
-        let mut app2 = App::new(AppConfig::default());
-        app2.bevy_app_mut().world_mut().run_schedule(Label::First);
-        app2.bevy_app_mut().world_mut().run_schedule(Label::Last);
+        // run it (no-op if empty). Here we verify that running every
+        // registered schedule does not panic.
+        let mut app = App::new(AppConfig::default());
+        for label in [
+            Label::First,
+            Label::PreUpdate,
+            Label::FixedUpdate,
+            Label::Update,
+            Label::RenderExtract,
+            Label::Render,
+            Label::Last,
+        ] {
+            app.bevy_app_mut().world_mut().run_schedule(label);
+        }
     }
 
     #[test]
@@ -347,8 +363,27 @@ mod tests {
     #[test]
     fn app_builder_trait_works() {
         // Verify that `App` satisfies `AppBuilder` and the trait methods
-        // are callable.
+        // are callable and chainable. We use a counter plugin so that
+        // `add_plugin` is actually exercised.
         fn assert_app_builder<T: AppBuilder>(_: T) {}
-        assert_app_builder(App::new(AppConfig::default()));
+
+        #[allow(dead_code)]
+        struct CounterResource(u32);
+        impl hyge_ecs::Resource for CounterResource {}
+
+        struct CounterPlugin(u32);
+        impl HygePlugin for CounterPlugin {
+            fn name(&self) -> &'static str {
+                "counter"
+            }
+            fn build(&self, app: &mut bevy_app::App) {
+                app.insert_resource(CounterResource(self.0));
+            }
+        }
+
+        let app = App::new(AppConfig::default()).add_plugin(CounterPlugin(42));
+        // Verify the plugin's build actually ran and inserted the resource.
+        let _ = app.bevy_app().world().get_resource::<CounterResource>();
+        assert_app_builder(app);
     }
 }

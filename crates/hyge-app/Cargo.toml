@@ -9,10 +9,9 @@ description = "App builder, AppConfig, default_plugins. The only crate that wire
 
 [dependencies]
 bevy_ecs = { workspace = true }
-bevy_tasks = { workspace = true }
+bevy_app = { workspace = true }
 winit = { workspace = true }
 tracing = { workspace = true }
-thiserror = { workspace = true }
 hyge-core = { workspace = true }
 hyge-ecs = { workspace = true }
 hyge-window = { workspace = true }

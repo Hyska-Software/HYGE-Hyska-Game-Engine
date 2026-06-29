@@ -130,9 +130,12 @@ mod tests {
     fn sets_from_different_enums_never_compare_equal() {
         // This is a compile-time property (different types), but we
         // document it here: TransformSet::Sync and PhysicsSet::Sync are
-        // different types and cannot be compared with ==.
-        assert_ne!(TransformSet::Sync, TransformSet::Sync); // same, should be eq
-        // The following would not compile (different types):
-        // assert_ne!(TransformSet::Sync, PhysicsSet::Sync);
+        // different types and cannot be compared with ==. The following
+        // would not compile (different types):
+        //     assert_ne!(TransformSet::Sync, PhysicsSet::Sync);
+        // What we *can* assert is that identical values of the same set
+        // compare equal (the smoke test that derives are correct).
+        assert_eq!(TransformSet::Sync, TransformSet::Sync);
+        assert_eq!(PhysicsSet::Sync, PhysicsSet::Sync);
     }
 }

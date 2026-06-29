@@ -5,11 +5,9 @@
 //! geometry types: [`Aabb`], [`Frustum`], [`Plane`], and [`Ray`].
 
 pub use glam::{
-    Mat2, Mat3, Mat3A, Mat4, Quat, Vec2, Vec3, Vec3A, Vec4, Vec4A, IVec2, IVec3, IVec4,
-    UVec2, UVec3, UVec4,
+    IVec2, IVec3, IVec4, Mat2, Mat3, Mat3A, Mat4, Quat, UVec2, UVec3, UVec4, Vec2, Vec3, Vec3A,
+    Vec4,
 };
-
-use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
 
 /// Axis-aligned bounding box.
 ///
@@ -167,13 +165,15 @@ impl Frustum {
     /// of `[-1, 1]` on all three axes; for Vulkan's `[0, 1]` depth, the
     /// caller must remap `z` before constructing the matrix.
     pub fn from_view_proj(view_proj: Mat4) -> Self {
-        let left   = Plane::from_vec4(view_proj.row(3) + view_proj.row(0));
-        let right  = Plane::from_vec4(view_proj.row(3) - view_proj.row(0));
+        let left = Plane::from_vec4(view_proj.row(3) + view_proj.row(0));
+        let right = Plane::from_vec4(view_proj.row(3) - view_proj.row(0));
         let bottom = Plane::from_vec4(view_proj.row(3) + view_proj.row(1));
-        let top    = Plane::from_vec4(view_proj.row(3) - view_proj.row(1));
-        let near   = Plane::from_vec4(view_proj.row(3) + view_proj.row(2));
-        let far    = Plane::from_vec4(view_proj.row(3) - view_proj.row(2));
-        Frustum { planes: [left, right, bottom, top, near, far] }
+        let top = Plane::from_vec4(view_proj.row(3) - view_proj.row(1));
+        let near = Plane::from_vec4(view_proj.row(3) + view_proj.row(2));
+        let far = Plane::from_vec4(view_proj.row(3) - view_proj.row(2));
+        Frustum {
+            planes: [left, right, bottom, top, near, far],
+        }
     }
 
     /// Returns true if the frustum contains the given point.
@@ -209,7 +209,10 @@ pub struct Ray {
 impl Ray {
     /// Constructs a ray and normalizes `direction` to unit length.
     pub fn new(origin: Vec3, direction: Vec3) -> Self {
-        Self { origin, direction: direction.normalize() }
+        Self {
+            origin,
+            direction: direction.normalize(),
+        }
     }
 
     /// Returns the point at parameter `t` along the ray.
@@ -308,7 +311,10 @@ mod tests {
         assert!(outer.intersects_aabb(&inner));
         assert!(inner.intersects_aabb(&outer));
         assert!(!outer.intersects_aabb(&disjoint));
-        assert!(outer.intersects_aabb(&touching), "touching boxes count as intersecting");
+        assert!(
+            outer.intersects_aabb(&touching),
+            "touching boxes count as intersecting"
+        );
         assert!(outer.contains_point(Vec3::splat(5.0)));
         assert!(!outer.contains_point(Vec3::splat(11.0)));
     }
@@ -348,13 +354,19 @@ mod tests {
     fn ray_misses_aabb_behind() {
         let r = Ray::new(Vec3::new(5.0, 0.0, 0.0), Vec3::X);
         let a = Aabb::new(Vec3::splat(-1.0), Vec3::splat(1.0));
-        assert!(r.intersects_aabb(&a).is_none(), "ray pointing away should miss");
+        assert!(
+            r.intersects_aabb(&a).is_none(),
+            "ray pointing away should miss"
+        );
     }
 
     #[test]
     fn ray_misses_aabb_laterally() {
         let r = Ray::new(Vec3::new(0.0, 5.0, 0.0), Vec3::X);
         let a = Aabb::new(Vec3::splat(-1.0), Vec3::splat(1.0));
-        assert!(r.intersects_aabb(&a).is_none(), "ray passing alongside should miss");
+        assert!(
+            r.intersects_aabb(&a).is_none(),
+            "ray passing alongside should miss"
+        );
     }
 }

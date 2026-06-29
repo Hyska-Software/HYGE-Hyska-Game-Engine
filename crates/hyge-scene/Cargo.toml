@@ -5,18 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "glTF import, .hyge-world / .hyge-prefab formats, hierarchical prefab system, instancing extraction, component catalog."
+description = "glTF import, .hyge-world / .hyge-prefab formats, hierarchical prefab system, instancing extraction, component catalog. Implementation deferred to M6 (see roadmap R-060..R-064)."
 
 [dependencies]
-gltf = { workspace = true }
-meshopt = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-rmp-serde = { workspace = true }
-ron = { workspace = true }
-bevy_ecs = { workspace = true }
-bevy_reflect = { workspace = true }
-tracing = { workspace = true }
-thiserror = { workspace = true }
 hyge-core = { workspace = true }
-hyge-asset = { workspace = true }

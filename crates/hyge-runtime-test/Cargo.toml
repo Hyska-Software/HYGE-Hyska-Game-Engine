@@ -5,12 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Headless wgpu test harness: TestRenderer, capture_frame, assert_image_matches, hash_image. No surface; CI-friendly."
+description = "Headless wgpu test harness: TestRenderer, capture_frame, assert_image_matches, hash_image. Implementation deferred to M2 (see roadmap R-090, R-092)."
 
 [dependencies]
-wgpu = { workspace = true }
-image = { workspace = true }
-tracing = { workspace = true }
-thiserror = { workspace = true }
 hyge-core = { workspace = true }
-hyge-render = { workspace = true }

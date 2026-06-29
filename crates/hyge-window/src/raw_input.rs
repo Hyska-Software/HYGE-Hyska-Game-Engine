@@ -15,7 +15,7 @@
 
 use raw_window_handle::HasWindowHandle;
 
-use crate::result::HygeError;
+use hyge_core::result::HygeError;
 
 /// Registers raw input devices (mouse, keyboard) for the given window.
 ///
@@ -38,14 +38,13 @@ pub fn register_raw_input_devices(window: &impl HasWindowHandle) -> Result<(), H
 }
 
 #[cfg(windows)]
+#[allow(unsafe_code)]
 mod windows_impl {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::Foundation::HWND;
-    use windows_sys::Win32::UI::Input::{
-        RegisterRawInputDevices, RIDEV_INPUTSINK, RAWINPUTDEVICE,
-    };
+    use windows_sys::Win32::UI::Input::{RegisterRawInputDevices, RAWINPUTDEVICE, RIDEV_INPUTSINK};
 
-    use crate::result::HygeError;
+    use hyge_core::result::HygeError;
 
     /// HID usage page: "Generic Desktop" (mouse, keyboard, game controllers).
     const USAGE_PAGE_GENERIC_DESKTOP: u16 = 0x01;
@@ -56,12 +55,9 @@ mod windows_impl {
 
     /// Calls `RegisterRawInputDevices` to enable raw input for the given
     /// window.
-    pub fn register(window: &impl HasWindowHandle) -> Result<(), HygeError> {
+    pub fn register(window: &(impl HasWindowHandle + ?Sized)) -> Result<(), HygeError> {
         let hwnd = hwnd_from(window)?;
-        let devices = [
-            device(hwnd, USAGE_MOUSE),
-            device(hwnd, USAGE_KEYBOARD),
-        ];
+        let devices = [device(hwnd, USAGE_MOUSE), device(hwnd, USAGE_KEYBOARD)];
         // SAFETY: `RegisterRawInputDevices` is a Win32 API; we pass a valid
         // pointer to a stack-allocated array of two `RAWINPUTDEVICE`s and
         // the correct count/size. The HWND is derived from a live
@@ -90,7 +86,7 @@ mod windows_impl {
         }
     }
 
-    fn hwnd_from(window: &impl HasWindowHandle) -> Result<HWND, HygeError> {
+    fn hwnd_from(window: &(impl HasWindowHandle + ?Sized)) -> Result<HWND, HygeError> {
         let handle = window
             .window_handle()
             .map_err(|e| HygeError::Unsupported(format!("window_handle: {e}")))?;

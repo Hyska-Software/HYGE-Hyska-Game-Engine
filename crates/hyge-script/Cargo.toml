@@ -5,13 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Lua via mlua, sandbox (os/io/debug stripped), bevy_reflect-driven bindings, hot-reload, on_reload hook."
+description = "Lua via mlua, sandbox, bevy_reflect-driven bindings, hot-reload. Implementation deferred to M7 (see roadmap R-076..R-077)."
 
 [dependencies]
-mlua = { workspace = true }
-bevy_ecs = { workspace = true }
-bevy_reflect = { workspace = true }
-tracing = { workspace = true }
-thiserror = { workspace = true }
-notify = { workspace = true }
 hyge-core = { workspace = true }

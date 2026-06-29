@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use hyge_core::Vec3;
-use hyge_window::WindowConfig;
+use hyge_core::prelude::Vec3;
+use hyge_window::prelude::WindowConfig;
 
 /// The top-level configuration passed to [`crate::App::new`].
 ///
@@ -71,15 +71,18 @@ pub struct RendererConfig {
 
 impl Default for RendererConfig {
     fn default() -> Self {
-        Self { backend: RendererBackend::Auto }
+        Self {
+            backend: RendererBackend::Auto,
+        }
     }
 }
 
 /// `wgpu` backend selection.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum RendererBackend {
     /// Let `wgpu` pick the best available backend (DX12 on Windows,
     /// Metal on macOS, Vulkan on Linux).
+    #[default]
     Auto,
     /// Force Vulkan.
     Vulkan,
@@ -89,24 +92,12 @@ pub enum RendererBackend {
     Metal,
 }
 
-impl Default for RendererBackend {
-    fn default() -> Self {
-        RendererBackend::Auto
-    }
-}
-
 /// Asset DB and cache configuration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct AssetsConfig {
     /// Directory where the asset DB and cooked cache live. `None` means
     /// use the default (`./assets/cache/` relative to the executable).
     pub cache_dir: Option<PathBuf>,
-}
-
-impl Default for AssetsConfig {
-    fn default() -> Self {
-        Self { cache_dir: None }
-    }
 }
 
 /// Physics simulation configuration. The actual integration is a
@@ -144,22 +135,19 @@ pub struct AudioConfig {
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        Self { enabled: true, hrtf: false }
+        Self {
+            enabled: true,
+            hrtf: false,
+        }
     }
 }
 
 /// Input bindings and gamepad configuration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct InputConfig {
     /// Optional path to a TOML binding file. `None` means use the default
     /// (`assets/input.bind.toml`).
     pub binding_file: Option<PathBuf>,
-}
-
-impl Default for InputConfig {
-    fn default() -> Self {
-        Self { binding_file: None }
-    }
 }
 
 /// Lua scripting configuration. The actual integration is a placeholder
@@ -174,22 +162,17 @@ pub struct ScriptConfig {
 
 impl Default for ScriptConfig {
     fn default() -> Self {
-        Self { enabled: true, sandbox: true }
+        Self {
+            enabled: true,
+            sandbox: true,
+        }
     }
 }
 
 /// Editor configuration. The editor is a separate window in M6+.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct EditorConfig {
     /// Whether the editor is enabled (the in-process editor, not the
     /// game window).
     pub enabled: bool,
-}
-
-impl Default for EditorConfig {
-    fn default() -> Self {
-        // Default is `false` because the editor is opt-in; games ship
-        // without it.
-        Self { enabled: false }
-    }
 }

@@ -56,7 +56,7 @@ impl AssetId {
     }
 
     /// Parses a 64-character hex string. An optional `0x` prefix is
-    /// accepted. Returns [`HygeError::Parse`] on length mismatch or
+    /// accepted. Returns [`crate::result::HygeError::Parse`] on length mismatch or
     /// non-hex content.
     pub fn from_hex(s: &str) -> Result<Self, crate::result::HygeError> {
         let s = s.strip_prefix("0x").unwrap_or(s);

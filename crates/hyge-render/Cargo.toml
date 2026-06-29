@@ -5,17 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Runtime renderer: wgpu device, bindless table, clustered forward, meshlet culling, post-process."
+description = "Runtime renderer: wgpu device, bindless table, clustered forward, meshlet culling, post-process. Implementation deferred to M2 (see roadmap R-023..R-025 and R-040..R-058)."
+
+[lints.rust]
+unsafe_code = "allow"
 
 [dependencies]
-wgpu = { workspace = true }
-naga = { workspace = true }
-bytemuck = { workspace = true }
-bitflags = { workspace = true }
-bevy_ecs = { workspace = true }
 hyge-core = { workspace = true }
-hyge-render-graph = { workspace = true }
-
-[lints]
-workspace = true
-unsafe_code = "allow"
