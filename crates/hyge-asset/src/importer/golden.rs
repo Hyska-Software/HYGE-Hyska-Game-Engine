@@ -480,3 +480,70 @@ fn golden_gltf_asset_db_records_hashes_paths_and_dependency_edges() {
         "exactly mesh -> material and mesh -> source"
     );
 }
+
+/// R-035 acceptance test: end-to-end through `import_gltf` —
+/// asserts the on-disk `.hyge-mesh` carries a real
+/// `meshopt`-baked meshlet stream (header `version == 2`,
+/// `meshlet_count > 0`, `lod_count == 3`) and that the
+/// deterministic-bake contract holds for repeated runs.
+#[test]
+#[serial]
+fn r035_meshlet_bake_lands_on_disk_with_three_lods() {
+    let dir = golden_dir("r035");
+    let src = write_gltf(&dir, "triangle.glb", &build_glb());
+    let out = dir.join("cook");
+    let report = run_import(&src, &out).expect("R-035 import must succeed");
+
+    let mesh_path = out.join(format!("{}.hyge-mesh", report.mesh_hash));
+    let mesh_bytes = fs::read(&mesh_path).expect("mesh file readable");
+
+    // Header is 24 bytes (6 * u32, little-endian).
+    let header: [u32; 6] = bytemuck::cast_slice::<u8, u32>(&mesh_bytes[0..24])
+        .try_into()
+        .unwrap();
+    const MAGIC: u32 = 0x484D_4548;
+    const VERSION_R035: u32 = 2;
+    assert_eq!(header[0], MAGIC, "magic preserved");
+    assert_eq!(
+        header[1], VERSION_R035,
+        "R-035 bumps the on-disk format version to 2 (cone bounds + LOD chain)"
+    );
+    assert!(
+        header[2] >= 1,
+        "R-035 must produce >= 1 meshlet from a triangle; got {}",
+        header[2]
+    );
+    assert_eq!(
+        header[5], 3,
+        "R-035 must produce exactly 3 LODs (0.5, 0.25, 0.1 ratios); got {}",
+        header[5]
+    );
+
+    // The 3-vertex / 1-triangle fixture collapses to 1 meshlet
+    // (within the 128-tri cap) and produces 3 LODs even when
+    // each LOD ends up with 1 triangle (meshopt's lower bound).
+    assert_eq!(header[3], 3, "three source vertices");
+    // 1 meshlet * 3 indices per triangle = 3 base indices, plus
+    // 3 LODs * 3 indices each = 9, total 12. meshopt may add a
+    // small overhead for degenerate LODs, so we just check the
+    // index count is at least 12.
+    assert!(
+        header[4] >= 12,
+        "expected at least 12 indices (1 meshlet + 3 LODs); got {}",
+        header[4]
+    );
+
+    // Determinism: a second import of the same source produces
+    // the exact same `.hyge-mesh` bytes.
+    let out_b = golden_dir("r035-b");
+    let report_b = run_import(&src, &out_b).expect("R-035 second import must succeed");
+    assert_eq!(
+        report.mesh_hash, report_b.mesh_hash,
+        "R-035 determinism: mesh hash must be stable across runs"
+    );
+    let bytes_b = fs::read(out_b.join(format!("{}.hyge-mesh", report_b.mesh_hash))).unwrap();
+    assert_eq!(
+        mesh_bytes, bytes_b,
+        "R-035 determinism: same input glTF must produce identical .hyge-mesh bytes"
+    );
+}

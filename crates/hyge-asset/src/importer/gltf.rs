@@ -138,11 +138,11 @@ pub fn parse(bytes: &[u8], _source: &Path) -> HygeResult<GltfScene> {
         vertices.extend_from_slice(&p.vertices);
         indices.extend(p.indices.iter().map(|i| i + base));
     }
-    let mesh_data = if vertices.is_empty() {
-        MeshData::from_triangle_list(Vec::new(), Vec::new())
-    } else {
-        MeshData::from_triangle_list(vertices, indices)
-    };
+    // R-035: bake the meshlet stream + LOD chain through
+    // `meshopt`. The bake is a no-op on empty input (handled
+    // inside [`MeshData::bake`]) so the empty placeholder is
+    // preserved end-to-end.
+    let mesh_data = MeshData::bake(vertices, indices)?;
 
     // -- materials ----------------------------------------------------
     let mut materials: Vec<MaterialData> = Vec::new();

@@ -153,7 +153,10 @@ fn write_outputs(
     scene: &GltfScene,
 ) -> Result<(ImportReport, Vec<DependencyEdge>), ImportError> {
     // -- mesh ---------------------------------------------------------
-    let mesh_bytes = serialize_mesh(&scene.mesh)?;
+    // R-035: `scene.mesh` is the output of `MeshData::bake` (a
+    // real `meshopt`-baked meshlet stream + LOD chain). The
+    // writer is a single binary pass — no temp file round-trip.
+    let mesh_bytes = mesh::to_bytes(&scene.mesh)?;
     let mesh_hash = hash_hex(&mesh_bytes);
     let mesh_path = out_dir.join(format!("{mesh_hash}.hyge-mesh"));
     fs::write(&mesh_path, &mesh_bytes).map_err(|e| io_with_path(e, "write mesh", &mesh_path))?;
@@ -284,26 +287,6 @@ fn read_file(path: &Path) -> HygeResult<Vec<u8>> {
     Ok(buf)
 }
 
-fn serialize_mesh(m: &mesh::MeshData) -> HygeResult<Vec<u8>> {
-    // The mesh writer is a thin pass-through, so serializing once
-    // to a temp file is cheap (the largest mesh a single import
-    // can produce in R-034 is bounded by `len(vertices) * 32`).
-    let dir = std::env::temp_dir().join(format!(
-        "hyge-asset-meshbuf-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-    fs::create_dir_all(&dir).map_err(io_error("create tempdir"))?;
-    let p = dir.join("m.hyge-mesh");
-    mesh::write(&p, m)?;
-    let bytes = fs::read(&p).map_err(io_error("read temp mesh"))?;
-    let _ = fs::remove_dir_all(&dir);
-    Ok(bytes)
-}
-
 fn build_ktx1_bytes(
     width: u32,
     height: u32,
@@ -366,10 +349,6 @@ fn io_with_path(err: std::io::Error, op: &str, path: &Path) -> HygeError {
         "{op} {}: {err}",
         path.display()
     )))
-}
-
-fn io_error(op: &'static str) -> impl FnOnce(std::io::Error) -> HygeError {
-    move |e| HygeError::Io(std::io::Error::other(format!("{op}: {e}")))
 }
 
 #[cfg(test)]

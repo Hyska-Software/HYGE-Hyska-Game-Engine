@@ -21,6 +21,7 @@ serde_json = { workspace = true }
 rmp-serde = { workspace = true }
 bytemuck = { workspace = true }
 gltf = { workspace = true }
+meshopt = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }

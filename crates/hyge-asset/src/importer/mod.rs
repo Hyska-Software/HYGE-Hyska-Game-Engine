@@ -13,6 +13,7 @@ pub mod gltf;
 pub mod import;
 pub mod material;
 pub mod mesh;
+pub mod meshlet;
 pub mod meta;
 pub mod texture;
 
