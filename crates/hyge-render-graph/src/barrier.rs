@@ -319,7 +319,7 @@ mod tests {
         assert_eq!(t.len(), 1);
     }
 
-    /// Sparse-table soundness test: `ensure_slot` must not make unset
+    /// Sparse-table regression test: `ensure_slot` must not make unset
     /// sparse slots appear initialized for any sequence of `ensure_slot`,
     /// `set`, and `get` calls.
     ///
@@ -329,7 +329,7 @@ mod tests {
     ///     -p hyge-render-graph --lib barrier::tests::miri
     /// ```
     #[test]
-    fn miri_barrier_state_table_set_len_is_sound() {
+    fn miri_barrier_state_table_sparse_slots_are_sound() {
         let mut t = BarrierStateTable::new();
         // Out-of-order ensure_slot calls.
         t.ensure_slot(ResourceHandle::from_index(0));
@@ -372,7 +372,7 @@ mod tests {
             t.get(ResourceHandle::from_index(7)),
             Some(AccessState::Texture(wgpu::TextureUsages::TEXTURE_BINDING))
         );
-        // Drop the table — exercises the `MaybeUninit` drop path.
+        // Drop the table explicitly so Miri also checks the sparse storage path.
         drop(t);
     }
 }

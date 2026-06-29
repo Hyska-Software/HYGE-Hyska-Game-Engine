@@ -152,7 +152,7 @@ cargo +nightly fuzz run gltf_parser -- -max_total_time=60
 
 ---
 
-## 4. Workflow: From R-XXX to Merged Code
+## 4. Workflow: From R-XXX to Complete Code
 
 The unit of work is an **R-XXX item** in `docs/roadmap.toml`. The lifecycle is:
 
@@ -201,12 +201,18 @@ PR body must include:
 - "Test evidence" section: paste the relevant test output snippets (not just "tests pass").
 - "Risks" section: any unresolved concerns, future work, or known limitations.
 
-### 4.6 Review and merge
+### 4.6 Mark complete, review, and merge
+
+An item may be marked `status = "complete"` after its local Definition
+of Done is satisfied, even if the work has not yet gone through PR
+review or merge. In that case, record the local validation evidence in
+`completion_notes` and leave PR/merge review as an integration step,
+not as a prerequisite for roadmap completion.
 
 - At least one approving review from the item's `owner` group (or its delegate).
 - All CI checks green.
 - Squash-merge to `main` with a Conventional Commit message (see §6).
-- After merge, update `docs/roadmap.toml` to `status = "complete"` for the item, in a follow-up PR (or in the same PR if the reviewer allows).
+- If the item was not already marked complete, update `docs/roadmap.toml` to `status = "complete"` after local verification or after merge.
 
 ### 4.7 Tag the milestone
 
@@ -231,7 +237,7 @@ Update `CHANGELOG.md` via `git-cliff` first.
 - [ ] rustdoc on every new public item.
 - [ ] No `unwrap()` in library code; `expect()` only with a comment explaining the invariant.
 - [ ] No new `unsafe` outside `hyge-render` and `hyge-render-graph`; if added there, `// SAFETY:` comment present.
-- [ ] PR merged with reviewer approval.
+- [ ] PR merged with reviewer approval when the work is being integrated through a PR; local roadmap completion may happen before this when all other DoD items pass.
 
 ### 5.2 Per milestone (M0–M7)
 

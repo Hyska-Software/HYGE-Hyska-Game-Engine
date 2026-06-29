@@ -307,11 +307,9 @@ impl RenderGraph {
         //       execute time.
         //   - Always update `state` to the new usage.
         //
-        // `state` is a [`crate::barrier::BarrierStateTable`] — the
-        // only `unsafe` in the crate lives in that type. The
-        // miri test in `barrier.rs` validates its `set_len`-based
-        // grow path; the state updates here exercise it on the
-        // hot path.
+        // `state` is a [`crate::barrier::BarrierStateTable`], a sparse
+        // safe-Rust table that preserves `None` for handles that have
+        // been reserved but not touched yet.
         let mut state = crate::barrier::BarrierStateTable::new();
         let mut barriers_per_pass: Vec<Vec<Barrier>> = Vec::with_capacity(topo.len());
         let mut pass_ids_in_order: Vec<PassId> = Vec::with_capacity(topo.len());
