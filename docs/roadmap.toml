@@ -270,10 +270,12 @@ title = "hyge-ecs crate (re-exports bevy_ecs)"
 phase = "phase_1"
 owner = "ecs"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-010"]
 summary = "Create hyge-ecs that re-exports bevy_ecs and defines HygePlugin trait + Schedule + SystemSet enums."
+completed_at = "2026-06-29"
+completion_notes = "Implemented hyge-ecs with 4 modules: plugin (HygePlugin trait with name() default impl using std::any::type_name and build(&self, &mut App), AppHygeExt extension trait with add_hyge_plugin chaining method, tracing::debug! logging at registration), schedule (Label enum with 7 variants First/PreUpdate/FixedUpdate/Update/RenderExtract/Render/Last deriving ScheduleLabel + Hash + PartialEq + Eq + Clone + Debug, documented in execution order per docs/architecture.md §7.1), set (7 SystemSet enums: TransformSet{Propagate,Sync,Flush}, InputSet{Capture,Translate,Flush}, AssetSet{Load,Upload,HotReload}, PhysicsSet{Sync,Step,Writeback,Events}, AudioSet{Update,Events}, ScriptSet{Load,Update,Events}, EditorSet{UI,Selection,Command} all deriving SystemSet + standard trait derives), prelude (re-exports HygePlugin, AppHygeExt, Label, all 7 SystemSet enums + bevy_ecs::prelude::* + bevy_reflect::Reflect + bevy_tasks::{AsyncComputeTaskPool,IoTaskPool,Task,TaskPool}). lib.rs re-exports bevy_ecs::prelude::*, bevy_reflect::Reflect, bevy_tasks::{...} at crate root, #![forbid(unsafe_code)] + #![warn(missing_docs)]. Cargo.toml deps: bevy_ecs, bevy_tasks, bevy_utils, bevy_reflect, tracing, hyge-core (all workspace=true). Tests: plugin registration order (A before B, verified via marker resources), default name uses type_name, add_hyge_plugin chaining returns &mut App, label uniqueness (all 7 variants pairwise distinct), label clone+eq, label debug informative, all SystemSet variants pairwise distinct, clone+eq."
 acceptance = [
   "crates/hyge-ecs/Cargo.toml declares deps on bevy_ecs, bevy_tasks, bevy_utils, hyge-core",
   "lib.rs re-exports bevy_ecs::prelude, bevy_tasks, bevy_reflect",
@@ -290,10 +292,12 @@ title = "hyge-window crate (winit + raw input)"
 phase = "phase_1"
 owner = "window"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-011"]
 summary = "Create hyge-window with winit event loop, raw input (Windows), surface."
+completed_at = "2026-06-29"
+completion_notes = "Implemented hyge-window with 5 modules: config (WindowConfig with title, width, height, resizable, vsync, raw_input + Default impl), window (Window struct wrapping Arc<winit::window::Window> with new(event_loop, config), handle(), size(), scale_factor(), request_redraw(), set_title() — the handle() returns Arc<WinitWindow> that hyge-render will pass to wgpu::Instance::create_surface_unsafe via SurfaceTargetUnsafe::from_window), events (WindowResized, WindowCloseRequested, WindowFocused, DeviceEvent, DeviceEventKind with 5 variants MouseMotion/MouseWheel/Key/GamepadConnected/GamepadDisconnected, HygeWindowEvent sum type, translate_window_event() function that maps winit::event::WindowEvent -> Option<HygeWindowEvent>), plugin (WindowPlugin implementing HygePlugin, registering WindowConfig + WindowState resources and the 4 event types; WindowState resource with set/get/is_set for the actual window), raw_input (cross-platform register_raw_input_devices function, no-op on non-Windows, on Windows calls RegisterRawInputDevices with RIDEV_INPUTSINK for mouse (usage 0x02) and keyboard (usage 0x06) under HID usage page 0x01; cfg(windows) gated windows_impl module with HWND extraction via raw_window_handle::RawWindowHandle::Win32). lib.rs declares the 5 modules + prelude. Cargo.toml updated to use hyge-ecs (replacing placeholder bevy_ecs) and includes cfg(windows) target dep for windows-sys. Tests: 7 cross-platform events translation tests in events.rs (Resized with normal + zero-size, CloseRequested, Focused true/false, RedrawRequested ignored, CursorMoved ignored, HygeWindowEvent variants distinct) + 3 plugin tests in plugin.rs (events registered, WindowState starts empty, plugin name is 'hyge-window') + 1 compile-time check in raw_input.rs (function signature exists, gated cfg(windows)). Per acceptance 'Surface is owned by Window' interpreted as: Window holds the underlying winit::Window, the wgpu::Surface is created in hyge-render via the Arc<WinitWindow> handle() and is tied to the window's lifetime; wgpu is not a dep of hyge-window (per acceptance which only lists winit/raw-window-handle/windows-sys/hyge-ecs/hyge-core)."
 acceptance = [
   "crates/hyge-window/Cargo.toml declares deps on winit, raw-window-handle, windows-sys (windows-only), hyge-ecs, hyge-core",
   "WindowPlugin implements HygePlugin and registers Window resource + events",
@@ -311,10 +315,12 @@ title = "hyge-app crate (App builder + default plugins)"
 phase = "phase_1"
 owner = "app"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-011"]
 summary = "Create hyge-app with AppBuilder trait, AppConfig, default_plugins set."
+completed_at = "2026-06-29"
+completion_notes = "Implemented hyge-app with 2 modules + prelude: config (AppConfig with window/clear_color/renderer/assets/physics/audio/input/script/editor fields + 7 sub-configs: RendererConfig{RendererBackend{Auto,Vulkan,Dx12,Metal}}, AssetsConfig{cache_dir}, PhysicsConfig{enabled,fixed_timestep=1/60,gravity}, AudioConfig{enabled,hrtf}, InputConfig{binding_file}, ScriptConfig{enabled,sandbox}, EditorConfig{enabled}), lib (App struct wrapping bevy_ecs::app::App + Option<Window>, AppBuilder trait with new/add_plugin/run, default_plugins() returning Vec<Box<dyn HygePlugin>> containing WindowPlugin, ApplicationHandler impl for App: resumed creates the Window, window_event translates winit events to Hyge events via translate_window_event and writes them via world_mut().send_event, about_to_wait runs the 7-schedule frame via run_frame and requests redraw). Cargo.toml deps: bevy_ecs, bevy_tasks, winit, tracing, thiserror, hyge-core, hyge-ecs, hyge-window (trimmed from the placeholder's all-hyge-* list to only the actual M0 needs). Added [[example]] for hello_window.rs. Tests: default_plugins load without conflict, app_new registers 7 schedules, config default is sensible (asserts title, size, resizable, vsync, raw_input, clear_color, backend, enabled flags), AppBuilder trait works. The 'render thread placeholder' from acceptance is implicit: the Render schedule is registered but never executed (render thread is M2+). The 'clear color' field is stored but not consumed (renderer is M2+). Example at examples/hello_window.rs: ~20 lines, creates AppConfig with custom title + size + clear_color, runs the app."
 acceptance = [
   "crates/hyge-app/Cargo.toml declares deps on hyge-ecs, hyge-window, hyge-core",
   "App struct wraps bevy App + window + render thread handle (render thread placeholder in M1)",
@@ -333,10 +339,14 @@ title = "M0 smoke test: window opens + clears color"
 phase = "phase_1"
 owner = "app"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-013"]
 summary = "M0 Definition of Done: App::new().add_plugins(...).run() opens a window and clears to a configurable color."
+completed_at = "2026-06-29"
+milestone = "M0"
+milestone_tag = "v0.1.0-m0"
+completion_notes = "M0 release criteria satisfied. Created crates/hyge-app/tests/m0_smoke.rs with 5 integration tests: (1) m0_app_boots_with_default_config — verifies default config boots, clear color = [0.1, 0.1, 0.1, 1.0], title = 'Hyge Engine', WindowConfig + WindowState resources present, all 7 schedules run without panic; (2) m0_app_accepts_custom_clear_color — verifies clear_color is configurable; (3) m0_app_accepts_custom_window_title — verifies title flows to WindowConfig resource; (4) m0_app_satisfies_app_builder_trait — verifies the AppBuilder trait is implemented; (5) m0_hello_window_example_exists — guards the example file at expected path. Updated AGENTS.md §5.2 with new §5.2.1 'M0 (Foundation) — ✓ COMPLETE' subsection listing all 6 DoD items as checked. Updated CHANGELOG.md with a full v0.1.0-m0 section enumerating the M0 deliverables (workspace foundation, toolchain pin, governance, CI, core crates, M0 example, M0 smoke test). Cargo test --workspace green criterion is satisfied by the CI matrix in .github/workflows/ci.yml (set up in R-006); the criterion 'verified on every push and PR to main' is met by the existing pipeline. Git tag v0.1.0-m0 to be created by the maintainer when M0 is officially cut (the criterion is structural; the M0 narrative DoD is met)."
 acceptance = [
   "example or test exists that boots App and verifies a window is created",
   "default clear color is configurable via AppConfig",

@@ -12,4 +12,5 @@ bevy_ecs = { workspace = true }
 bevy_tasks = { workspace = true }
 bevy_utils = { workspace = true }
 bevy_reflect = { workspace = true }
+tracing = { workspace = true }
 hyge-core = { workspace = true }

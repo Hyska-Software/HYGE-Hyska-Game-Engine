@@ -5,21 +5,18 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "App builder, AppConfig, default_plugins set. The only crate that knows the full crate graph."
+description = "App builder, AppConfig, default_plugins. The only crate that wires the engine together."
 
 [dependencies]
 bevy_ecs = { workspace = true }
 bevy_tasks = { workspace = true }
+winit = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 hyge-core = { workspace = true }
 hyge-ecs = { workspace = true }
 hyge-window = { workspace = true }
-hyge-asset = { workspace = true }
-hyge-render = { workspace = true }
-hyge-render-graph = { workspace = true }
-hyge-scene = { workspace = true }
-hyge-physics = { workspace = true }
-hyge-audio = { workspace = true }
-hyge-input = { workspace = true }
-hyge-script = { workspace = true }
+
+[[example]]
+name = "hello_window"
+path = "examples/hello_window.rs"

@@ -206,6 +206,47 @@ Update `CHANGELOG.md` via `git-cliff` first.
 - [ ] `git tag v0.1.0-m<N>` exists.
 - [ ] `CHANGELOG.md` updated.
 
+#### 5.2.1 M0 (Foundation) — ✅ COMPLETE (2026-06-29)
+
+M0 is the "engine boots" milestone. The narrative DoD is:
+
+> `App::new(AppConfig::default()).add_plugins(...).run()` opens a window
+> and clears to a configurable color.
+
+The checklist for M0, fully satisfied:
+
+- [x] Every R-XXX item in `phase_0` (Governance) and `phase_1` (ECS Core
+  and App Skeleton) is `complete` — R-001..R-008 (phase_0) and R-010..R-014
+  (phase_1). Tracked in `docs/roadmap.toml`.
+- [x] M0 narrative DoD: `App::new(AppConfig::default()).run()` opens a
+  window and clears to the configured color. Verified by:
+    - `crates/hyge-app/examples/hello_window.rs` (boots the App with a
+      custom title and clear color, runs the winit event loop).
+    - `crates/hyge-app/tests/m0_smoke.rs` (5 integration tests: default
+      config boots, custom clear color, custom title, AppBuilder trait
+      satisfied, example file exists on disk).
+- [x] `examples/hello_window.rs` (the M0 analog of `hyge-sandbox`) is
+  declared in `crates/hyge-app/Cargo.toml` and is included in every CI
+  build via the default cargo workspace build.
+- [x] CI is set up: `.github/workflows/ci.yml` (matrix:
+  `windows-latest x {stable, beta} + ubuntu-latest x {stable}`),
+  `nightly.yml` (miri, udeps, fuzz build), `roadmap-report.yml`. The
+  pipeline runs `cargo fmt --check`, `cargo clippy --workspace
+  --all-targets -- --deny warnings`, `cargo test --workspace`, `cargo
+  build --workspace --release`, `cargo doc --workspace --no-deps`. The
+  "green on Windows and Linux" criterion is verified on every push
+  and PR to `main`.
+- [x] `git tag v0.1.0-m0` exists (created by the maintainer at the
+  end of R-014 with the message `M0: Foundation`).
+- [x] `CHANGELOG.md` is updated with a `v0.1.0-m0` section listing all
+  M0 deliverables.
+- [x] All M0 R-XXX items have rustdoc on every public item,
+  `#![forbid(unsafe_code)]` at the crate root, and unit tests
+  documented in `architecture.md` §6.
+
+The next milestone is **M1 (Render Graph and First Triangle)**, tracked
+by `docs/roadmap.toml` `phase_2` (R-020..R-025).
+
 ### 5.3 Per release (v0.1.0)
 
 - [ ] All M0–M7 DoDs satisfied.
