@@ -171,21 +171,24 @@ impl CompiledGraph {
     /// Persistent resources must be installed in the resource table
     /// before calling `execute`; transient resources are populated
     /// lazily in R-022.
-    pub fn execute(&mut self, encoder: &mut wgpu::CommandEncoder) {
+    ///
+    /// `frame` is the per-frame context built by
+    /// [`Renderer::begin_frame`](hyge_render::Renderer::begin_frame).
+    /// Pass it as `Some(&mut frame_ctx)` from the windowed
+    /// rendering path; pass `None` for the headless test path
+    /// (where the encoder has no surface target).
+    pub fn execute(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: Option<&mut crate::frame::FrameContext<'_>>,
+    ) {
         for pass in &mut self.passes {
             encoder.push_debug_group(pass.name.as_str());
-            // Emit barriers: in wgpu 22, per-resource transitions are
-            // not directly exposed in the high-level API; the
-            // barrier list is emitted by the actual pass via the
-            // encoder (each pass declares its transitions inside
-            // `record`). We log the inferred barriers so tests can
-            // observe them. R-021 will replace this with explicit
-            // wgpu transition calls.
             for barrier in &pass.barriers_before {
                 tracing::debug!("barrier: {barrier}");
             }
             {
-                let mut ctx = PassContext::new(&self.table, encoder);
+                let mut ctx = PassContext::new(&self.table, encoder, frame.as_deref_mut());
                 pass.pass.record(&mut ctx);
             }
             encoder.pop_debug_group();

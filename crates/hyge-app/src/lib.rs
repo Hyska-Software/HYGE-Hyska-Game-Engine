@@ -21,6 +21,7 @@ pub use config::{
 pub mod prelude;
 
 use hyge_ecs::prelude::*;
+use hyge_render::prelude::*;
 use hyge_window::prelude::*;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -28,7 +29,8 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 
 /// The Hyge application. Owns the bevy `App`, the `winit` event loop
-/// driver state, and the `Window` once it is created.
+/// driver state, the `Window` once it is created, and the
+/// `Renderer` once the device + surface are initialized.
 ///
 /// Construct with [`App::new`], add plugins with [`App::add_plugin`] (or
 /// rely on the defaults from [`default_plugins`]), then call
@@ -37,6 +39,13 @@ pub struct App {
     config: AppConfig,
     inner: bevy_app::App,
     window: Option<Window>,
+    /// The runtime renderer. Created lazily in `resumed` once the
+    /// `Window` exists (R-024); `None` before that. The renderer
+    /// is the only consumer of the `Arc<winit::Window>` stored
+    /// inside `WindowState`; the App holds it separately to keep
+    /// the lifetime story simple (the `Renderer` owns a `'static`
+    /// surface, backed by the same `Arc<winit::Window>`).
+    renderer: Option<Renderer>,
 }
 
 /// Builder trait for the Hyge application. Implemented by [`App`].
@@ -100,6 +109,7 @@ impl App {
             config,
             inner,
             window: None,
+            renderer: None,
         };
 
         // Install the default plugin set. Each plugin's `build` method
@@ -220,6 +230,29 @@ impl ApplicationHandler for App {
                 Err(e) => {
                     tracing::error!(error = %e, "failed to create window");
                     event_loop.exit();
+                    return;
+                }
+            }
+        }
+
+        // Create the runtime renderer once we have a window. The
+        // renderer owns the wgpu device, queue, surface, and the
+        // pre-built first-triangle pipeline (R-024).
+        if self.renderer.is_none() {
+            let Some(window) = self.window.as_ref() else {
+                return;
+            };
+            let renderer_config = RendererConfig::default();
+            match Renderer::new(renderer_config, window) {
+                Ok(renderer) => {
+                    tracing::info!("renderer initialized; first-triangle ready");
+                    self.renderer = Some(renderer);
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to initialize renderer");
+                    // Don't exit: the user can still see the window
+                    // (it just won't render). M1+ show a fallback
+                    // clear color via a different path.
                 }
             }
         }
@@ -262,6 +295,12 @@ impl ApplicationHandler for App {
         // `WindowPlugin` re-read it).
         if let WindowEvent::Resized(PhysicalSize { width, height }) = event {
             tracing::debug!(width, height, "window resized");
+            // R-024: forward the resize to the renderer so the
+            // surface / swapchain gets reconfigured before the
+            // next frame.
+            if let Some(renderer) = &mut self.renderer {
+                renderer.resize(width, height);
+            }
         }
     }
 
@@ -271,6 +310,23 @@ impl ApplicationHandler for App {
         // schedule execution infrastructure is what we are validating
         // here.
         self.run_frame();
+
+        // R-024: render the first triangle. The render path is
+        // begin_frame → build the triangle graph → compile + execute
+        // → submit → end_frame. Errors are logged but do not exit
+        // the loop (e.g. a device-lost error should be recoverable
+        // by recreating the surface).
+        if let Some(renderer) = &mut self.renderer {
+            let clear_color = wgpu::Color {
+                r: self.config.clear_color[0] as f64,
+                g: self.config.clear_color[1] as f64,
+                b: self.config.clear_color[2] as f64,
+                a: self.config.clear_color[3] as f64,
+            };
+            if let Err(e) = renderer.render_triangle(clear_color) {
+                tracing::warn!(error = %e, "render_triangle failed");
+            }
+        }
 
         // Request a redraw so the OS schedules a paint event.
         if let Some(window) = &self.window {

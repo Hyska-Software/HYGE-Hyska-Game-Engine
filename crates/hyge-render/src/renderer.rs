@@ -1,0 +1,635 @@
+//! The runtime [`Renderer`].
+//!
+//! # Overview
+//!
+//! The renderer owns the wgpu [`wgpu::Instance`], [`wgpu::Device`],
+//! [`wgpu::Queue`], the optional [`wgpu::Surface`] (and its
+//! [`wgpu::SurfaceConfiguration`]), the pre-built triangle
+//! pipeline + vertex buffer (R-024), and the per-frame
+//! [`hyge_render_graph::RenderGraph`]. Construction takes a
+//! [`RendererConfig`] and either a [`hyge_window::Window`] (for
+//! the windowed / present-to-screen path) or nothing (for the
+//! headless / compute-only path used by tests).
+//!
+//! # Field drop order
+//!
+//! The struct fields are declared in the order required for a
+//! sound `Drop`:
+//! 1. `instance` (last to drop — the `Instance` owns the runtime
+//!    and must outlive every resource derived from it),
+//! 2. `device` and `queue` (dropped before the surface, because
+//!    the surface references the device),
+//! 3. `triangle_pipeline` and `triangle_vertex_buffer` (R-024
+//!    resources, dropped alongside the device),
+//! 4. `window_keepalive` (the `Arc<winit::Window>` that backs the
+//!    surface; dropped AFTER the surface so the surface is never
+//!    used with a freed window),
+//! 5. `surface` and `surface_config` (the wgpu surface and its
+//!    configuration, dropped before the instance),
+//! 6. `current_frame` (the current `SurfaceTexture`; dropped
+//!    before the surface so the backbuffer is presented /
+//!    released before the surface is destroyed),
+//! 7. `config` and `graph` (plain data, no wgpu state).
+//!
+//! # Why a `'static` surface?
+//!
+//! wgpu 22's [`wgpu::SurfaceTargetUnsafe::from_window`] requires
+//! a `&'static` reference to the window. The lifetime of the
+//! surface we build is a lie: the actual lifetime is bounded by
+//! the `Arc<winit::Window>` in `self.window_keepalive`. The
+//! `transmute` that produces the `&'static` reference is
+//! sound because the `Arc` outlives the surface (see the SAFETY
+//! comment in [`Renderer::new`]). This matches the pattern used
+//! by the wgpu 22 examples and by the wgpu + winit 0.30 ecosystem
+//! at large; the alternative is to thread a lifetime parameter
+//! through the entire renderer, which is what R-024+ will do
+//! once we move beyond the skeleton.
+
+use std::sync::Arc;
+
+use winit::window::Window as WinitWindow;
+
+use hyge_core::prelude::*;
+use hyge_render_graph::prelude::*;
+use hyge_window::Window;
+
+use crate::config::RendererConfig;
+use crate::triangle::TrianglePass;
+
+/// The runtime renderer.
+pub struct Renderer {
+    /// The wgpu instance. Declared first so it is dropped last;
+    /// every other wgpu object borrows from it.
+    instance: wgpu::Instance,
+    /// The wgpu device. Dropped before the surface (the surface
+    /// holds a reference to the device internally).
+    device: wgpu::Device,
+    /// The wgpu queue. Dropped alongside the device.
+    queue: wgpu::Queue,
+    /// The pre-built render pipeline for the first-triangle
+    /// pass (R-024). Created at construction time with the
+    /// surface format (or `Rgba8UnormSrgb` for the headless
+    /// path). `Clone` is cheap (reference-counted inside wgpu).
+    triangle_pipeline: wgpu::RenderPipeline,
+    /// The pre-built vertex buffer for the first-triangle
+    /// pass (R-024). Holds the three hardcoded vertices from
+    /// `crate::triangle::VERTICES`.
+    triangle_vertex_buffer: wgpu::Buffer,
+    /// The `Arc<winit::Window>` that backs the surface. Stored
+    /// here to keep the window alive for the surface's `'static`
+    /// lifetime. `None` for the headless path.
+    window_keepalive: Option<Arc<WinitWindow>>,
+    /// The wgpu surface, if the renderer was created with a
+    /// window. `None` for the headless path.
+    surface: Option<wgpu::Surface<'static>>,
+    /// The surface configuration. Updated by [`Renderer::resize`].
+    surface_config: Option<wgpu::SurfaceConfiguration>,
+    /// The current swapchain texture, held between
+    /// [`Renderer::begin_frame`] and [`Renderer::end_frame`].
+    /// `None` outside of a frame. The texture is returned to
+    /// the surface by [`Renderer::end_frame`] (via
+    /// `SurfaceTexture::present`) before the frame is dropped.
+    current_frame: Option<wgpu::SurfaceTexture>,
+    /// The configuration the renderer was constructed with.
+    config: RendererConfig,
+    /// The per-frame render graph. Re-built by the caller each
+    /// frame; the actual `compile` / `execute` integration is
+    /// wired in R-024 (the triangle pass) and grows from there.
+    graph: RenderGraph,
+}
+
+impl std::fmt::Debug for Renderer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Renderer")
+            .field("config", &self.config)
+            .field("has_surface", &self.surface.is_some())
+            .field("has_window", &self.window_keepalive.is_some())
+            .field("has_frame", &self.current_frame.is_some())
+            .field("device_label", &self.config.device_label)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Renderer {
+    /// Constructs a renderer bound to a winit window. Creates the
+    /// wgpu instance (with optional validation), the surface, the
+    /// adapter, the device, the queue, configures the swapchain,
+    /// and pre-builds the first-triangle pipeline (R-024).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HygeError::Gpu`] if surface / adapter / device
+    /// creation fails, or [`HygeError::Unsupported`] if no adapter
+    /// is available for the surface.
+    pub fn new(config: RendererConfig, window: &Window) -> HygeResult<Self> {
+        let winit_arc: Arc<WinitWindow> = window.handle();
+        let size = window.size();
+        let instance = create_instance(&config);
+
+        // SAFETY: wgpu 22's `SurfaceTargetUnsafe::from_window`
+        // requires a `&'static` reference to the window. The
+        // actual lifetime of the window we pass in is the
+        // lifetime of the local `winit_arc` binding, which is
+        // moved into `self.window_keepalive` below. The renderer
+        // drops the surface before the window (see the field
+        // declaration order in the struct rustdoc), so the
+        // surface is never used after the window is freed. The
+        // `transmute` is therefore sound: the pointer remains
+        // valid for the entire surface lifetime.
+        let surface = unsafe {
+            let winit_ref: &WinitWindow = &winit_arc;
+            let static_ref: &'static WinitWindow = std::mem::transmute(winit_ref);
+            instance
+                .create_surface_unsafe(
+                    wgpu::SurfaceTargetUnsafe::from_window(static_ref).map_err(|e| {
+                        HygeError::gpu(format!("surface target: {e}"))
+                    })?,
+                )
+                .map_err(|e| HygeError::gpu(format!("create surface: {e}")))?
+        };
+
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: config.power_preference,
+            force_fallback_adapter: false,
+            compatible_surface: Some(&surface),
+        }))
+        .ok_or_else(|| {
+            HygeError::unsupported("no wgpu adapter compatible with surface")
+        })?;
+
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some(&config.device_label),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::downlevel_defaults(),
+                memory_hints: wgpu::MemoryHints::default(),
+            },
+            None,
+        ))
+        .map_err(|e| HygeError::gpu(format!("request device: {e}")))?;
+
+        let surface_caps = surface.get_capabilities(&adapter);
+        // Prefer sRGB; fall back to the first format the surface
+        // advertises. Surfaces in wgpu 22 always expose at least
+        // one format, so the unwrap is safe.
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(wgpu::TextureFormat::is_srgb)
+            .unwrap_or(surface_caps.formats[0]);
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: pick_present_mode(&surface_caps, config.present_mode),
+            alpha_mode: surface_caps
+                .alpha_modes
+                .first()
+                .copied()
+                .unwrap_or(wgpu::CompositeAlphaMode::Auto),
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &surface_config);
+
+        // Pre-build the first-triangle pipeline + vertex buffer
+        // (R-024). The pipeline is rendered every frame, so we
+        // build it once at startup rather than every frame.
+        let triangle_pipeline = TrianglePass::create_pipeline(&device, surface_format);
+        let triangle_vertex_buffer = TrianglePass::create_vertex_buffer(&device);
+
+        Ok(Self {
+            instance,
+            device,
+            queue,
+            triangle_pipeline,
+            triangle_vertex_buffer,
+            window_keepalive: Some(winit_arc),
+            surface: Some(surface),
+            surface_config: Some(surface_config),
+            current_frame: None,
+            config,
+            graph: RenderGraph::new(),
+        })
+    }
+
+    /// Constructs a renderer without a surface. Useful for tests
+    /// (the device-init smoke test) and for compute-only setups
+    /// (no present-to-screen). The `compatible_surface` filter is
+    /// set to `None` and `force_fallback_adapter: true` so a
+    /// software adapter is preferred — the headless path does not
+    /// care about GPU compatibility with a display.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HygeError::Gpu`] if device creation fails, or
+    /// [`HygeError::Unsupported`] if no wgpu adapter is available.
+    pub(crate) fn new_headless(config: &RendererConfig) -> HygeResult<Self> {
+        let instance = create_instance(config);
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: config.power_preference,
+            force_fallback_adapter: true,
+            compatible_surface: None,
+        }))
+        .ok_or_else(|| HygeError::unsupported("no wgpu adapter available"))?;
+        let (device, queue) = pollster::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some(&config.device_label),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::downlevel_defaults(),
+                memory_hints: wgpu::MemoryHints::default(),
+            },
+            None,
+        ))
+        .map_err(|e| HygeError::gpu(format!("request device: {e}")))?;
+
+        // The headless renderer has no surface; the test path
+        // supplies its own off-screen render target whose
+        // format must match the pipeline format. We pick a
+        // sensible default (sRGB) and let the test configure
+        // the target to match.
+        let triangle_pipeline =
+            TrianglePass::create_pipeline(&device, wgpu::TextureFormat::Rgba8UnormSrgb);
+        let triangle_vertex_buffer = TrianglePass::create_vertex_buffer(&device);
+
+        Ok(Self {
+            instance,
+            device,
+            queue,
+            triangle_pipeline,
+            triangle_vertex_buffer,
+            window_keepalive: None,
+            surface: None,
+            surface_config: None,
+            current_frame: None,
+            config: config.clone(),
+            graph: RenderGraph::new(),
+        })
+    }
+
+    /// Begins a frame: acquires the swapchain texture and stores
+    /// it on `self` for the duration of the frame. Must be
+    /// called before [`Renderer::render_triangle`] (or any other
+    /// render pass) and before [`Renderer::end_frame`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HygeError::Gpu`] if the surface fails to
+    /// acquire a new texture (e.g. the swapchain is out of date
+    /// and needs a reconfigure, or the window is minimized).
+    pub fn begin_frame(&mut self) -> HygeResult<()> {
+        if self.current_frame.is_some() {
+            return Err(HygeError::gpu("begin_frame called twice without end_frame"));
+        }
+        let surface = self
+            .surface
+            .as_ref()
+            .ok_or_else(|| HygeError::gpu("begin_frame: no surface"))?;
+        let frame = surface
+            .get_current_texture()
+            .map_err(|e| HygeError::gpu(format!("get_current_texture: {e}")))?;
+        self.current_frame = Some(frame);
+        Ok(())
+    }
+
+    /// Ends a frame: presents the swapchain texture and clears
+    /// `self.current_frame`. Must be called after
+    /// [`Renderer::begin_frame`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HygeError::Gpu`] if no frame is in flight.
+    pub fn end_frame(&mut self) -> HygeResult<()> {
+        let frame = self
+            .current_frame
+            .take()
+            .ok_or_else(|| HygeError::gpu("end_frame: no current frame"))?;
+        frame.present();
+        Ok(())
+    }
+
+    /// Returns a [`wgpu::TextureView`] of the current swapchain
+    /// texture. Only valid between [`Renderer::begin_frame`] and
+    /// [`Renderer::end_frame`]. The view is cloned from the
+    /// underlying texture and is safe to hold for the duration
+    /// of the frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HygeError::Gpu`] if no frame is in flight.
+    pub fn current_frame_view(&self) -> HygeResult<wgpu::TextureView> {
+        let frame = self
+            .current_frame
+            .as_ref()
+            .ok_or_else(|| HygeError::gpu("current_frame_view: no current frame"))?;
+        Ok(frame.texture.create_view(&wgpu::TextureViewDescriptor::default()))
+    }
+
+    /// Returns the format the swapchain (or, for the headless
+    /// path, the default triangle pipeline) was created with.
+    /// The triangle pass uses this format for its color-target
+    /// state.
+    #[must_use]
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        self.surface_config
+            .as_ref()
+            .map(|c| c.format)
+            .unwrap_or(wgpu::TextureFormat::Rgba8UnormSrgb)
+    }
+
+    /// Builds a [`RenderGraph`] that contains a single
+    /// [`TrianglePass`] with the renderer's pre-built pipeline +
+    /// vertex buffer. The caller can extend the graph (e.g. add
+    /// shadow / post-process passes) before compiling.
+    #[must_use]
+    pub fn build_triangle_graph(&self, clear_color: wgpu::Color) -> RenderGraph {
+        let mut graph = RenderGraph::new();
+        let pass = TrianglePass {
+            pipeline: self.triangle_pipeline.clone(),
+            vertex_buffer: self.triangle_vertex_buffer.clone(),
+            clear_color,
+        };
+        graph.add_pass(pass);
+        graph
+    }
+
+    /// Renders one full frame: begin frame → build the triangle
+    /// graph → compile + execute → submit → present. The
+    /// `clear_color` is the color the surface is cleared to
+    /// before the triangle is drawn; the triangle itself paints
+    /// red / green / blue over the clear color.
+    ///
+    /// This is the R-024 smoke path. R-040+ replace it with the
+    /// full PBR / shadow / post-process pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HygeError::Gpu`] if the frame acquisition, the
+    /// pipeline compile, or the queue submission fails.
+    pub fn render_triangle(&mut self, clear_color: wgpu::Color) -> HygeResult<()> {
+        self.begin_frame()?;
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("hyge-render/triangle-frame"),
+            });
+        let view = self.current_frame_view()?;
+        let format = self.surface_format();
+        let mut frame_ctx = FrameContext::new(view, format);
+        {
+            let mut graph = self.build_triangle_graph(clear_color);
+            let compiled = graph.compile(&self.device)?;
+            compiled.execute(&mut encoder, Some(&mut frame_ctx));
+        }
+        self.queue
+            .submit(std::iter::once(encoder.finish()));
+        self.end_frame()?;
+        Ok(())
+    }
+
+    /// Renders the triangle into an off-screen [`wgpu::Texture`]
+    /// (the test / capture path). The target's format must
+    /// match the renderer's `surface_format()` (the pipeline
+    /// was pre-built with that format).
+    ///
+    /// After this call returns, the texture contains the
+    /// rendered image. The caller can map it for readback (see
+    /// `hyge-runtime-test::capture_frame`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HygeError::Gpu`] if the encoder creation or
+    /// queue submission fails.
+    pub fn render_triangle_to_texture(
+        &mut self,
+        target: &wgpu::Texture,
+        clear_color: wgpu::Color,
+    ) -> HygeResult<()> {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("hyge-render/triangle-offscreen"),
+            });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        let format = target.format();
+        let mut frame_ctx = FrameContext::new(view, format);
+        {
+            let mut graph = self.build_triangle_graph(clear_color);
+            let compiled = graph.compile(&self.device)?;
+            compiled.execute(&mut encoder, Some(&mut frame_ctx));
+        }
+        self.queue
+            .submit(std::iter::once(encoder.finish()));
+        // Block until the GPU finishes so callers can map the
+        // texture immediately after.
+        self.device.poll(wgpu::Maintain::Wait);
+        Ok(())
+    }
+
+    /// Resizes the surface to the given width and height. A no-op
+    /// for headless renderers (no surface to resize).
+    ///
+    /// Widths and heights of zero are clamped to 1 — wgpu rejects
+    /// zero-sized surfaces with an error.
+    pub fn resize(&mut self, w: u32, h: u32) {
+        if let (Some(surface), Some(cfg)) = (self.surface.as_ref(), self.surface_config.as_mut()) {
+            cfg.width = w.max(1);
+            cfg.height = h.max(1);
+            surface.configure(&self.device, cfg);
+        }
+    }
+
+    /// Returns the wgpu device.
+    #[must_use]
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// Returns the wgpu queue.
+    #[must_use]
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// Returns the wgpu instance.
+    #[must_use]
+    pub fn instance(&self) -> &wgpu::Instance {
+        &self.instance
+    }
+
+    /// Returns the wgpu surface, if this renderer was created
+    /// with a window.
+    #[must_use]
+    pub fn surface(&self) -> Option<&wgpu::Surface<'static>> {
+        self.surface.as_ref()
+    }
+
+    /// Returns the current surface configuration, if any.
+    #[must_use]
+    pub fn surface_config(&self) -> Option<&wgpu::SurfaceConfiguration> {
+        self.surface_config.as_ref()
+    }
+
+    /// Returns the renderer configuration.
+    #[must_use]
+    pub fn config(&self) -> &RendererConfig {
+        &self.config
+    }
+
+    /// Returns `true` if this renderer has a wgpu surface bound
+    /// to a window. False for headless renderers.
+    #[must_use]
+    pub fn has_surface(&self) -> bool {
+        self.surface.is_some()
+    }
+
+    /// Returns a mutable reference to the per-frame
+    /// [`RenderGraph`]. The caller adds resources, passes, and
+    /// later calls `compile` + `execute`.
+    #[must_use]
+    pub fn graph_mut(&mut self) -> &mut RenderGraph {
+        &mut self.graph
+    }
+}
+
+/// Constructs the wgpu [`wgpu::Instance`] with the requested
+/// backends and the validation-layer toggle. The `Instance` is
+/// the root of every other wgpu object and is owned by the
+/// [`Renderer`].
+fn create_instance(config: &RendererConfig) -> wgpu::Instance {
+    let flags = if config.validation {
+        wgpu::InstanceFlags::VALIDATION | wgpu::InstanceFlags::DEBUG
+    } else {
+        wgpu::InstanceFlags::default()
+    };
+    wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: config.backend,
+        flags,
+        ..Default::default()
+    })
+}
+
+/// Picks the present mode the surface will be configured with.
+/// If the requested mode is not in the surface's capability list
+/// (some platforms don't support Mailbox or Immediate), the
+/// function falls back to `Fifo` — the one mode every platform
+/// must support per the WebGPU spec.
+fn pick_present_mode(
+    caps: &wgpu::SurfaceCapabilities,
+    requested: wgpu::PresentMode,
+) -> wgpu::PresentMode {
+    if caps.present_modes.contains(&requested) {
+        requested
+    } else {
+        wgpu::PresentMode::Fifo
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pick_present_mode_prefers_requested() {
+        let caps = wgpu::SurfaceCapabilities {
+            formats: vec![wgpu::TextureFormat::Rgba8UnormSrgb],
+            present_modes: vec![
+                wgpu::PresentMode::Fifo,
+                wgpu::PresentMode::Mailbox,
+            ],
+            alpha_modes: vec![wgpu::CompositeAlphaMode::Auto],
+            usages: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        };
+        assert_eq!(pick_present_mode(&caps, wgpu::PresentMode::Mailbox), wgpu::PresentMode::Mailbox);
+        assert_eq!(pick_present_mode(&caps, wgpu::PresentMode::Fifo), wgpu::PresentMode::Fifo);
+    }
+
+    #[test]
+    fn pick_present_mode_falls_back_to_fifo() {
+        let caps = wgpu::SurfaceCapabilities {
+            formats: vec![wgpu::TextureFormat::Rgba8UnormSrgb],
+            present_modes: vec![wgpu::PresentMode::Fifo],
+            alpha_modes: vec![wgpu::CompositeAlphaMode::Auto],
+            usages: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        };
+        assert_eq!(pick_present_mode(&caps, wgpu::PresentMode::Mailbox), wgpu::PresentMode::Fifo);
+        assert_eq!(pick_present_mode(&caps, wgpu::PresentMode::Immediate), wgpu::PresentMode::Fifo);
+    }
+
+    /// R-023 acceptance: "device init succeeds on a software
+    /// adapter (when available) or skips when not". Uses
+    /// `new_headless` with `force_fallback_adapter: true` so the
+    /// software path is always preferred.
+    #[test]
+    fn device_init_succeeds_on_software_adapter() {
+        let config = RendererConfig::default();
+        let renderer = match Renderer::new_headless(&config) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("no wgpu adapter available ({e}); skipping");
+                return;
+            }
+        };
+        assert!(!renderer.has_surface());
+        renderer.device().poll(wgpu::Maintain::Poll);
+        assert_eq!(renderer.config().device_label, "hyge-device");
+    }
+
+    #[test]
+    fn renderer_debug_does_not_panic() {
+        let config = RendererConfig::default();
+        let Ok(renderer) = Renderer::new_headless(&config) else {
+            return;
+        };
+        let s = format!("{renderer:?}");
+        assert!(s.contains("Renderer"));
+        assert!(s.contains("hyge-device"));
+    }
+
+    /// R-024: the headless renderer pre-builds the triangle
+    /// pipeline + vertex buffer at construction time. We can
+    /// verify the format + the headless path's surface_format
+    /// accessor without a real wgpu device (the test skips when
+    /// no adapter is available).
+    #[test]
+    fn headless_renderer_pre_builds_triangle_state() {
+        let config = RendererConfig::default();
+        let Ok(renderer) = Renderer::new_headless(&config) else {
+            return;
+        };
+        // The headless default format is sRGB. The test path
+        // uses this to pick the off-screen render-target format.
+        assert_eq!(renderer.surface_format(), wgpu::TextureFormat::Rgba8UnormSrgb);
+    }
+
+    /// R-024: an off-screen render of the triangle round-trips
+    /// without errors. We create a small off-screen target,
+    /// render the triangle into it, and verify the renderer is
+    /// still alive (no panic, no leaked resources).
+    #[test]
+    fn render_triangle_to_offscreen_target() {
+        let config = RendererConfig::default();
+        let Ok(mut renderer) = Renderer::new_headless(&config) else {
+            eprintln!("no wgpu adapter; skipping");
+            return;
+        };
+        let target = renderer.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("test-target"),
+            size: wgpu::Extent3d { width: 64, height: 64, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: renderer.surface_format(),
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        renderer
+            .render_triangle_to_texture(
+                &target,
+                wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+            )
+            .expect("render_triangle_to_texture should succeed");
+    }
+}

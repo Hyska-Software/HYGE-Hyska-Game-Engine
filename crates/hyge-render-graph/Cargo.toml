@@ -17,3 +17,7 @@ indexmap = { workspace = true }
 tracing = { workspace = true }
 pollster = { workspace = true }
 hyge-core = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+pollster = { workspace = true }

@@ -15,6 +15,7 @@ tracing = { workspace = true }
 hyge-core = { workspace = true }
 hyge-ecs = { workspace = true }
 hyge-window = { workspace = true }
+hyge-render = { workspace = true }
 
 [[example]]
 name = "hello_window"

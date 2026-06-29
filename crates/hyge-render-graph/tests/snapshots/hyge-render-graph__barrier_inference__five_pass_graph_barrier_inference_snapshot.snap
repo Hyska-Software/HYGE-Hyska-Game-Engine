@@ -1,0 +1,15 @@
+---
+source: tests/barrier_inference.rs
+expression: snapshot
+---
+[
+    SnapshotBarrier { pass: "0:shadow", resource: 0, kind: "Texture", from: "TextureUses(UNINITIALIZED)", to: "TextureUses(RENDER_ATTACHMENT)" },
+    SnapshotBarrier { pass: "1:gbuffer", resource: 0, kind: "Texture", from: "TextureUses(RENDER_ATTACHMENT)", to: "TextureUses(TEXTURE_BINDING)" },
+    SnapshotBarrier { pass: "1:gbuffer", resource: 1, kind: "Texture", from: "TextureUses(UNINITIALIZED)", to: "TextureUses(RENDER_ATTACHMENT)" },
+    SnapshotBarrier { pass: "1:gbuffer", resource: 2, kind: "Texture", from: "TextureUses(UNINITIALIZED)", to: "TextureUses(RENDER_ATTACHMENT)" },
+    SnapshotBarrier { pass: "2:lighting", resource: 1, kind: "Texture", from: "TextureUses(RENDER_ATTACHMENT)", to: "TextureUses(TEXTURE_BINDING)" },
+    SnapshotBarrier { pass: "2:lighting", resource: 3, kind: "Texture", from: "TextureUses(UNINITIALIZED)", to: "TextureUses(RENDER_ATTACHMENT | TEXTURE_BINDING)" },
+    SnapshotBarrier { pass: "3:tonemap", resource: 3, kind: "Texture", from: "TextureUses(RENDER_ATTACHMENT | TEXTURE_BINDING)", to: "TextureUses(TEXTURE_BINDING)" },
+    SnapshotBarrier { pass: "3:tonemap", resource: 4, kind: "Texture", from: "TextureUses(UNINITIALIZED)", to: "TextureUses(RENDER_ATTACHMENT | TEXTURE_BINDING)" },
+    SnapshotBarrier { pass: "4:present", resource: 4, kind: "Texture", from: "TextureUses(RENDER_ATTACHMENT | TEXTURE_BINDING)", to: "TextureUses(TEXTURE_BINDING)" },
+]

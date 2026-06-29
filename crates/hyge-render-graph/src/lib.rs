@@ -46,6 +46,7 @@
 pub mod allocator;
 pub mod barrier;
 pub mod compile;
+pub mod frame;
 pub mod graph;
 pub mod pass;
 pub mod prelude;

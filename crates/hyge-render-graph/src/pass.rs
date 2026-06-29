@@ -5,6 +5,7 @@
 //! and `record()` during execute to emit GPU commands into the
 //! `wgpu::CommandEncoder` the graph provides.
 
+use crate::frame::FrameContext;
 use crate::resource::ResourceHandle;
 
 /// Context passed to [`Pass::record`].
@@ -14,19 +15,32 @@ use crate::resource::ResourceHandle;
 ///   [`ResourceHandle`]s back to concrete `wgpu` objects
 ///   ([`PassContext::texture`], [`PassContext::buffer`]);
 /// - the `wgpu::CommandEncoder` the pass records into
-///   ([`PassContext::encoder`]).
+///   ([`PassContext::encoder`]);
+/// - the optional per-frame [`FrameContext`] (the current
+///   surface view + format), for passes that draw to the
+///   swapchain — [`PassContext::frame`].
 pub struct PassContext<'a> {
     resources: &'a ResourceTable,
     encoder: &'a mut wgpu::CommandEncoder,
+    /// `Some` for passes that draw to the current frame (the
+    /// windowed `Renderer::render_frame` path); `None` for the
+    /// headless test path (where the pass records into a
+    /// user-provided `wgpu::CommandEncoder` with no surface).
+    frame: Option<&'a mut FrameContext<'a>>,
 }
 
 impl<'a> PassContext<'a> {
-    /// Constructs a new `PassContext` bound to the compiled resource
-    /// table and the encoder the pass records into.
+    /// Constructs a new `PassContext` bound to the compiled
+    /// resource table, the encoder the pass records into, and
+    /// the optional per-frame context.
     #[inline]
     #[must_use]
-    pub(crate) fn new(resources: &'a ResourceTable, encoder: &'a mut wgpu::CommandEncoder) -> Self {
-        Self { resources, encoder }
+    pub fn new(
+        resources: &'a ResourceTable,
+        encoder: &'a mut wgpu::CommandEncoder,
+        frame: Option<&'a mut FrameContext<'a>>,
+    ) -> Self {
+        Self { resources, encoder, frame }
     }
 
     /// Looks up the concrete `wgpu::Texture` backing a resource handle.
@@ -52,6 +66,15 @@ impl<'a> PassContext<'a> {
     #[must_use]
     pub fn encoder(&mut self) -> &mut wgpu::CommandEncoder {
         self.encoder
+    }
+
+    /// Returns a mutable reference to the per-frame
+    /// [`FrameContext`], or `None` if no surface is bound (the
+    /// headless test path).
+    #[inline]
+    #[must_use]
+    pub fn frame(&mut self) -> Option<&mut FrameContext<'a>> {
+        self.frame.as_deref_mut()
     }
 }
 

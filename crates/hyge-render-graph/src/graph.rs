@@ -280,12 +280,36 @@ impl RenderGraph {
         }
 
         // Step 4: barrier inference.
-        // `state` holds the prior access pattern for each resource.
-        enum Access {
-            Texture(wgpu::TextureUses),
-            Buffer(wgpu::BufferUses),
-        }
-        let mut state: HashMap<ResourceHandle, Access> = HashMap::new();
+        //
+        // Algorithm (see `barrier.rs` module-level rustdoc for the
+        // full prose):
+        //   - Walk passes in topological order.
+        //   - For every resource the pass touches, look up the prior
+        //     access pattern in `state`.
+        //     * If the resource was already touched in this frame
+        //       and the new usage differs from the prior usage,
+        //       emit a barrier.
+        //     * If the resource is touched for the first time in
+        //       this frame and is `ResourceLifetime::Transient`,
+        //       emit a barrier iff the requested usage is not the
+        //       "uninitialized" sentinel.
+        //     * If the resource is touched for the first time in
+        //       this frame and is `ResourceLifetime::Persistent`,
+        //       ALWAYS emit a barrier — the runtime does not know
+        //       the prior state of a persistent resource (it may
+        //       have been written by the host, the swapchain, or
+        //       an external system) so we conservatively force a
+        //       transition so the underlying `wgpu` backend
+        //       inserts a real `transition_resources` call at
+        //       execute time.
+        //   - Always update `state` to the new usage.
+        //
+        // `state` is a [`crate::barrier::BarrierStateTable`] — the
+        // only `unsafe` in the crate lives in that type. The
+        // miri test in `barrier.rs` validates its `set_len`-based
+        // grow path; the state updates here exercise it on the
+        // hot path.
+        let mut state = crate::barrier::BarrierStateTable::new();
         let mut barriers_per_pass: Vec<Vec<Barrier>> = Vec::with_capacity(topo.len());
         let mut pass_ids_in_order: Vec<PassId> = Vec::with_capacity(topo.len());
 
@@ -311,34 +335,58 @@ impl RenderGraph {
                     .resources
                     .get(r)
                     .expect("pass references a declared resource");
+                let is_persistent = entry.lifetime().is_persistent();
                 match &entry.kind {
                     ResourceKind::Texture(_) => {
                         let to = tex_usage
                             .get(&(pid, *r))
                             .copied()
                             .unwrap_or_else(wgpu::TextureUses::empty);
+                        let is_first_touch = state.get(r).is_none();
                         let from = match state.get(r) {
-                            Some(Access::Texture(u)) => *u,
+                            Some(crate::barrier::AccessState::Texture(u)) => *u,
                             _ => wgpu::TextureUses::UNINITIALIZED,
                         };
-                        if from != to {
+                        // Emission rule (see module rustdoc):
+                        //   * first touch + Transient + to == UNINITIALIZED  -> no barrier
+                        //   * first touch + Transient + to != UNINITIALIZED  -> barrier
+                        //   * first touch + Persistent                       -> barrier (always)
+                        //   * subsequent touch + from != to                  -> barrier
+                        //   * subsequent touch + from == to                  -> no barrier
+                        let should_emit = if is_first_touch {
+                            is_persistent || to != wgpu::TextureUses::UNINITIALIZED
+                        } else {
+                            from != to
+                        };
+                        if should_emit {
                             barriers.push(Barrier::Texture { resource: *r, from, to });
                         }
-                        state.insert(*r, Access::Texture(to));
+                        state.set(r, crate::barrier::AccessState::Texture(to));
                     }
                     ResourceKind::Buffer(_) => {
                         let to = buf_usage
                             .get(&(pid, *r))
                             .copied()
                             .unwrap_or_else(wgpu::BufferUsages::empty);
+                        let is_first_touch = state.get(r).is_none();
                         let from = match state.get(r) {
-                            Some(Access::Buffer(u)) => *u,
-                            _ => wgpu::BufferUses::empty(),
+                            Some(crate::barrier::AccessState::Buffer(u)) => *u,
+                            _ => wgpu::BufferUsages::empty(),
                         };
-                        if from != to {
+                        let should_emit = if is_first_touch {
+                            // For buffers, the "uninitialized" sentinel
+                            // is the empty bitflag; we always emit on
+                            // first touch of a Persistent buffer, and
+                            // emit on a Transient buffer only when the
+                            // requested usage is non-empty.
+                            is_persistent || to != wgpu::BufferUses::empty()
+                        } else {
+                            from != to
+                        };
+                        if should_emit {
                             barriers.push(Barrier::Buffer { resource: *r, from, to });
                         }
-                        state.insert(*r, Access::Buffer(to));
+                        state.set(r, crate::barrier::AccessState::Buffer(to));
                     }
                 }
             }
