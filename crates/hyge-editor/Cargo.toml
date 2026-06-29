@@ -1,0 +1,24 @@
+[package]
+name = "hyge-editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "egui-based editor: viewport, hierarchy, inspector (reflect-driven), content browser, asset graph, console, profiler, undo/redo."
+
+[dependencies]
+egui = { workspace = true }
+egui_dock = { workspace = true }
+egui_tiles = { workspace = true }
+egui-wgpu = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+hyge-core = { workspace = true }
+hyge-ecs = { workspace = true }
+hyge-render = { workspace = true }
+hyge-scene = { workspace = true }
+hyge-asset = { workspace = true }
+hyge-app = { workspace = true }

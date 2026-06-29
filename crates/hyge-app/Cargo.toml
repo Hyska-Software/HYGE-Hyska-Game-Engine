@@ -1,0 +1,25 @@
+[package]
+name = "hyge-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "App builder, AppConfig, default_plugins set. The only crate that knows the full crate graph."
+
+[dependencies]
+bevy_ecs = { workspace = true }
+bevy_tasks = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+hyge-core = { workspace = true }
+hyge-ecs = { workspace = true }
+hyge-window = { workspace = true }
+hyge-asset = { workspace = true }
+hyge-render = { workspace = true }
+hyge-render-graph = { workspace = true }
+hyge-scene = { workspace = true }
+hyge-physics = { workspace = true }
+hyge-audio = { workspace = true }
+hyge-input = { workspace = true }
+hyge-script = { workspace = true }

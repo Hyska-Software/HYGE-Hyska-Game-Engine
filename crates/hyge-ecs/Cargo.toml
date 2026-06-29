@@ -1,0 +1,15 @@
+[package]
+name = "hyge-ecs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Re-exports bevy_ecs and defines the HygePlugin trait, Schedule enums, and SystemSet enums."
+
+[dependencies]
+bevy_ecs = { workspace = true }
+bevy_tasks = { workspace = true }
+bevy_utils = { workspace = true }
+bevy_reflect = { workspace = true }
+hyge-core = { workspace = true }

@@ -1,0 +1,17 @@
+[package]
+name = "hyge-script"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lua via mlua, sandbox (os/io/debug stripped), bevy_reflect-driven bindings, hot-reload, on_reload hook."
+
+[dependencies]
+mlua = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+notify = { workspace = true }
+hyge-core = { workspace = true }

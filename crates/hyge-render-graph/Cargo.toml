@@ -1,0 +1,19 @@
+[package]
+name = "hyge-render-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Render graph: DAG of passes with automatic barrier inference and transient resource allocation."
+
+[dependencies]
+wgpu = { workspace = true }
+petgraph = { workspace = true }
+indexmap = { workspace = true }
+bytemuck = { workspace = true }
+hyge-core = { workspace = true }
+
+[lints]
+workspace = true
+unsafe_code = "allow"

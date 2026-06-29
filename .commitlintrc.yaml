@@ -1,0 +1,52 @@
+# Commitlint configuration
+# https://commitlint.js.org/
+#
+# To use locally: install Node.js >= 18, then
+#   npm install --save-dev @commitlint/cli @commitlint/config-conventional
+#   npx commitlint --edit
+#
+# To enforce in CI, the `changelog` job in .github/workflows/ci.yml runs
+# scripts/check-breaking-with-adr.sh which independently enforces the
+# breaking-change-with-ADR invariant (this config defines the *types*;
+# the CI script enforces the *invariant*).
+
+extends:
+  - "@commitlint/config-conventional"
+
+rules:
+  # All Hyge commits must use one of these types. Mirrors
+  # docs/architecture.md §15.4 (changelog) and AGENTS.md §6.1 (commit format).
+  type-enum:
+    - 2
+    - always
+    - [
+        "feat",
+        "fix",
+        "perf",
+        "refactor",
+        "docs",
+        "test",
+        "chore",
+        "breaking",
+      ]
+
+  # Subject (the part after the type and optional scope) must be at most
+  # 100 characters. AGENTS.md §6.1 specifies <= 50 chars; we allow up to
+  # 100 to accommodate longer descriptions and to leave room for the
+  # subject-case rule to suggest a concise form.
+  header-max-length:
+    - 2
+    - always
+    - 100
+
+  # Subject must not end with a period.
+  header-trailing-period:
+    - 2
+    - always
+    - "."
+
+  # Body wrapping (best effort; commitlint wraps at 100 by default).
+  body-max-line-length:
+    - 2
+    - always
+    - 100

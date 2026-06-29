@@ -1,0 +1,16 @@
+[toolchain]
+# Pinned to the stable channel; no nightly allowed by ADR-0014.
+# The MSRV is declared in [workspace.package] rust-version = "1.80" in
+# Cargo.toml. The `channel = "stable"` form is used (not a pinned version) so
+# the workspace tracks the current stable; reproducibility for CI is provided
+# by the GitHub Actions matrix (R-006) which tests against both `stable`
+# and `beta`.
+channel = "stable"
+
+# Components that are required for the workflow defined in AGENTS.md §3.
+components = ["clippy", "rustfmt"]
+
+# Minimal profile avoids installing rust-docs and other components we do not
+# need; this makes the toolchain install much faster on CI runners and on
+# contributor machines.
+profile = "minimal"

@@ -1,0 +1,20 @@
+[package]
+name = "hyge-input"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Action<T> abstraction, TOML binding parser, hot-reload, edge detection, gamepad via gilrs."
+
+[dependencies]
+toml = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+notify = { workspace = true }
+gilrs = { workspace = true }
+bevy_ecs = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+hyge-core = { workspace = true }
+hyge-window = { workspace = true }

@@ -1,0 +1,206 @@
+# Hyge nightly audit pipeline
+#
+# Implements roadmap item R-007.
+#
+# Runs daily at 03:00 UTC (low-traffic window). Four parallel audit jobs:
+#   1. udeps  -- find unused dependencies in the workspace
+#   2. miri   -- undefined-behavior detection on the two `unsafe`-gated
+#                crates (hyge-render, hyge-render-graph)
+#   3. fuzz   -- `cargo +nightly fuzz build` (no execution); the fuzz crate
+#                is created in M2 (R-038), so this step is a no-op until
+#                `fuzz/Cargo.toml` exists.
+# A fifth job, `report`, aggregates the four results and posts a summary
+# comment to the milestone tracking issue. The issue number is read from
+# the `HYGE_ROADMAP_MILESTONE_ISSUE` repository variable (set in
+# GitHub Settings > Secrets and variables > Actions > Variables).
+#
+# All audit jobs use the `nightly` toolchain. The stable-only constraint
+# (ADR-0014) applies to *shipped* code; CI nightly is an out-of-band
+# safety net, not a release artifact.
+
+name: Nightly
+
+on:
+  schedule:
+    # 03:00 UTC daily. Cron syntax: minute hour day-of-month month day-of-week.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+
+  # -------------------------------------------------------------------------
+  # cargo-udeps: detect dependencies declared in Cargo.toml but never used.
+  # Requires nightly; udeps is not on stable. Reports, does not fix.
+  # -------------------------------------------------------------------------
+  udeps:
+    name: udeps (unused dependencies)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: target -> target
+
+      - name: Install nightly + cargo-udeps
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly
+      - name: Install cargo-udeps
+        run: cargo +nightly install --locked cargo-udeps
+
+      - name: Run cargo-udeps
+        run: cargo +nightly udeps --workspace --all-targets
+
+  # -------------------------------------------------------------------------
+  # miri on hyge-render. Catches UB in our `unsafe` wgpu / bindless / barrier
+  # code. Currently a no-op (placeholder crate); will start producing real
+  # signal once R-023 (device init) and R-024 (first triangle) land.
+  # -------------------------------------------------------------------------
+  miri-render:
+    name: miri (hyge-render)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: target -> target
+
+      - name: Install nightly + miri
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly
+          components: miri
+
+      - name: Run miri on hyge-render
+        # Limit threads: miri is single-threaded per definition, and parallel
+        # tests serialize, wasting CI minutes. Keep one worker.
+        env:
+          MIRIFLAGS: "-Zmiri-disable-isolation"
+        run: cargo +nightly miri test -p hyge-render
+
+  # -------------------------------------------------------------------------
+  # miri on hyge-render-graph. Same purpose as above; the render graph is
+  # the other `unsafe`-gated crate (barrier inference, transient
+  # allocator).
+  # -------------------------------------------------------------------------
+  miri-render-graph:
+    name: miri (hyge-render-graph)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: target -> target
+
+      - name: Install nightly + miri
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly
+          components: miri
+
+      - name: Run miri on hyge-render-graph
+        env:
+          MIRIFLAGS: "-Zmiri-disable-isolation"
+        run: cargo +nightly miri test -p hyge-render-graph
+
+  # -------------------------------------------------------------------------
+  # fuzz build. `cargo +nightly fuzz build` only, no execution. Skipped
+  # gracefully when `fuzz/Cargo.toml` does not exist (will be created in
+  # M2 by R-038).
+  # -------------------------------------------------------------------------
+  fuzz-build:
+    name: fuzz build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: target -> target
+
+      - name: Install nightly + cargo-fuzz
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly
+      - name: Install cargo-fuzz
+        run: cargo +nightly install --locked cargo-fuzz
+
+      - name: Build fuzz targets
+        if: hashFiles('fuzz/Cargo.toml') != ''
+        run: cargo +nightly fuzz build
+
+      - name: Skip (fuzz crate not created yet)
+        if: hashFiles('fuzz/Cargo.toml') == ''
+        run: |
+          echo "::notice title=Nightly::No fuzz/Cargo.toml found; the fuzz crate is created in M2 (R-038) and will activate then. Skipping fuzz build."
+
+  # -------------------------------------------------------------------------
+  # Aggregator: posts a single summary comment to the milestone tracking
+  # issue. Best-effort: never fails the run, never blocks the other jobs.
+  # Reads the issue number from the HYGE_ROADMAP_MILESTONE_ISSUE repo
+  # variable. If unset, logs a warning and exits.
+  # -------------------------------------------------------------------------
+  report:
+    name: Post milestone summary
+    runs-on: ubuntu-latest
+    needs: [udeps, miri-render, miri-render-graph, fuzz-build]
+    # Always run after the other four (even if they fail), but only on
+    # scheduled or manual runs (not on PRs -- the milestone post is for
+    # periodic summary, not per-PR).
+    if: |
+      always() &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    continue-on-error: true
+    steps:
+      - name: Post to milestone tracking issue
+        env:
+          MILESTONE_ISSUE: ${{ vars.HYGE_ROADMAP_MILESTONE_ISSUE }}
+        if: env.MILESTONE_ISSUE != ''
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ env.MILESTONE_ISSUE }}
+          edit-mode: replace
+          body: |
+            ## Nightly Audit Report
+
+            - **Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            - **Commit:** `${{ github.sha }}`
+            - **Trigger:** `${{ github.event_name }}`
+
+            | Job | Result |
+            |-----|--------|
+            | `udeps` (unused dependencies) | ${{ needs.udeps.result }} |
+            | `miri` (`hyge-render`) | ${{ needs.miri-render.result }} |
+            | `miri` (`hyge-render-graph`) | ${{ needs.miri-render-graph.result }} |
+            | `fuzz build` | ${{ needs.fuzz-build.result }} |
+
+            See the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for full logs.
+
+            ---
+            _Posted by the `nightly` workflow. Set `HYGE_ROADMAP_MILESTONE_ISSUE` as a repository variable to enable these updates._
+
+      - name: Warn if milestone issue is not configured
+        if: env.MILESTONE_ISSUE == ''
+        env:
+          MILESTONE_ISSUE: ${{ vars.HYGE_ROADMAP_MILESTONE_ISSUE }}
+        run: |
+          echo "::warning title=Nightly::HYGE_ROADMAP_MILESTONE_ISSUE not set as a repository variable; skipping milestone post. Set it in GitHub Settings > Secrets and variables > Actions > Variables to enable."

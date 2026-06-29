@@ -1,0 +1,20 @@
+[package]
+name = "hyge-physics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "rapier3d wrapper behind a feature flag: rigid bodies, colliders, joints, character controller, spatial queries, fixed-timestep events."
+
+[features]
+default = ["physics-rapier"]
+physics-rapier = ["dep:rapier3d"]
+
+[dependencies]
+rapier3d = { workspace = true, optional = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+hyge-core = { workspace = true }

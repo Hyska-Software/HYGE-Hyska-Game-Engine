@@ -1,0 +1,19 @@
+[package]
+name = "hyge-window"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "winit event loop, surface, raw input (Windows via RegisterRawInputDevices), Window resource, DeviceEvent translation."
+
+[dependencies]
+winit = { workspace = true }
+raw-window-handle = { workspace = true }
+bevy_ecs = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+hyge-core = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }

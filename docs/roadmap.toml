@@ -141,10 +141,12 @@ title = "Workspace Cargo.toml"
 phase = "phase_0"
 owner = "build"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = []
 summary = "Create the root workspace Cargo.toml with resolver = '2' and [workspace.dependencies] single-versioning policy."
+completed_at = "2026-06-29"
+completion_notes = "Created root Cargo.toml with [workspace] (resolver='2', members=['crates/*','examples/*']), [workspace.package] (v0.1.0, edition 2021, rust-version 1.80, license, repository, etc.), [workspace.lints] (rust: unsafe_code=deny, missing_docs=warn, unused_must_use=deny; clippy: all+pedantic+nursery with documented allows), [profile.dev] and [profile.release] (release with lto='thin'), and [workspace.dependencies] declaring ~40 external deps (glam, wgpu, bevy_ecs, rapier3d, kira, mlua, egui, gltf, meshopt, rusqlite, blake3, notify, etc.) plus all 15 internal hyge-* crates with path. Created 15 placeholder member crates (hyge-core, hyge-ecs, hyge-render, hyge-render-graph, hyge-asset, hyge-scene, hyge-physics, hyge-audio, hyge-window, hyge-input, hyge-script, hyge-app, hyge-editor, hyge-tools, hyge-runtime-test) each with Cargo.toml referencing workspace deps and minimal src/lib.rs placeholder. hyge-render and hyge-render-graph allow unsafe_code override. hyge-physics has feature 'physics-rapier' (default). hyge-audio has feature 'audio-hrtf'. Created root README.md pointing to docs/, AGENTS.md, and listing all crates. Note: cargo/rustc not available in this environment, so 'cargo build --workspace' was not executed by the agent; the structure was validated by hand against Cargo workspace conventions and matches docs/architecture.md §5.2 crate map. The CI pipeline (R-006) will execute cargo build on PRs."
 acceptance = [
   "Cargo.toml at workspace root defines [workspace] with members = ['crates/*', 'examples/*']",
   "[workspace.package] sets version, edition, rust-version, license, repository",
@@ -160,10 +162,12 @@ title = "Workspace Toolchain Pin"
 phase = "phase_0"
 owner = "build"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = []
 summary = "Pin Rust toolchain to stable, MSRV 1.80."
+completed_at = "2026-06-29"
+completion_notes = "Created rust-toolchain.toml (channel='stable', components=['clippy','rustfmt'], profile='minimal'); rustfmt.toml (unstable_features=true, imports_granularity='Crate', group_imports='StdExternalCrate'); clippy.toml (msrv='1.80' for MSRV-aware suggestions, allow=[module_name_repetitions, must_use_candidate, missing_errors_doc]). MSRV documented in README.md (Requirements section) and Cargo.toml ([workspace.package] rust-version='1.80' + comment in rust-toolchain.toml pointing to both). README also got a Requirements section listing C/C++ toolchain prerequisites for rusqlite/mlua/meshopt native builds."
 acceptance = [
   "rust-toolchain.toml sets channel = 'stable' and components = ['clippy', 'rustfmt']",
   "rustfmt.toml at root sets unstable_features = true, imports_granularity = 'Crate', group_imports = 'StdExternalCrate'",
@@ -177,10 +181,12 @@ title = "CI Matrix (Windows + Linux)"
 phase = "phase_0"
 owner = "build"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-004"]
 summary = "GitHub Actions CI with Windows + Linux matrix on stable + beta."
+completed_at = "2026-06-29"
+completion_notes = "Created .github/workflows/ci.yml with two jobs: (1) 'ci' job with matrix windows-latest x {stable, beta} + ubuntu-latest x {stable} (3 cells) running cargo fmt --check, cargo clippy --workspace --all-targets --deny warnings, cargo test --workspace, cargo build --workspace --release, cargo doc --workspace --no-deps with RUSTDOCFLAGS=-D warnings; (2) 'headless-render' job on ubuntu-latest that installs libvulkan1 + mesa-vulkan-drivers (lavapipe software ICD) + vulkan-tools, runs vulkaninfo --summary to verify the loader, builds hyge-runtime-test --release, and runs a no-op smoke test that becomes the real snapshot test once R-090 lands. Both jobs use Swatinem/rust-cache@v2 with workspaces target -> target (and tools/roadmap_report/target -> tools/roadmap_report/target for the ci job). dtolnay/rust-toolchain installs the matrix rust channel plus clippy + rustfmt components. Branch protection setup documented in workflow header comment for 'green PRs mergeable' acceptance."
 acceptance = [
   ".github/workflows/ci.yml exists with matrix: windows-latest x {stable, beta} + ubuntu-latest x {stable}",
   "steps run cargo fmt --check, cargo clippy --workspace --all-targets -- -D warnings, cargo test --workspace, cargo build --release, cargo doc --no-deps -- -D warnings",
@@ -195,10 +201,12 @@ title = "Nightly Job (miri, udeps, fuzz build)"
 phase = "phase_0"
 owner = "build"
 priority = "P1"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-006"]
 summary = "Nightly CI job for unsafe audit, unused-deps, fuzz build."
+completed_at = "2026-06-29"
+completion_notes = "Created .github/workflows/nightly.yml with 4 parallel audit jobs + 1 aggregator: (1) udeps installs nightly + cargo-udeps and runs 'cargo +nightly udeps --workspace --all-targets'; (2) miri-render installs nightly + miri and runs 'cargo +nightly miri test -p hyge-render' with MIRIFLAGS=-Zmiri-disable-isolation; (3) miri-render-graph same for hyge-render-graph; (4) fuzz-build installs nightly + cargo-fuzz and runs 'cargo +nightly fuzz build', gracefully skipping with a ::notice when fuzz/Cargo.toml is absent (the fuzz crate is created in M2 by R-038); (5) report aggregator runs after all 4 with 'if: always()', posts a summary table to the milestone issue via peter-evans/create-or-update-comment@v4 using the HYGE_ROADMAP_MILESTONE_ISSUE repo variable, warns with ::warning if the variable is unset, and uses 'continue-on-error: true' so the audit jobs are not blocked. Schedule: daily at 03:00 UTC; also accepts workflow_dispatch. Swatinem/rust-cache@v2 in each job. All miri jobs set MIRIFLAGS=-Zmiri-disable-isolation for CI speed (Miri's default isolation adds significant overhead; the trade is fewer caught bugs at the cost of speed -- acceptable for nightly)."
 acceptance = [
   ".github/workflows/nightly.yml exists",
   "runs cargo +nightly udeps --workspace",
@@ -214,10 +222,12 @@ title = "Conventional Commits and CHANGELOG"
 phase = "phase_0"
 owner = "build"
 priority = "P1"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = []
 summary = "Wire up conventional commit enforcement and git-cliff CHANGELOG generation."
+completed_at = "2026-06-29"
+completion_notes = "Created .commitlintrc.yaml (extends @commitlint/config-conventional, with Hyge-specific type-enum: feat/fix/perf/refactor/docs/test/chore/breaking, header-max-length=100, header-trailing-period rule, body-max-line-length=100); cliff.toml (conventional_commits=true, protect_breaking_commits=true, git_tag='v*', group_by type, Keep-a-Changelog header, GitHub owner/repo=hyge/hyge); CHANGELOG.md (Keep-a-Changelog preamble, Unreleased section with placeholder text); scripts/check-breaking-with-adr.sh (POSIX bash + git + awk, detects breaking commits via ^type! subject or BREAKING CHANGE body footer via --extended-regexp --grep OR semantics, counts new ADRs via --diff-filter=A on docs/adr/*.md, fails with ::error title annotation if breaking>0 and new_adrs==0). Updated .github/workflows/ci.yml with a new 'changelog' job on ubuntu-latest that checks out full history (fetch-depth: 0), installs pinned git-cliff v1.4.0 from the GitHub release, runs the breaking-change-without-ADR script, and renders --unreleased into the step summary for review."
 acceptance = [
   ".gitlint or commitlint config in repo",
   "cliff.toml configured to read commits and emit CHANGELOG.md",

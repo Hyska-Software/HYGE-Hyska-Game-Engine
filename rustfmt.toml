@@ -1,0 +1,28 @@
+# rustfmt configuration (workspace-wide).
+# See AGENTS.md §7.1 for the binding policy.
+
+# Required by AGENTS.md and by R-005 acceptance: needed to use the
+# `imports_granularity` and `group_imports` settings below. (Both are
+# technically stable in 1.80; the explicit opt-in keeps the file forward-
+# compatible with any future unstable flag we may add.)
+unstable_features = true
+
+# Group imports by their source: `std` first, then external crates, then
+# internal `hyge_*` crates, then `crate::*` and `super::*`.
+imports_granularity = "Crate"
+
+# Within each group, sort imports alphabetically. The "StdExternalCrate"
+# group puts `std` and `extern crate` declarations together; combined with
+# `imports_granularity = "Crate"` this gives the layout:
+#
+#   use std::collections::HashMap;
+#
+#   use anyhow::Result;
+#   use serde::Serialize;
+#
+#   use hyge_core::id::AssetId;
+#   use hyge_ecs::prelude::*;
+#
+#   use crate::component::Transform;
+#   use crate::system::propagate;
+group_imports = "StdExternalCrate"

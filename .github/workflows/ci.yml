@@ -1,0 +1,223 @@
+# Hyge CI pipeline
+#
+# Implements roadmap item R-006.
+#
+# Matrix:  windows-latest x {stable, beta} + ubuntu-latest x {stable} (3 jobs).
+# Headless render smoke test: ubuntu-latest + Vulkan ICD (separate job).
+#
+# Branch protection setup (do this in GitHub Settings > Branches > main):
+#   Required status checks:
+#     - ci / windows-latest / stable
+#     - ci / windows-latest / beta
+#     - ci / ubuntu-latest / stable
+#     - headless-render / ubuntu / Vulkan
+#   When those are green, the PR is mergeable (acceptance #5).
+
+name: CI
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+  workflow_dispatch:
+
+# Treat every warning as an error in the lint and doc steps. The
+# `RUSTDOCFLAGS="-D warnings"` is consumed by `cargo doc`.
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTDOCFLAGS: "-D warnings"
+
+jobs:
+
+  # -------------------------------------------------------------------------
+  # Main CI: build, lint, test, doc on the platform + toolchain matrix.
+  # -------------------------------------------------------------------------
+  ci:
+    name: ci / ${{ matrix.os }} / ${{ matrix.rust }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      # Don't cancel the other matrix jobs if one fails: each one gives
+      # independent signal (Windows-only bug, beta-only regression, etc.).
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rust: stable
+          - os: windows-latest
+            rust: beta
+          - os: ubuntu-latest
+            rust: stable
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Swatinem/rust-cache caches ~/.cargo (registry, git index) and the
+      # `target/` directory. Multiple `workspaces` entries let us share the
+      # cache with `tools/roadmap_report/` (R-003) which is a standalone
+      # Cargo project.
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            target -> target
+            tools/roadmap_report/target -> tools/roadmap_report/target
+
+      - name: Install Rust ${{ matrix.rust }}
+        uses: dtolnay/rust-toolchain@${{ matrix.rust }}
+        with:
+          toolchain: ${{ matrix.rust }}
+          # The `clippy` and `rustfmt` components are listed in
+          # rust-toolchain.toml (profile = "minimal" still installs the
+          # components we explicitly request). The dtolnay action adds
+          # them on top of the channel.
+          components: clippy, rustfmt
+
+      - name: Show toolchain info
+        shell: bash
+        run: |
+          rustc --version
+          cargo --version
+          rustfmt --version
+          cargo clippy --version
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- --deny warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+      - name: cargo build --release
+        run: cargo build --workspace --release
+
+      - name: cargo doc (deny warnings)
+        run: cargo doc --workspace --no-deps
+
+      - name: Upload release artifacts
+        if: github.event_name == 'push' && matrix.rust == 'stable' && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyge-release-${{ matrix.os }}
+          path: |
+            target/release/hyge-tools
+            target/release/hyge-tools.exe
+          if-no-files-found: warn
+
+  # -------------------------------------------------------------------------
+  # Headless render smoke test (Vulkan on Linux).
+  #
+  # Currently a no-op because `hyge-runtime-test` is a placeholder (R-090 is
+  # its implementation item, scheduled in M2). Once R-090 lands this job
+  # will run a real snapshot test that:
+  #   1. boots a headless wgpu device on Vulkan (lavapipe software ICD)
+  #   2. loads a deterministic reference scene
+  #   3. captures a frame and hashes it
+  #   4. asserts the hash matches `assets/tests/reference/`
+  # -------------------------------------------------------------------------
+  headless-render:
+    name: headless-render / ubuntu / Vulkan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: target -> target
+
+      - name: Install Vulkan loader + Mesa software ICD
+        # `mesa-vulkan-drivers` includes `lavapipe` (CPU Vulkan), which is
+        # what wgpu falls back to when no discrete GPU is present on the
+        # CI runner. `vulkan-tools` provides `vulkaninfo` for verification.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libvulkan1 \
+            mesa-vulkan-drivers \
+            vulkan-tools
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.80
+          components: clippy, rustfmt
+
+      - name: Verify Vulkan loader
+        # A non-empty summary means at least one ICD and one device is
+        # visible. Fails the job otherwise.
+        run: vulkaninfo --summary
+
+      - name: Build hyge-runtime-test (release)
+        run: cargo build -p hyge-runtime-test --release
+
+      - name: Headless render smoke test
+        # No-op today (no tests defined in the placeholder crate). When
+        # R-090 lands this becomes:
+        #   cargo test -p hyge-runtime-test --release
+        # and the test panics on hash mismatch with the golden reference.
+        run: |
+          echo "=== Headless render smoke test ==="
+          echo "Status: placeholder. Will execute the snapshot test once R-090"
+          echo "(hyge-runtime-test implementation) and R-092 (snapshot"
+          echo "infrastructure) are merged. See docs/roadmap.toml."
+          cargo test -p hyge-runtime-test --release --no-run
+          echo "=== hyge-runtime-test compiles + links successfully ==="
+
+  # -------------------------------------------------------------------------
+  # Changelog + breaking-change-without-ADR check (implements R-008).
+  #
+  # Runs on every push and PR. Two responsibilities:
+  #   1. scripts/check-breaking-with-adr.sh: gates breaking changes on
+  #      having a new ADR in docs/adr/. Mirrors the convention in
+  #      AGENTS.md §11 and docs/ownership.md §9.
+  #   2. Verifies git-cliff can render --unreleased against cliff.toml,
+  #      so a broken cliff.toml fails CI before it ships.
+  # -------------------------------------------------------------------------
+  changelog:
+    name: changelog / breaking-change-without-ADR
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout (full history for git-cliff)
+        uses: actions/checkout@v4
+        with:
+          # Full history is required for `git describe --tags` and for
+          # `git diff` against the last release tag. The default depth-1
+          # shallow clone would fail the breaking-change check.
+          fetch-depth: 0
+
+      - name: Install git-cliff
+        # Pinned version for reproducibility. Bump manually when ready.
+        # See https://github.com/orhun/git-cliff/releases for newer tags.
+        run: |
+          set -e
+          VERSION="v1.4.0"
+          ARCH="x86_64-unknown-linux-musl"
+          URL="https://github.com/orhun/git-cliff/releases/download/${VERSION}/git-cliff-${VERSION}-${ARCH}.tar.gz"
+          echo "Downloading ${URL}"
+          curl -sL --fail "$URL" | tar -xz -C /tmp
+          sudo mv /tmp/git-cliff-*/git-cliff /usr/local/bin/
+          git-cliff --version
+
+      - name: Check breaking change requires ADR
+        # The script exits non-zero on (breaking-change, no-new-ADR), which
+        # fails the job and blocks the PR. See scripts/check-breaking-with-adr.sh
+        # for the full logic.
+        run: bash scripts/check-breaking-with-adr.sh
+
+      - name: Render unreleased (cliff.toml sanity check)
+        # Pure render check: if cliff.toml is broken, fail here so we
+        # catch it in PR rather than at release time. The output goes to
+        # the step summary for easy review.
+        run: |
+          echo "### Unreleased (per cliff.toml)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          git-cliff --unreleased --config cliff.toml >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

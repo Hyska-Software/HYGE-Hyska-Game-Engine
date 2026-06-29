@@ -1,0 +1,68 @@
+# git-cliff configuration
+# https://git-cliff.org/docs/configuration
+#
+# git-cliff reads git log + Conventional Commits, groups by type, and emits
+# a Markdown CHANGELOG. Run locally:
+#   cargo install git-cliff --locked
+#   git-cliff --unreleased              # preview of unreleased changes
+#   git-cliff                          # full CHANGELOG.md
+#
+# The CI uses this config to:
+#   1. Render the unreleased section
+#   2. Drive scripts/check-breaking-with-adr.sh (independent of this file)
+
+[changelog]
+# Header text for the CHANGELOG. Matches the Keep a Changelog preamble.
+header = """
+# Changelog
+
+All notable changes to Hyge are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+
+# Body template. Renders the conventional-commit groups in a stable order.
+# {{ version }} is the tag; when missing, "Unreleased" is shown.
+body = """
+{% if version -%}
+## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## [Unreleased]
+{% endif -%}
+{% for group, commits in commits | filter(attribute="merge_commit", value=false) | group_by(attribute="group") -%}
+### {{ group | upper_first }}
+{% for commit in commits | sort(attribute="message") -%}
+- {{ commit.message | upper_first }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/hyge/hyge/commit/{{ commit.id }}))
+{% endfor -%}
+{% endfor %}
+
+"""
+trim = true
+postprocessors = []
+
+[git]
+# Parse conventional commits. Required for the type/scope extraction and
+# for the "feat!:" / "BREAKING CHANGE:" breaking-change detection.
+conventional_commits = true
+filter_unconventional = false
+# Don't split commits like "feat: a" + "fix: b" that share a body into
+# multiple entries; keep them as authored.
+split_commits = false
+# Promote commits with a "!" type suffix into the "breaking" group so they
+# appear under the BREAKING CHANGES section in the rendered CHANGELOG.
+protect_breaking_commits = true
+# Show all commits, including non-conventional ones. (R-008 requires this
+# so unreleased breaking changes are always surfaced.)
+filter_commits = false
+# Match tags like "v0.1.0", "v0.1.0-m3", "v0.2.0-rc.1".
+git_tag = "v*"
+# Newest first within a release.
+topo_order = false
+sort_commits = "oldest"
+
+[github]
+owner = "hyge"
+repo = "hyge"
+# api_url left at the GitHub default; uncomment if using GitHub Enterprise.
+# api_url = "https://api.github.com"

@@ -1,0 +1,16 @@
+[package]
+name = "hyge-runtime-test"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Headless wgpu test harness: TestRenderer, capture_frame, assert_image_matches, hash_image. No surface; CI-friendly."
+
+[dependencies]
+wgpu = { workspace = true }
+image = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+hyge-core = { workspace = true }
+hyge-render = { workspace = true }
