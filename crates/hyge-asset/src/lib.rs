@@ -8,3 +8,17 @@
 //!
 //! See `docs/architecture.md` §6.5 for the planned public surface.
 //! Implementation is tracked in `docs/roadmap.toml` under R-030..R-037.
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
+pub mod asset;
+pub mod context;
+pub mod handle;
+pub mod plugin;
+pub mod prelude;
+
+pub use asset::{Asset, AssetId};
+pub use context::LoadContext;
+pub use handle::{Handle, LoadedAsset};
+pub use plugin::AssetPlugin;

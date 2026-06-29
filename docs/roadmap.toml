@@ -493,10 +493,12 @@ title = "hyge-asset crate skeleton (Asset trait, Handle, AssetId)"
 phase = "phase_3"
 owner = "asset"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-010"]
 summary = "Create hyge-asset with the foundational Asset trait, Handle<A>, AssetId."
+completed_at = "2026-06-29"
+completion_notes = "Implemented hyge-asset skeleton with Cargo deps on rusqlite, blake3, notify, lz4_flex, zstd, serde, rmp-serde, hyge-ecs, hyge-core, plus bevy_app for the HygePlugin signature. Added modules asset, context, handle, plugin, and prelude. Public API includes Asset trait (Data, hash, extensions, load), AssetId([u8; 32]) with From<blake3::Hash>, Eq, Hash, Copy, Handle<A> with AssetId + PhantomData and Copy, LoadedAsset<A> with Arc<A> + version, LoadContext dependency tracking, and no-op AssetPlugin. Verification: cargo test -p hyge-asset (8 passed), cargo clippy -p hyge-asset --all-targets -- --deny warnings, and RUSTDOCFLAGS='-D warnings' cargo doc -p hyge-asset --no-deps all pass."
 acceptance = [
   "crates/hyge-asset/Cargo.toml declares deps on rusqlite, blake3, notify, lz4_flex, zstd, serde, rmp-serde, hyge-ecs, hyge-core",
   "Asset trait with type Data, hash, extensions, load methods",
