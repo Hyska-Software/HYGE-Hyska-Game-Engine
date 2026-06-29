@@ -1,0 +1,23 @@
+version = 1
+title = "Test (invalid: duplicate phase id)"
+updated_at = "2026-06-29"
+status_scale = ["not_started", "in_progress", "blocked", "complete"]
+priority_scale = ["P0", "P1", "P2", "P3"]
+risk_scale = ["low", "medium", "high"]
+
+[metadata]
+source_architecture = ""
+source_agents = ""
+target_state = ""
+msrv = ""
+channel = ""
+
+[[phases]]
+id = "phase_0"
+name = "First"
+goal = ""
+
+[[phases]]
+id = "phase_0"
+name = "Duplicate"
+goal = ""

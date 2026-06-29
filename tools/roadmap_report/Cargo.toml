@@ -1,0 +1,32 @@
+[package]
+name = "hyge-roadmap-report"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+description = "Read docs/roadmap.toml and emit phase-grouped progress reports."
+publish = false
+
+[lib]
+name = "hyge_roadmap_report"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hyge-roadmap-report"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

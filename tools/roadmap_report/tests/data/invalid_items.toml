@@ -1,0 +1,66 @@
+version = 1
+title = "Test (invalid: bad priority, bad phase ref)"
+updated_at = "2026-06-29"
+status_scale = ["not_started", "in_progress", "blocked", "complete"]
+priority_scale = ["P0", "P1", "P2", "P3"]
+risk_scale = ["low", "medium", "high"]
+
+[metadata]
+source_architecture = ""
+source_agents = ""
+target_state = ""
+msrv = ""
+channel = ""
+
+[[phases]]
+id = "phase_0"
+name = "First"
+goal = ""
+
+[[items]]
+id = "R-001"
+title = "Bad priority"
+phase = "phase_0"
+owner = "core"
+priority = "P9"
+status = "not_started"
+risk = "low"
+dependencies = []
+summary = ""
+acceptance = []
+
+[[items]]
+id = "R-002"
+title = "Unknown phase ref"
+phase = "phase_does_not_exist"
+owner = "core"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = []
+summary = ""
+acceptance = []
+
+[[items]]
+id = "R-003"
+title = "Self-dependency"
+phase = "phase_0"
+owner = "core"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-003"]
+summary = ""
+acceptance = []
+
+[[items]]
+id = "R-004"
+title = "Unknown dependency"
+phase = "phase_0"
+owner = "core"
+priority = "P0"
+status = "not_started"
+risk = "low"
+dependencies = ["R-999"]
+summary = ""
+acceptance = []

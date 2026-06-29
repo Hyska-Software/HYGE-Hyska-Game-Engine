@@ -103,10 +103,12 @@ title = "Ownership Map"
 phase = "phase_0"
 owner = "ecosystem"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-001"]
 summary = "Define owners and review responsibilities across all top-level crates."
+completed_at = "2026-06-29"
+completion_notes = "Created docs/ownership.md with 20 owner groups, per-crate ownership table covering all 15 implementation crates (14 workspace + hyge-runtime-test + examples + governance areas) with lead and 2 delegates each, PR routing rules for single-crate / multi-crate / cross-cutting / docs / hotfix / ADR PRs, escalation path, on-call rotation, and a procedure for binding real names to role identifiers."
 acceptance = [
   "docs/ownership.md exists",
   "each of the 14 crates has a primary owner group",
@@ -120,10 +122,12 @@ title = "Roadmap Reporting Script"
 phase = "phase_0"
 owner = "tooling"
 priority = "P1"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = []
 summary = "Create a script that reads roadmap.toml and emits phase-grouped progress reports."
+completed_at = "2026-06-29"
+completion_notes = "Created tools/roadmap_report/ standalone Rust binary (hyge-roadmap-report) with library + CLI. Validates v1 schema (version, scales, phase/item ID uniqueness, phase/dependency references, status/priority/risk membership, owner non-empty, no self-deps). Emits phase-grouped progress in human (columnar) and JSON formats. Unit tests (in src/report.rs) + integration tests (tests/integration.rs) with fixtures for valid, duplicate-phase, bad-priority, unknown-phase-ref, self-dep, and unknown-dep cases. CI workflow .github/workflows/roadmap-report.yml runs validation strict, posts sticky PR comment via marocchino/sticky-pull-request-comment, and posts to the milestone tracking issue (issue number in HYGE_ROADMAP_MILESTONE_ISSUE repo variable) via peter-evans/create-or-update-comment, with weekly cron."
 acceptance = [
   "tools/roadmap_report/ exists with a binary",
   "script validates roadmap.toml against the v1 schema",

@@ -1,0 +1,95 @@
+name: Roadmap Report
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 0 * * 1' # weekly on Monday
+
+jobs:
+  report:
+    name: Validate + emit roadmap report
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.80
+
+      - name: Cache cargo target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/roadmap_report -> target
+
+      - name: Build hyge-roadmap-report
+        working-directory: tools/roadmap_report
+        run: cargo build --release --locked
+
+      - name: Validate roadmap.toml (strict)
+        id: validate
+        working-directory: tools/roadmap_report
+        run: |
+          ./target/release/hyge-roadmap-report \
+            --roadmap ../../docs/roadmap.toml \
+            --strict \
+            --quiet
+
+      - name: Generate report
+        id: report
+        if: always()
+        working-directory: tools/roadmap_report
+        run: |
+          HUMAN=$(./target/release/hyge-roadmap-report \
+            --roadmap ../../docs/roadmap.toml \
+            --format human 2>/dev/null)
+          {
+            echo "human<<EOF"
+            echo "$HUMAN"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post PR comment (sticky)
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: hyge-roadmap
+          message: |
+            ## Hyge Roadmap Report
+
+            ```
+            ${{ steps.report.outputs.human }}
+            ```
+
+            ---
+            _Posted by `hyge-roadmap-report` (workflow run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}))_
+
+      - name: Post milestone tracking issue comment
+        if: >
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          vars.HYGE_ROADMAP_MILESTONE_ISSUE != ''
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ vars.HYGE_ROADMAP_MILESTONE_ISSUE }}
+          edit-mode: replace
+          body: |
+            ## Hyge Roadmap Report (updated ${{ github.event.head_commit.timestamp }})
+
+            ```
+            ${{ steps.report.outputs.human }}
+            ```
+
+            ---
+            _Posted by `hyge-roadmap-report` (workflow run [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}))_
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyge-roadmap-report
+          path: tools/roadmap_report/target/release/hyge-roadmap-report
+          if-no-files-found: error

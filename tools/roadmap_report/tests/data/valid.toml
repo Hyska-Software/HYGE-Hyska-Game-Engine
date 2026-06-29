@@ -1,0 +1,59 @@
+version = 1
+title = "Test Roadmap"
+updated_at = "2026-06-29T00:00:00Z"
+status_scale = ["not_started", "in_progress", "blocked", "complete"]
+priority_scale = ["P0", "P1", "P2", "P3"]
+risk_scale = ["low", "medium", "high"]
+
+[metadata]
+source_architecture = "docs/architecture.md"
+source_agents = "AGENTS.md"
+target_state = "v0.1.0"
+msrv = "1.80"
+channel = "stable"
+
+[[phases]]
+id = "phase_0"
+name = "Foundation"
+goal = "Setup the basics."
+
+[[phases]]
+id = "phase_1"
+name = "Implementation"
+goal = "Build the thing."
+
+[[items]]
+id = "R-001"
+title = "First item"
+phase = "phase_0"
+owner = "core"
+priority = "P0"
+status = "complete"
+risk = "low"
+dependencies = []
+summary = "First test item."
+acceptance = ["exists"]
+
+[[items]]
+id = "R-002"
+title = "Second item"
+phase = "phase_0"
+owner = "core"
+priority = "P1"
+status = "in_progress"
+risk = "low"
+dependencies = ["R-001"]
+summary = "Second test item."
+acceptance = []
+
+[[items]]
+id = "R-003"
+title = "Third item"
+phase = "phase_1"
+owner = "render"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-002"]
+summary = "Third test item."
+acceptance = []
