@@ -581,6 +581,16 @@ impl Renderer {
     pub fn bindless(&self) -> &BindlessTable {
         &self.bindless
     }
+
+    /// Returns a clone of the bindless table's `Arc`.
+    /// Integration tests that need to share the table
+    /// with helper functions (e.g. `LambertPass::new`)
+    /// use this accessor; the table is `Send + Sync` so
+    /// the `Arc` is safe to share across threads.
+    #[must_use]
+    pub fn bindless_arc(&self) -> Arc<BindlessTable> {
+        Arc::clone(&self.bindless)
+    }
 }
 
 /// Returns the optional timestamp feature set requested from the adapter.

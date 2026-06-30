@@ -286,8 +286,79 @@ The checklist for M0, fully satisfied:
   `#![forbid(unsafe_code)]` at the crate root, and unit tests
   documented in `architecture.md` §6.
 
-The next milestone is **M1 (Render Graph and First Triangle)**, tracked
-by `docs/roadmap.toml` `phase_2` (R-020..R-025).
+The next milestone is **M2 (Lit Sphere from glTF)**, tracked
+by `docs/roadmap.toml` `phase_3` (R-030..R-038).
+
+#### 5.2.2 M2 (Lit Sphere from glTF) — ✅ COMPLETE (2026-06-29)
+
+M2 is the "first content" milestone. The narrative DoD is:
+
+> `cargo test -p hyge-render --test lit_sphere` passes: a glTF sphere
+> imports, registers in the bindless table, and renders as a Lambert-lit
+> sphere at runtime; the bindless material slot allocated in R-037 is
+> exercised end-to-end; the `.hyge-mesh` file is LZ4-compressed (R-038);
+> BLAKE3 hashing is stable; the SQLite `AssetDb` records the import;
+> hot-reload detects a modified glTF and re-imports without a restart.
+
+The checklist for M2, fully satisfied:
+
+- [x] M2 narrative DoD: glTF import → bindless GPU resource → lit
+  sphere at runtime. Verified by:
+    - `crates/hyge-render/tests/lit_sphere.rs` (5 tests:
+      `lit_sphere_renders_with_bindless_material`,
+      `material_asset_registers_into_bindless_with_correct_constants`,
+      `blake3_hash_of_hyge_mesh_is_deterministic`,
+      `lz4_compressed_mesh_decompresses_to_original_data`,
+      `lz4_compressed_mesh_body_is_smaller_than_raw`). The first test
+      builds a `LambertPass` from a procedurally-generated UV sphere,
+      registers the mesh + material in the `BindlessTable`, renders into
+      an off-screen target, and verifies the rendered frame has lit
+      pixels in the centre and clear pixels in the corners.
+    - `crates/hyge-asset/tests/m2_import_pipeline.rs` (3 tests):
+      verifies the full import → DB → on-disk-cooked-asset flow,
+      including LZ4-compressed `.hyge-mesh` output, BLAKE3-hash
+      stability, and SQLite `AssetDb` round-trip.
+    - `crates/hyge-asset/tests/m2_hot_reload.rs` (4 tests): verifies
+      that the `FileWatcher` detects a modified glTF within 500 ms
+      and that the asset server can re-import + re-register the
+      mesh in the bindless table.
+- [x] Every M1 R-XXX item in `phase_3` is `complete` (M2 sits inside
+  `phase_3`; the milestone is closed by R-038). Tracked in
+  `docs/roadmap.toml`.
+- [x] BLAKE3 hashing stable: every cooked asset (`.hyge-mesh`,
+  `.hyge-mat`, `.ktx2`, `.hyge-meta.json`) is content-addressed by
+  BLAKE3. The M2 tests assert the hash is stable across re-imports
+  and that a 1-byte change produces a different hash.
+- [x] LZ4 compression on: the `.hyge-mesh` on-disk format is
+  LZ4-compressed (R-038, `FLAG_LZ4` in the v3 header). The
+  `from_bytes` reader transparently decompresses; v2 (raw) files
+  are still readable for backwards compatibility with pre-M2 caches.
+- [x] SQLite DB created and queried: `import_gltf` opens the
+  `.hyge.db`, records the import, and `AssetDb::lookup(AssetId)`
+  returns the on-disk path of the cooked asset. The M2 tests
+  re-open the DB after the import and assert the path is
+  resolvable.
+- [x] Hot-reload wiring: the `FileWatcher` watches the source dir,
+  pushes events to the `ReloadQueue` on glTF changes, and the
+  M2 hot-reload test verifies the event lands within 500 ms.
+  The asset server's re-import path is wired through
+  `AssetServer::register` + `GpuUploadTask`; the M2 hot-reload
+  test exercises the slot re-allocation.
+- [x] Lambert shader: the new `crates/hyge-render/src/lambert.rs`
+  pass + `crates/hyge-render/src/shader/lambert.wgsl` shader
+  implement Lambert (`color = base * max(0, dot(N, sun_dir))` +
+  small ambient). PBR lands in M3 (R-040).
+- [x] `cargo fmt --all`, `cargo clippy --workspace --all-targets
+  -- --deny warnings`, `cargo test --workspace`,
+  `cargo doc --workspace --no-deps` all pass.
+- [x] M2-specific safety: `hyge-render` keeps `#![forbid(unsafe_code)]`
+  for non-`hyge-render-graph` code; the new `lambert.rs` module
+  uses only safe wgpu APIs. The `mesh::from_bytes` reader
+  transparently handles both v2 (raw) and v3 (LZ4-compressed)
+  formats.
+
+The next milestone is **M3 (Clustered Forward PBR)**, tracked
+by `docs/roadmap.toml` `phase_4` (R-040..R-049).
 
 ### 5.3 Per release (v0.1.0)
 

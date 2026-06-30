@@ -12,6 +12,8 @@
 //! and avoids GPU-driver-specific variations in the rendered
 //! output (which is exactly what we want for a snapshot test).
 
+use std::sync::Arc;
+
 use hyge_core::prelude::*;
 use hyge_render::prelude::*;
 
@@ -73,6 +75,16 @@ impl TestRenderer {
     #[must_use]
     pub fn renderer_bindless(&self) -> &hyge_render::prelude::BindlessTable {
         self.renderer.bindless()
+    }
+
+    /// Returns a clone of the renderer's bindless
+    /// descriptor heap's `Arc`. Integration tests that
+    /// need to share the heap with helper functions
+    /// (e.g. `LambertPass::new`) reach in through this
+    /// accessor.
+    #[must_use]
+    pub fn renderer_bindless_arc(&self) -> Arc<hyge_render::prelude::BindlessTable> {
+        self.renderer.bindless_arc()
     }
 
     /// Returns the texture format the pre-built triangle pipeline

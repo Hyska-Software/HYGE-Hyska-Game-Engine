@@ -3,13 +3,13 @@
 //! Owns the wgpu device / queue (typically on a dedicated render
 //! thread), the wgpu surface and swapchain configuration bound to
 //! the application window, the per-frame render graph, the
-//! pre-built first-triangle pipeline (R-024), and the bindless
-//! descriptor heap (R-037). R-040+ add the clustered forward
-//! pipeline, cascaded shadows, meshlet culling, post-process,
-//! and IBL.
+//! pre-built first-triangle pipeline (R-024), the bindless
+//! descriptor heap (R-037), and the Lambert lit-sphere pass
+//! (M2 / R-038). R-040+ add the clustered forward pipeline,
+//! cascaded shadows, meshlet culling, post-process, and IBL.
 //!
 //! # R-023 (skeleton), R-024 (first triangle), R-025 (profiler),
-//!   R-037 (bindless table)
+//!   R-037 (bindless table), R-038 (Lambert lit-sphere)
 //!
 //! The public surface:
 //!
@@ -37,6 +37,11 @@
 //! - [`TrianglePass`](triangle::TrianglePass) — the first
 //!   render-graph pass. The WGSL shader lives at
 //!   `src/shader/triangle.wgsl`.
+//! - [`LambertPass`](lambert::LambertPass) — the M2 lit-sphere
+//!   pass. The WGSL shader lives at `src/shader/lambert.wgsl`.
+//!   The pass uses a per-frame uniform for the material
+//!   (`LambertPass::set_material`) so the bindless material
+//!   slot allocated in R-037 is exercised end-to-end.
 //! - [`FrameStats`](profiler::FrameStats) — the per-frame profiling
 //!   resource populated by timestamp queries and draw counters.
 //!
@@ -48,6 +53,7 @@
 
 pub mod bindless;
 pub mod config;
+pub mod lambert;
 pub mod profiler;
 pub mod renderer;
 pub mod triangle;

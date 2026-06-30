@@ -26,3 +26,5 @@ egui = { workspace = true }
 
 [dev-dependencies]
 hyge-runtime-test = { workspace = true }
+hyge-asset = { workspace = true }
+hyge-render-graph = { workspace = true }

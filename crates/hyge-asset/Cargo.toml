@@ -30,3 +30,8 @@ serial_test = { workspace = true }
 # `image` is used by the R-036 golden test to produce a small
 # PNG fixture that the importer feeds to the KTX2 transcoder.
 image = { workspace = true, features = ["png"] }
+# `hyge-runtime-test` powers the M2 hot-reload integration
+# test (R-038) which uses the headless `TestRenderer` to
+# register the modified mesh into a real `BindlessTable`.
+hyge-runtime-test = { workspace = true }
+hyge-render = { workspace = true }

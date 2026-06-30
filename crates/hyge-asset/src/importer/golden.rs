@@ -27,6 +27,7 @@ use serial_test::serial;
 
 use crate::asset::AssetId;
 use crate::db::AssetDb;
+use crate::importer::mesh;
 use crate::importer::transcode::{CompressionMode, TargetFormat};
 use crate::importer::{import_gltf, ImportOptions, ImportReport};
 
@@ -404,34 +405,33 @@ fn golden_gltf_khr_mesh_quantization_dequantizes_to_min_max_range() {
 
     let mesh_bytes =
         fs::read(cook.join(format!("{}.hyge-mesh", report.mesh_hash))).expect("mesh file readable");
-    // Header is 24 bytes (magic + version + counts). Each vertex
-    // is 32 bytes: position[3] + normal[3] + uv[2]. The first
-    // three floats of each vertex are the dequantized POSITION.
-    // With quant = (-32768, -32768, 0) and target range
-    // min = (-1, -1, 0), max = (1, 1, 1) the dequantized
-    // position is approximately (-1, -1, 0.5) — z maps
-    // (0 - (-32768)) / 65535 ≈ 0.5000076 into [0, 1].
-    let read_pos = |offset: usize| -> [f32; 3] {
-        bytemuck::cast_slice::<u8, [u8; 4]>(&mesh_bytes[24 + offset..24 + offset + 12])[0..3]
-            .iter()
-            .map(|b| f32::from_le_bytes(*b))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap()
-    };
-    let pos = read_pos(0);
+    // R-038 changed the on-disk format to v3 with an LZ4
+    // body. The first 28 bytes are the v3 header; the
+    // remaining bytes are the LZ4-compressed v2-style body.
+    // We decompress + parse the file via `from_bytes` to
+    // recover the CPU-side `MeshData`, then assert the
+    // dequantized positions match the expected values.
+    let mesh_data = mesh::from_bytes(&mesh_bytes).expect("mesh file parses");
+    // Each vertex is 32 bytes: position[3] + normal[3] + uv[2].
+    // The first three floats of each vertex are the
+    // dequantized POSITION. With quant = (-32768, -32768, 0)
+    // and target range min = (-1, -1, 0), max = (1, 1, 1)
+    // the dequantized position is approximately
+    // (-1, -1, 0.5) — z maps (0 - (-32768)) / 65535 ≈
+    // 0.5000076 into [0, 1].
+    let pos = mesh_data.vertices[0].position;
     assert!((pos[0] - (-1.0)).abs() < 1e-3, "x0: got {pos:?}");
     assert!((pos[1] - (-1.0)).abs() < 1e-3, "y0: got {pos:?}");
     assert!((pos[2] - 0.5).abs() < 1e-3, "z0: got {pos:?}");
 
     // Second vertex: quant (0, 0, 16384) -> (0, 0, 0.75).
-    let pos1 = read_pos(32);
+    let pos1 = mesh_data.vertices[1].position;
     assert!((pos1[0] - 0.0).abs() < 1e-3, "x1: got {pos1:?}");
     assert!((pos1[1] - 0.0).abs() < 1e-3, "y1: got {pos1:?}");
     assert!((pos1[2] - 0.75).abs() < 1e-3, "z1: got {pos1:?}");
 
     // Third vertex: quant (32767, 32767, 32767) -> (1, 1, 1).
-    let pos2 = read_pos(64);
+    let pos2 = mesh_data.vertices[2].position;
     assert!((pos2[0] - 1.0).abs() < 1e-3, "x2: got {pos2:?}");
     assert!((pos2[1] - 1.0).abs() < 1e-3, "y2: got {pos2:?}");
     assert!((pos2[2] - 1.0).abs() < 1e-3, "z2: got {pos2:?}");
@@ -487,9 +487,11 @@ fn golden_gltf_asset_db_records_hashes_paths_and_dependency_edges() {
 
 /// R-035 acceptance test: end-to-end through `import_gltf` —
 /// asserts the on-disk `.hyge-mesh` carries a real
-/// `meshopt`-baked meshlet stream (header `version == 2`,
-/// `meshlet_count > 0`, `lod_count == 3`) and that the
-/// deterministic-bake contract holds for repeated runs.
+/// `meshopt`-baked meshlet stream (header `version == 3`,
+/// `flags == FLAG_LZ4`, `meshlet_count > 0`,
+/// `lod_count == 3`) and that the deterministic-bake
+/// contract holds for repeated runs. R-038 added the LZ4
+/// wrap; R-035's meshlet + LOD logic is unchanged.
 #[test]
 #[serial]
 fn r035_meshlet_bake_lands_on_disk_with_three_lods() {
@@ -501,40 +503,47 @@ fn r035_meshlet_bake_lands_on_disk_with_three_lods() {
     let mesh_path = out.join(format!("{}.hyge-mesh", report.mesh_hash));
     let mesh_bytes = fs::read(&mesh_path).expect("mesh file readable");
 
-    // Header is 24 bytes (6 * u32, little-endian).
-    let header: [u32; 6] = bytemuck::cast_slice::<u8, u32>(&mesh_bytes[0..24])
+    // v3 header is 28 bytes (7 * u32, little-endian):
+    // magic, version, flags, meshlet_count, vertex_count,
+    // index_count, lod_count.
+    let header: [u32; 7] = bytemuck::cast_slice::<u8, u32>(&mesh_bytes[0..28])
         .try_into()
         .unwrap();
     const MAGIC: u32 = 0x484D_4548;
-    const VERSION_R035: u32 = 2;
+    const VERSION_R038: u32 = 3;
+    const FLAG_LZ4: u32 = 0x1;
     assert_eq!(header[0], MAGIC, "magic preserved");
     assert_eq!(
-        header[1], VERSION_R035,
-        "R-035 bumps the on-disk format version to 2 (cone bounds + LOD chain)"
-    );
-    assert!(
-        header[2] >= 1,
-        "R-035 must produce >= 1 meshlet from a triangle; got {}",
-        header[2]
+        header[1], VERSION_R038,
+        "R-038 bumps the on-disk format version to 3 (LZ4 wrap)"
     );
     assert_eq!(
-        header[5], 3,
+        header[2], FLAG_LZ4,
+        "R-038 v3 mesh must have FLAG_LZ4 set in the header"
+    );
+    assert!(
+        header[3] >= 1,
+        "R-035 must produce >= 1 meshlet from a triangle; got {}",
+        header[3]
+    );
+    assert_eq!(
+        header[6], 3,
         "R-035 must produce exactly 3 LODs (0.5, 0.25, 0.1 ratios); got {}",
-        header[5]
+        header[6]
     );
 
     // The 3-vertex / 1-triangle fixture collapses to 1 meshlet
     // (within the 128-tri cap) and produces 3 LODs even when
     // each LOD ends up with 1 triangle (meshopt's lower bound).
-    assert_eq!(header[3], 3, "three source vertices");
+    assert_eq!(header[4], 3, "three source vertices");
     // 1 meshlet * 3 indices per triangle = 3 base indices, plus
     // 3 LODs * 3 indices each = 9, total 12. meshopt may add a
     // small overhead for degenerate LODs, so we just check the
     // index count is at least 12.
     assert!(
-        header[4] >= 12,
+        header[5] >= 12,
         "expected at least 12 indices (1 meshlet + 3 LODs); got {}",
-        header[4]
+        header[5]
     );
 
     // Determinism: a second import of the same source produces

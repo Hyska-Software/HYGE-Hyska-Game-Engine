@@ -17,7 +17,12 @@ use crate::asset::AssetId;
 /// Debounce window used for filesystem hot-reload events.
 pub const DEBOUNCE_WINDOW: Duration = Duration::from_millis(100);
 
-type AssetResolver = Arc<dyn Fn(&Path) -> Option<AssetId> + Send + Sync + 'static>;
+/// A file-path-to-`AssetId` resolver. The watcher calls
+/// the resolver on every FS event to convert the raw
+/// path into a content-addressed `AssetId`. Production
+/// resolvers consult the `AssetDb`; tests can return a
+/// hard-coded id.
+pub type AssetResolver = Arc<dyn Fn(&Path) -> Option<AssetId> + Send + Sync + 'static>;
 
 #[derive(Clone, Copy, Debug)]
 struct PendingReload {

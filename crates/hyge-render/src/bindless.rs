@@ -1139,9 +1139,10 @@ impl BindlessTable {
     /// exhausted (no free slots).
     pub fn register_mesh(&self, mesh: GpuMesh) -> HygeResult<MeshId> {
         let slot = {
-            let mut inner = self.inner.lock().map_err(|e| {
-                HygeError::gpu(format!("bindless table mutex poisoned: {e}"))
-            })?;
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|e| HygeError::gpu(format!("bindless table mutex poisoned: {e}")))?;
             // The slot is held for the lifetime of the returned `MeshId`.
             // We do not bump the storage until the caller has
             // the slot, so a partial allocation is impossible
@@ -1153,10 +1154,12 @@ impl BindlessTable {
         };
         // Write the entry. This is outside the lock so a
         // concurrent register_material can proceed.
-        let byte_offset =
-            (slot as u64) * (std::mem::size_of::<GpuMesh>() as u64);
-        self.queue
-            .write_buffer(&self.get_mesh_buffer(), byte_offset, bytemuck::bytes_of(&mesh));
+        let byte_offset = (slot as u64) * (std::mem::size_of::<GpuMesh>() as u64);
+        self.queue.write_buffer(
+            &self.get_mesh_buffer(),
+            byte_offset,
+            bytemuck::bytes_of(&mesh),
+        );
         Ok(self.alloc_mesh_slot(slot))
     }
 

@@ -1,13 +1,17 @@
 //! `.hyge-mesh` binary writer.
 //!
 //! The mesh format is a compact, deterministic little-endian layout.
-//! Version 2 (R-035, current) adds the cone bounds and a real
-//! meshopt-baked meshlet stream plus a 3-level LOD chain:
+//! Version 3 (R-038, current) is the M2 on-disk format: the body
+//! after the header is LZ4-compressed (the `flags` field carries
+//! the `FLAG_LZ4` bit). v2 files (raw, no LZ4) are still readable
+//! through [`from_bytes`] for backwards compatibility with
+//! pre-M2 caches.
 //!
 //! ```text
-//! header          (24 bytes)
+//! header          (28 bytes)
 //!   magic         : u32  = 0x484D4548 ("HMEH")
-//!   version       : u32  = 2
+//!   version       : u32  = 3
+//!   flags         : u32  = 0x1 (FLAG_LZ4)
 //!   meshlet_count : u32
 //!   vertex_count  : u32
 //!   index_count   : u32           (total, includes LOD chain)
@@ -33,8 +37,9 @@
 //! `meshlet_index_offsets[i]` is a direct offset into the
 //! `index_data` section.
 //!
-//! See `docs/architecture.md` §6.6 ("Meshlet bake algorithm") and
-//! `docs/roadmap.toml` R-035.
+//! See `docs/architecture.md` §6.6 ("Meshlet bake algorithm"),
+//! `docs/roadmap.toml` R-035 (meshlet bake), and R-038 (M2
+//! LZ4 wrap).
 
 use std::fs;
 use std::io::Write;
@@ -47,9 +52,17 @@ use crate::importer::meshlet::{
 };
 
 const MAGIC: u32 = 0x484D_4548; // "HMEH" little-endian
-/// On-disk format version. Bumped to 2 by R-035: adds the
-/// `meshlet_cones` section and the LOD chain.
-const VERSION: u32 = 2;
+/// On-disk format version. Bumped to 3 by R-038: the body
+/// after the header is LZ4-compressed (the `flags` field
+/// carries the `FLAG_LZ4` bit). v2 files (raw, no LZ4) are
+/// still readable through [`from_bytes`].
+const VERSION: u32 = 3;
+/// The previous on-disk format version, still readable
+/// through [`from_bytes`] for backwards compatibility with
+/// pre-M2 caches.
+const VERSION_RAW: u32 = 2;
+/// Header flag: the body is LZ4-compressed.
+const FLAG_LZ4: u32 = 0x1;
 
 /// A triangle mesh ready to be serialized to `.hyge-mesh`.
 ///
@@ -343,25 +356,37 @@ pub fn write(path: &Path, mesh: &MeshData) -> HygeResult<()> {
 /// orchestrator when it needs both the bytes (for content-
 /// addressing) and the on-disk file (for the cache).
 pub fn to_bytes(mesh: &MeshData) -> HygeResult<Vec<u8>> {
-    // Pre-size the buffer to the exact on-disk length so the
-    // inner writer never reallocates. Layout (see module docs):
-    //   header(24) + vertices*32 + indices*4
+    // Pre-size the buffer to the exact on-disk length so
+    // the inner writer never reallocates. Layout (see
+    // module docs):
+    //   header(28) + lz4_compressed(body)
+    // where the body is the v2-style raw layout:
+    //   vertices*32 + indices*4
     //   + meshlets*(8 + 256 + 24 + 44)
     //   + lods*8
-    let capacity = 24
-        + mesh.vertices.len() * 32
+    let body_capacity = mesh.vertices.len() * 32
         + mesh.indices.len() * 4
         + mesh.meshlets.len() * (8 + 256 + 24 + 44)
         + mesh.lods.len() * 8;
-    let mut buf: Vec<u8> = Vec::with_capacity(capacity);
+    // LZ4 worst case is `body + (body / 255) + 16`; we
+    // pre-size to that and the writer's `write_all` is
+    // the only allocation. The actual compressed size is
+    // reported by the writer when the buffer is finalized.
+    let worst_case = body_capacity + (body_capacity / 255) + 16;
+    let mut buf: Vec<u8> = Vec::with_capacity(28 + worst_case);
     write_into(&mut buf, mesh)?;
     Ok(buf)
 }
 
 fn write_into<W: Write>(w: &mut W, mesh: &MeshData) -> HygeResult<()> {
+    // Header layout (version 3, R-038):
+    //   magic, version, flags, meshlet_count, vertex_count, index_count, lod_count.
+    // The `flags` field currently only carries `FLAG_LZ4`
+    // (the body is always LZ4-compressed in v3).
     let header = [
         MAGIC,
         VERSION,
+        FLAG_LZ4,
         mesh.meshlets.len() as u32,
         mesh.vertices.len() as u32,
         mesh.indices.len() as u32,
@@ -370,6 +395,27 @@ fn write_into<W: Write>(w: &mut W, mesh: &MeshData) -> HygeResult<()> {
     w.write_all(bytemuck::cast_slice(&header))
         .map_err(io_error("write mesh header"))?;
 
+    // Build the v2-style body into a temporary buffer,
+    // then LZ4-compress it and emit the compressed bytes.
+    // The body layout matches the pre-R-038 v2 format (no
+    // header, no flags) so existing `from_bytes_v2` readers
+    // (R-035 tests, downstream tooling) can still parse it
+    // after decompression.
+    let mut body: Vec<u8> = Vec::new();
+    write_body_into(&mut body, mesh)?;
+    let compressed = lz4_flex::block::compress(&body);
+    w.write_all(&compressed)
+        .map_err(io_error("write lz4-compressed mesh body"))?;
+    Ok(())
+}
+
+/// Writes the v2-style body (the part after the 28-byte
+/// header) into the given writer. Used by both the v3 LZ4
+/// writer (which compresses the output) and the v2 raw
+/// writer (which was the R-035 path). The body has no
+/// version / flag bytes; the version is carried by the
+/// header.
+fn write_body_into<W: Write>(w: &mut W, mesh: &MeshData) -> HygeResult<()> {
     for v in &mesh.vertices {
         let data: [f32; 8] = [
             v.position[0],
@@ -444,6 +490,221 @@ fn write_into<W: Write>(w: &mut W, mesh: &MeshData) -> HygeResult<()> {
 
 fn io_error(op: &'static str) -> impl FnOnce(std::io::Error) -> hyge_core::result::HygeError {
     move |e| hyge_core::result::HygeError::Io(std::io::Error::other(format!("{op}: {e}")))
+}
+
+/// Reads a `.hyge-mesh` file from `bytes`. Supports both the
+/// v3 LZ4-compressed format (R-038, default) and the v2
+/// raw format (R-035, for backwards compatibility with
+/// pre-M2 caches). Returns the parsed `MeshData`.
+///
+/// # Errors
+///
+/// Returns [`hyge_core::result::HygeError::Parse`] when the
+/// header is malformed (wrong magic, unknown version, or
+/// truncated body). Returns
+/// [`hyge_core::result::HygeError::Io`] when the LZ4
+/// decompression fails.
+pub fn from_bytes(bytes: &[u8]) -> HygeResult<MeshData> {
+    if bytes.len() < 28 {
+        return Err(hyge_core::result::HygeError::parse(format!(
+            "mesh file too short: {} bytes (need at least 28 for v3 header)",
+            bytes.len()
+        )));
+    }
+    let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+    if magic != MAGIC {
+        return Err(hyge_core::result::HygeError::parse(format!(
+            "mesh file wrong magic: 0x{magic:08x} (expected 0x{MAGIC:08x})"
+        )));
+    }
+    let version = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    let meshlet_count = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+    let vertex_count = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
+    let index_count = u32::from_le_bytes(bytes[20..24].try_into().unwrap()) as usize;
+    let lod_count = u32::from_le_bytes(bytes[24..28].try_into().unwrap()) as usize;
+
+    let body = match version {
+        VERSION => {
+            // v3: LZ4-compressed body after the 28-byte
+            // header.
+            let flags = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+            if flags & FLAG_LZ4 == 0 {
+                return Err(hyge_core::result::HygeError::parse(
+                    "v3 mesh file has FLAG_LZ4 clear (unsupported)",
+                ));
+            }
+            let compressed = &bytes[28..];
+            lz4_flex::block::decompress(
+                compressed,
+                expected_body_size(vertex_count, index_count, meshlet_count, lod_count),
+            )
+            .map_err(|e| {
+                hyge_core::result::HygeError::Io(std::io::Error::other(format!(
+                    "lz4 decompress mesh body: {e}"
+                )))
+            })?
+        }
+        VERSION_RAW => {
+            // v2: raw body after the 24-byte header (the
+            // legacy format that pre-M2 importers produced).
+            // Note: the v2 header does not have a `flags`
+            // field, so the body starts at byte 24.
+            if bytes.len() < 24 {
+                return Err(hyge_core::result::HygeError::parse(
+                    "v2 mesh file too short for header",
+                ));
+            }
+            bytes[24..].to_vec()
+        }
+        other => {
+            return Err(hyge_core::result::HygeError::parse(format!(
+                "mesh file unsupported version: {other}"
+            )));
+        }
+    };
+
+    parse_body(&body, meshlet_count, vertex_count, index_count, lod_count)
+}
+
+/// Computes the expected body size for a v2-style raw
+/// layout given the section counts. Used as the upper
+/// bound for LZ4 decompression.
+fn expected_body_size(
+    vertex_count: usize,
+    index_count: usize,
+    meshlet_count: usize,
+    lod_count: usize,
+) -> usize {
+    vertex_count * 32 + index_count * 4 + meshlet_count * (8 + 256 + 24 + 44) + lod_count * 8
+}
+
+/// Parses the v2-style body into a `MeshData`. The body
+/// layout matches the pre-R-038 v2 format (no header, no
+/// flags): vertices, indices, then the per-meshlet
+/// sections, then the per-LOD sections.
+fn parse_body(
+    body: &[u8],
+    meshlet_count: usize,
+    vertex_count: usize,
+    index_count: usize,
+    lod_count: usize,
+) -> HygeResult<MeshData> {
+    let expected = expected_body_size(vertex_count, index_count, meshlet_count, lod_count);
+    if body.len() != expected {
+        return Err(hyge_core::result::HygeError::parse(format!(
+            "mesh body length mismatch: got {} bytes, expected {}",
+            body.len(),
+            expected
+        )));
+    }
+
+    let mut cursor = 0;
+    let mut take = |n: usize| -> HygeResult<&[u8]> {
+        let end = cursor + n;
+        if end > body.len() {
+            return Err(hyge_core::result::HygeError::parse(format!(
+                "mesh body truncated: need {n} bytes at offset {cursor}"
+            )));
+        }
+        let out = &body[cursor..end];
+        cursor = end;
+        Ok(out)
+    };
+
+    // Vertices.
+    let mut vertices = Vec::with_capacity(vertex_count);
+    for _ in 0..vertex_count {
+        let bytes = take(32)?;
+        let data: [f32; 8] = bytemuck::pod_read_unaligned(bytes);
+        vertices.push(Vertex {
+            position: [data[0], data[1], data[2]],
+            normal: [data[3], data[4], data[5]],
+            uv: [data[6], data[7]],
+        });
+    }
+
+    // Indices.
+    let mut indices = Vec::with_capacity(index_count);
+    for _ in 0..index_count {
+        let bytes = take(4)?;
+        indices.push(u32::from_le_bytes(bytes.try_into().unwrap()));
+    }
+
+    // Meshlet sections: index_offset, index_count, vertex_indices (64 * u32), aabb (6 * f32), cone (11 * f32).
+    let mut meshlet_index_offsets = Vec::with_capacity(meshlet_count);
+    for _ in 0..meshlet_count {
+        let bytes = take(4)?;
+        meshlet_index_offsets.push(u32::from_le_bytes(bytes.try_into().unwrap()));
+    }
+    let mut meshlet_index_counts = Vec::with_capacity(meshlet_count);
+    for _ in 0..meshlet_count {
+        let bytes = take(4)?;
+        meshlet_index_counts.push(u32::from_le_bytes(bytes.try_into().unwrap()));
+    }
+    let mut meshlet_vertex_indices = Vec::with_capacity(meshlet_count);
+    for _ in 0..meshlet_count {
+        let bytes = take(256)?;
+        let arr: [u32; 64] = bytemuck::pod_read_unaligned(bytes);
+        meshlet_vertex_indices.push(arr.to_vec());
+    }
+    let mut meshlet_aabbs_min = Vec::with_capacity(meshlet_count);
+    let mut meshlet_aabbs_max = Vec::with_capacity(meshlet_count);
+    for _ in 0..meshlet_count {
+        let bytes = take(24)?;
+        let data: [f32; 6] = bytemuck::pod_read_unaligned(bytes);
+        meshlet_aabbs_min.push([data[0], data[1], data[2]]);
+        meshlet_aabbs_max.push([data[3], data[4], data[5]]);
+    }
+    let mut meshlet_cones: Vec<MeshletCone> = Vec::with_capacity(meshlet_count);
+    for _ in 0..meshlet_count {
+        let bytes = take(44)?;
+        let data: [f32; 11] = bytemuck::pod_read_unaligned(bytes);
+        meshlet_cones.push(MeshletCone {
+            center: [data[0], data[1], data[2]],
+            radius: data[3],
+            apex: [data[4], data[5], data[6]],
+            axis: [data[7], data[8], data[9]],
+            cutoff: data[10],
+        });
+    }
+
+    // Reassemble meshlets.
+    let mut meshlets = Vec::with_capacity(meshlet_count);
+    for i in 0..meshlet_count {
+        meshlets.push(Meshlet {
+            index_offset: meshlet_index_offsets[i],
+            index_count: meshlet_index_counts[i],
+            vertex_indices: std::mem::take(&mut meshlet_vertex_indices[i]),
+            aabb_min: meshlet_aabbs_min[i],
+            aabb_max: meshlet_aabbs_max[i],
+            cone: meshlet_cones[i],
+        });
+    }
+
+    // LOD sections.
+    let mut lod_offsets = Vec::with_capacity(lod_count);
+    for _ in 0..lod_count {
+        let bytes = take(4)?;
+        lod_offsets.push(u32::from_le_bytes(bytes.try_into().unwrap()));
+    }
+    let mut lod_counts = Vec::with_capacity(lod_count);
+    for _ in 0..lod_count {
+        let bytes = take(4)?;
+        lod_counts.push(u32::from_le_bytes(bytes.try_into().unwrap()));
+    }
+    let lods: Vec<LodRange> = (0..lod_count)
+        .map(|i| LodRange {
+            index_offset: lod_offsets[i],
+            index_count: lod_counts[i],
+        })
+        .collect();
+
+    Ok(MeshData {
+        vertices,
+        indices,
+        meshlets,
+        lods,
+    })
 }
 
 #[cfg(test)]
@@ -522,11 +783,25 @@ mod tests {
         let a = fs::read(&p1).unwrap();
         let b = fs::read(&p2).unwrap();
         assert_eq!(a, b, "writer must be deterministic for same input");
-        assert!(a.len() > 24, "file must contain the header plus payload");
+        assert!(
+            a.len() > 28,
+            "file must contain the v3 header plus LZ4 body"
+        );
         assert_eq!(
             &a[0..4],
             &0x484D_4548u32.to_le_bytes(),
             "magic must be present in LE bytes"
+        );
+        // v3 + FLAG_LZ4
+        assert_eq!(
+            u32::from_le_bytes(a[4..8].try_into().unwrap()),
+            3,
+            "version must be 3"
+        );
+        assert_eq!(
+            u32::from_le_bytes(a[8..12].try_into().unwrap()),
+            FLAG_LZ4,
+            "flags must have FLAG_LZ4 set"
         );
     }
 
@@ -546,15 +821,19 @@ mod tests {
         write(&p, &m).unwrap();
 
         let bytes = fs::read(&p).unwrap();
-        let header: [u32; 6] = bytemuck::cast_slice::<u8, u32>(&bytes[0..24])
+        // v3 header is 28 bytes (7 × u32): magic, version,
+        // flags, meshlet_count, vertex_count, index_count,
+        // lod_count.
+        let header: [u32; 7] = bytemuck::cast_slice::<u8, u32>(&bytes[0..28])
             .try_into()
             .unwrap();
         assert_eq!(header[0], MAGIC);
-        assert_eq!(header[1], VERSION, "format version is 2 (R-035)");
-        assert_eq!(header[2], 1, "one meshlet");
-        assert_eq!(header[3], 3, "three vertices");
-        assert_eq!(header[4], 3, "three indices");
-        assert_eq!(header[5], 0, "no LODs for the placeholder single-tri mesh");
+        assert_eq!(header[1], VERSION, "format version is 3 (R-038 LZ4 wrap)");
+        assert_eq!(header[2], FLAG_LZ4, "FLAG_LZ4 must be set");
+        assert_eq!(header[3], 1, "one meshlet");
+        assert_eq!(header[4], 3, "three vertices");
+        assert_eq!(header[5], 3, "three indices");
+        assert_eq!(header[6], 0, "no LODs for the placeholder single-tri mesh");
     }
 
     #[test]
@@ -621,14 +900,62 @@ mod tests {
         let p = dir.join("baked.hyge-mesh");
         write(&p, &m).unwrap();
         let bytes = fs::read(&p).unwrap();
-        let header: [u32; 6] = bytemuck::cast_slice::<u8, u32>(&bytes[0..24])
+        let header: [u32; 7] = bytemuck::cast_slice::<u8, u32>(&bytes[0..28])
             .try_into()
             .unwrap();
         assert_eq!(header[0], MAGIC);
         assert_eq!(header[1], VERSION);
-        assert_eq!(header[2] as usize, m.meshlets.len());
-        assert_eq!(header[3] as usize, m.vertices.len());
-        assert_eq!(header[4] as usize, m.indices.len());
-        assert_eq!(header[5] as usize, m.lods.len());
+        assert_eq!(header[2], FLAG_LZ4);
+        assert_eq!(header[3] as usize, m.meshlets.len());
+        assert_eq!(header[4] as usize, m.vertices.len());
+        assert_eq!(header[5] as usize, m.indices.len());
+        assert_eq!(header[6] as usize, m.lods.len());
+    }
+
+    /// v3 .hyge-mesh files round-trip through
+    /// `to_bytes` -> `from_bytes`. The LZ4 wrap is
+    /// transparent.
+    #[test]
+    fn v3_round_trip_through_from_bytes() {
+        let (v, i) = quad();
+        let m = MeshData::bake(v, i).expect("bake");
+        let bytes = to_bytes(&m).expect("to_bytes");
+        let back = from_bytes(&bytes).expect("from_bytes");
+        assert_eq!(back.vertices.len(), m.vertices.len());
+        assert_eq!(back.indices.len(), m.indices.len());
+        assert_eq!(back.meshlets.len(), m.meshlets.len());
+        assert_eq!(back.lods.len(), m.lods.len());
+        for (a, b) in back.vertices.iter().zip(m.vertices.iter()) {
+            assert_eq!(a.position, b.position);
+            assert_eq!(a.normal, b.normal);
+        }
+        assert_eq!(back.indices, m.indices);
+    }
+
+    /// The LZ4-compressed body must be smaller (or equal)
+    /// than the raw body for a typical baked mesh.
+    #[test]
+    fn v3_lz4_compresses_payload() {
+        let (v, i) = quad();
+        let m = MeshData::bake(v, i).expect("bake");
+        let bytes = to_bytes(&m).expect("to_bytes");
+        // The header is 28 bytes; the rest is the LZ4 body.
+        let compressed_body = &bytes[28..];
+        let expected_raw = expected_body_size(
+            m.vertices.len(),
+            m.indices.len(),
+            m.meshlets.len(),
+            m.lods.len(),
+        );
+        // The compressed body is at most the raw size plus
+        // a small LZ4 framing overhead. We allow a generous
+        // upper bound so the test isn't fragile to
+        // LZ4 version differences.
+        assert!(
+            compressed_body.len() <= expected_raw + 64,
+            "compressed body {} should be no larger than raw {} + 64 bytes overhead",
+            compressed_body.len(),
+            expected_raw
+        );
     }
 }

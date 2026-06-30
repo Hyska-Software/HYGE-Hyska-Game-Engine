@@ -9,6 +9,10 @@ pub use crate::bindless::{
     SlotTag, TextureId,
 };
 pub use crate::config::RendererConfig;
+pub use crate::lambert::{
+    make_uv_sphere, LambertPass, MaterialUniform, MvpUniform, Vertex as LambertVertex,
+    SHADER_SOURCE as LAMBERT_SHADER_SOURCE,
+};
 pub use crate::profiler::{debug_overlay, fps_from_duration, FrameStats, GpuProfiler, PassStats};
 pub use crate::renderer::Renderer;
 pub use crate::triangle::{TrianglePass, Vertex, SHADER_SOURCE, VERTICES};
