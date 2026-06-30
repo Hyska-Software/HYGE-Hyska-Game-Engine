@@ -5,13 +5,14 @@
 //! the application window, the per-frame render graph, the
 //! pre-built first-triangle pipeline (R-024), the bindless
 //! descriptor heap (R-037), the Lambert lit-sphere pass
-//! (M2 / R-038), and the PBR shader contract (R-040).
-//! R-041+ add the IBL bake path and clustered forward pipeline,
-//! cascaded shadows, meshlet culling, post-process, and IBL.
+//! (M2 / R-038), the PBR shader contract (R-040), and the IBL
+//! prefilter + irradiance bake (R-041).
+//! R-042+ add the clustered forward pipeline, cascaded shadows,
+//! meshlet culling, post-process, and scene integration.
 //!
 //! # R-023 (skeleton), R-024 (first triangle), R-025 (profiler),
 //!   R-037 (bindless table), R-038 (Lambert lit-sphere),
-//!   R-040 (PBR shader)
+//!   R-040 (PBR shader), R-041 (IBL bake)
 //!
 //! The public surface:
 //!
@@ -45,7 +46,20 @@
 //!   (`LambertPass::set_material`) so the bindless material
 //!   slot allocated in R-037 is exercised end-to-end.
 //! - [`pbr::SHADER_SOURCE`] — the R-040 clustered-forward PBR
-//!   shader contract. The WGSL shader lives at `src/shader/pbr.wgsl`.
+//!   shader contract. The WGSL shader lives at
+//!   `src/shader/pbr.wgsl`.
+//! - [`ibl`] — the R-041 IBL bake module:
+//!   [`ibl::bake_from_rgbe_hdr`] for the offline + online
+//!   paths, [`ibl::decode_rgbe_hdr`] for the Radiance `.hdr`
+//!   format, [`ibl::prefilter_env`]
+//!   / [`ibl::diffuse_irradiance`] / [`ibl::integrate_brdf`] for the three
+//!   products, and [`write_env_file`](ibl::write_env_file) /
+//!   [`read_env_file`](ibl::read_env_file) for the
+//!   `.hyge-env` on-disk container. The
+//!   `prefilter.wgsl` and `irradiance.wgsl` reference compute
+//!   shaders live at `src/shader/{prefilter,irradiance}.wgsl`.
+//! - [`IblResources`](ibl_gpu::IblResources) — the wgpu-side
+//!   views produced by [`ibl_gpu::upload`] for the PBR pass.
 //! - [`FrameStats`](profiler::FrameStats) — the per-frame profiling
 //!   resource populated by timestamp queries and draw counters.
 //!
@@ -57,6 +71,8 @@
 
 pub mod bindless;
 pub mod config;
+pub mod ibl;
+pub mod ibl_gpu;
 pub mod lambert;
 pub mod pbr;
 pub mod profiler;

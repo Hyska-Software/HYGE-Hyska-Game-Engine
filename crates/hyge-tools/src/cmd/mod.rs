@@ -3,7 +3,8 @@
 //! Each variant of [`crate::cli::Cmd`] maps to exactly one module below.
 //! Only [`import`] and [`cook`] are real implementations in this phase
 //! (R-033); [`headless`], [`inspect`], [`serve`], and [`doctor`] are
-//! stubs that return [`HygeError::Unsupported`] and are filled in by
+//! stubs that return
+//! [`hyge_core::result::HygeError::Unsupported`] and are filled in by
 //! later roadmap items (R-091, R-127, R-150, R-160).
 
 pub mod cook;

@@ -1296,6 +1296,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "tracing",
  "zstd",
 ]
 
@@ -1363,6 +1364,7 @@ name = "hyge-render"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.13.0",
+ "blake3",
  "bytemuck",
  "egui",
  "hyge-asset",

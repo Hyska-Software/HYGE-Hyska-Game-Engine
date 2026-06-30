@@ -24,6 +24,7 @@ rmp-serde = { workspace = true }
 bytemuck = { workspace = true }
 gltf = { workspace = true }
 meshopt = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }

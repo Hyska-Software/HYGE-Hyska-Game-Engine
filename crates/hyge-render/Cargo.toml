@@ -23,6 +23,7 @@ hyge-window = { workspace = true }
 tracing = { workspace = true }
 pollster = { workspace = true }
 egui = { workspace = true }
+blake3 = { workspace = true }
 
 [dev-dependencies]
 hyge-runtime-test = { workspace = true }

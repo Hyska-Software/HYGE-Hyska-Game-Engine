@@ -3,7 +3,7 @@
 //! Three code paths share this entry point:
 //!
 //! - `.gltf` / `.glb` sources go through the full
-//!   [`hyge_asset::import_gltf`] pipeline (R-034 + R-036):
+//!   [`hyge_asset::importer::import_gltf`] pipeline (R-034 + R-036):
 //!   glTF 2.0 is parsed, the mesh / material outputs are written
 //!   to the cache, and every texture is **transcoded to KTX2**
 //!   (real container, full mip chain) by the R-036 pipeline.
@@ -123,6 +123,8 @@ pub fn run(path: &Path, out: &Path) -> HygeResult<String> {
         run_gltf(path, out)
     } else if is_texture_source(path) {
         run_texture(path, out)
+    } else if hyge_asset::importer::is_environment_source(path) {
+        run_environment(path, out)
     } else {
         run_passthrough(path, out)
     }
@@ -192,6 +194,23 @@ fn run_texture(path: &Path, out: &Path) -> HygeResult<String> {
         res.used_toktx
     );
     Ok(res.hash)
+}
+
+fn run_environment(path: &Path, out: &Path) -> HygeResult<String> {
+    hyge_log!(info, "importing environment {}", path.display());
+    let report = hyge_asset::importer::import_environment(path, out)?;
+    hyge_log!(
+        info,
+        "baked {} -> {} (prefilter {}x{} mips {}, irradiance {}x6, brdf_lut {} squared)",
+        path.display(),
+        report.env_hash,
+        report.prefilter_size,
+        report.prefilter_size,
+        report.prefilter_mips,
+        report.irradiance_size,
+        report.brdf_lut_size,
+    );
+    Ok(report.env_hash)
 }
 
 fn decode_texture_source(path: &Path) -> HygeResult<(u32, u32, TextureFormat, Vec<u8>)> {

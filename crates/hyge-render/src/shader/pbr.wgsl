@@ -20,7 +20,7 @@ const ALPHA_MODE_CUTOUT : u32 = 1u;
 const ALPHA_MODE_BLEND : u32 = 2u;
 const MATERIAL_FLAG_EMISSIVE_MAP : u32 = 1u;
 const PBR_PACKED_VERTEX_STRIDE_BYTES : u32 = 48u;
-const PREFILTERED_ENV_MAX_LOD : f32 = 4.0;
+const PREFILTERED_ENV_MAX_LOD : f32 = 8.0;
 
 struct GpuMesh {
     vertex_offset : u32,

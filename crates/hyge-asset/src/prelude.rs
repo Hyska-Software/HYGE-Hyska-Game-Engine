@@ -9,7 +9,10 @@ pub use crate::{
         GpuUploadPayload, GpuUploadResult, GpuUploadTask, MaterialUploadData, MeshUploadData,
         TextureUploadData,
     },
-    importer::{import_gltf, ImportError, ImportOptions, ImportReport},
+    importer::{
+        import_environment, import_gltf, is_environment_source, EnvironmentImportReport,
+        ImportError, ImportOptions, ImportReport,
+    },
     server::{AssetServer, GpuResourceKind, LoadedAssetGpu},
     Asset, AssetDb, AssetId, AssetPlugin, AssetResolver, FileWatcher, Handle, LoadContext,
     LoadedAsset, ReloadQueue,

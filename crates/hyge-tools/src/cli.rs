@@ -4,7 +4,8 @@
 //! enum that names every subcommand required by the engine's CLI surface
 //! (see `docs/architecture.md` §6.14). All six variants parse and dispatch;
 //! only `Import` and `Cook` are *implemented* in this phase (R-033). The
-//! other four return a clear "not yet implemented" [`HygeError`] so the
+//! other four return a clear "not yet implemented"
+//! [`hyge_core::result::HygeError`] so the
 //! dispatcher is exercised end-to-end today and the gap is visible in
 //! `--help` and in the runtime message.
 
@@ -40,7 +41,7 @@ pub struct Cli {
 /// table, and the architecture sketch (`docs/architecture.md` §6.14) stay
 /// in lockstep. Only [`Cmd::Import`] and [`Cmd::Cook`] are wired to real
 /// implementations in this phase (R-033); the other variants parse cleanly
-/// and return [`HygeError::Unsupported`] from their `cmd/<name>::run`
+/// and return [`hyge_core::result::HygeError::Unsupported`] from their `cmd/<name>::run`
 /// shims, so the dispatcher is still exercised end-to-end.
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
@@ -142,12 +143,12 @@ impl Cmd {
     /// Every variant maps to exactly one function, and every function
     /// returns the same [`HygeResult<()>`] shape so the dispatcher stays
     /// trivial. Unimplemented subcommands return
-    /// [`HygeError::Unsupported`] with a phase reference so the user gets
+    /// [`hyge_core::result::HygeError::Unsupported`] with a phase reference so the user gets
     /// a useful message instead of a panic.
     ///
     /// # Errors
     ///
-    /// - [`HygeError::Unsupported`] for `headless`, `inspect`, `serve`,
+    /// - [`hyge_core::result::HygeError::Unsupported`] for `headless`, `inspect`, `serve`,
     ///   and `doctor` (deferred to a later roadmap item).
     /// - Any error produced by the dispatched `cmd/<name>::run`
     ///   implementation, propagated via `?`.

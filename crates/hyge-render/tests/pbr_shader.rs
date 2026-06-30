@@ -48,4 +48,18 @@ fn pbr_cpu_constants_match_shader_literals() {
     assert_eq!(MATERIAL_FLAG_EMISSIVE_MAP, 1);
     assert_eq!(PBR_PACKED_VERTEX_STRIDE_BYTES, 48);
     assert!(PBR_SHADER_SOURCE.contains("const PBR_PACKED_VERTEX_STRIDE_BYTES : u32 = 48u"));
+    // R-041: the IBL prefilter cubemap base size grew from
+    // 32 (R-040 contract) to 256, which lifted the max LOD
+    // the PBR shader samples from 4.0 to 8.0. The CPU and
+    // shader constants must agree.
+    assert_eq!(PBR_PREFILTERED_ENV_MAX_LOD, 8.0);
+    assert!(PBR_SHADER_SOURCE.contains("const PREFILTERED_ENV_MAX_LOD : f32 = 8.0"));
+    // And the IBL prefilter / irradiance reference WGSL must
+    // also be naga-parseable; the actual validate is in
+    // `tests/ibl.rs`, but here we assert the embedded source
+    // contains the expected entry points.
+    assert!(PREFILTER_SHADER_SOURCE.contains("@compute"));
+    assert!(PREFILTER_SHADER_SOURCE.contains("importance_sample_ggx"));
+    assert!(IRRADIANCE_SHADER_SOURCE.contains("@compute"));
+    assert!(IRRADIANCE_SHADER_SOURCE.contains("hammersley"));
 }

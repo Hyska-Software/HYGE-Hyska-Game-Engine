@@ -7,9 +7,13 @@
 //! 3. Writes `.hyge-mesh` / `.hyge-mat` / `.ktx2` /
 //!    `.hyge-meta.json` into the configured cook directory, with
 //!    each output content-addressed by its BLAKE3 hash.
-//! 4. Records every hash → path mapping plus the
-//!    `mesh → material`, `mesh → texture`, `material → texture`
-//!    dependency edges into the [`AssetDb`].
+//! 4. If a sibling `.hdr` is present next to the source glTF
+//!    (the Khronos glTF-Sample-Environments convention), bakes
+//!    it into `.hyge-env` and records the result as a
+//!    dependency of the scene's mesh hash (R-041).
+//! 5. Records every hash → path mapping plus the
+//!    `mesh → material`, `mesh → texture`, `material → texture`,
+//!    and `mesh → env` dependency edges into the [`AssetDb`].
 //!
 //! R-036: the texture writer is a real KTX2 container
 //! (transcoded from the RGBA8 source the `gltf` crate
@@ -17,6 +21,13 @@
 //! [`crate::importer::transcode`]. The pure-Rust path is the
 //! default; the BC7/ASTC 4x4 `toktx` path is opt-in through
 //! [`ImportOptions::compression_mode`].
+//!
+//! R-041: the sibling-`.hdr` hook calls
+//! [`crate::importer::environment::import_environment`] to
+//! bake the IBL set. The returned hash is recorded as a child
+//! dependency of the mesh hash so the runtime
+//! `WorldLoader` can pick the environment up by walking
+//! dependencies from the scene's root mesh.
 
 use std::fs;
 use std::io::Read;
@@ -28,6 +39,7 @@ use hyge_core::result::{HygeError, HygeResult};
 
 use crate::asset::AssetId;
 use crate::db::AssetDb;
+use crate::importer::environment;
 use crate::importer::gltf::{self, GltfScene};
 use crate::importer::material;
 use crate::importer::mesh;
@@ -86,6 +98,9 @@ pub struct ImportReport {
     pub material_hashes: Vec<String>,
     /// BLAKE3 hexes of the texture assets produced.
     pub texture_hashes: Vec<String>,
+    /// BLAKE3 hex of the cooked `.hyge-env` file when a
+    /// sibling HDR was found (R-041); empty when not.
+    pub environment_hash: String,
     /// Number of `KHR_lights_punctual` lights, 0 when absent.
     pub light_count: u32,
     /// `false` once every texture is a real KTX2 container
@@ -271,12 +286,42 @@ fn write_outputs(
         child: source_hash.to_string(),
     });
 
+    // -- environment (R-041) -----------------------------------------
+    // The Khronos glTF-Sample-Environments test corpus uses the
+    // convention `<scene>.gltf` next to `<scene>.hdr`. When a
+    // sibling HDR is present, bake it into `.hyge-env` and
+    // record the result as a `mesh → env` dependency edge.
+    let mut environment_hash = String::new();
+    if let Some(hdr_path) = environment::sibling_hdr(source) {
+        match environment::import_environment(&hdr_path, out_dir) {
+            Ok(env_report) => {
+                environment_hash = env_report.env_hash.clone();
+                dependencies.push(DependencyEdge {
+                    parent: mesh_hash.clone(),
+                    child: env_report.env_hash,
+                });
+            }
+            Err(e) => {
+                // The HDR is optional; a parse failure here is
+                // logged and the glTF import continues without
+                // IBL data. The scene's `WorldLoader` will then
+                // fall back to a default environment (M4+).
+                tracing::warn!(
+                    error = %e,
+                    hdr = %hdr_path.display(),
+                    "ibl bake from sibling hdr failed; continuing without IBL"
+                );
+            }
+        }
+    }
+
     // -- meta ---------------------------------------------------------
     let report = ImportReport {
         source_hash: source_hash.to_string(),
         mesh_hash: mesh_hash.clone(),
         material_hashes: material_hashes.clone(),
         texture_hashes: texture_hashes.clone(),
+        environment_hash: environment_hash.clone(),
         light_count: scene.light_count,
         transcode_pending: false,
     };
@@ -316,6 +361,12 @@ fn record_in_db(
     }
     for h in &report.texture_hashes {
         assets.push((id_from_hex(h), out_dir.join(format!("{h}.ktx2"))));
+    }
+    if !report.environment_hash.is_empty() {
+        assets.push((
+            id_from_hex(&report.environment_hash),
+            out_dir.join(format!("{}.hyge-env", report.environment_hash)),
+        ));
     }
     let source_id = id_from_hex(&report.source_hash);
     assets.push((source_id, PathBuf::from(&report.source_hash)));
