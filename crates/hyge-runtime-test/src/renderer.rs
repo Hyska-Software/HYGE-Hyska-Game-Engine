@@ -66,6 +66,15 @@ impl TestRenderer {
         self.renderer.queue()
     }
 
+    /// Returns a reference to the renderer's bindless
+    /// descriptor heap (R-037). Integration tests that
+    /// need to register meshes / materials / textures
+    /// reach in through this accessor.
+    #[must_use]
+    pub fn renderer_bindless(&self) -> &hyge_render::prelude::BindlessTable {
+        self.renderer.bindless()
+    }
+
     /// Returns the texture format the pre-built triangle pipeline
     /// was created with. Off-screen render targets should use
     /// this format.

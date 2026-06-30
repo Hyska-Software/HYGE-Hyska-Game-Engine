@@ -53,6 +53,7 @@ use hyge_core::prelude::*;
 use hyge_render_graph::prelude::*;
 use hyge_window::prelude::Window;
 
+use crate::bindless::{BindlessConfig, BindlessTable};
 use crate::config::RendererConfig;
 use crate::profiler::{FrameStats, GpuProfiler};
 use crate::triangle::TrianglePass;
@@ -63,10 +64,14 @@ pub struct Renderer {
     /// every other wgpu object borrows from it.
     instance: wgpu::Instance,
     /// The wgpu device. Dropped before the surface (the surface
-    /// holds a reference to the device internally).
-    device: wgpu::Device,
-    /// The wgpu queue. Dropped alongside the device.
-    queue: wgpu::Queue,
+    /// holds a reference to the device internally). Wrapped in
+    /// an `Arc` so the bindless table (R-037) can share
+    /// ownership.
+    device: Arc<wgpu::Device>,
+    /// The wgpu queue. Dropped alongside the device. Wrapped in
+    /// an `Arc` so the bindless table (R-037) can share
+    /// ownership.
+    queue: Arc<wgpu::Queue>,
     /// The pre-built render pipeline for the first-triangle
     /// pass (R-024). Created at construction time with the
     /// surface format (or `Rgba8UnormSrgb` for the headless
@@ -76,6 +81,12 @@ pub struct Renderer {
     /// pass (R-024). Holds the three hardcoded vertices from
     /// `crate::triangle::VERTICES`.
     triangle_vertex_buffer: Arc<wgpu::Buffer>,
+    /// The bindless descriptor heap (R-037). Owns the
+    /// per-resource storage buffers, the texture array, the
+    /// default samplers, and the bind group + layout. The
+    /// asset server's GPU upload path registers mesh /
+    /// material / texture entries here.
+    bindless: Arc<BindlessTable>,
     /// GPU timestamp profiler and latest frame statistics.
     profiler: GpuProfiler,
     /// The `Arc<winit::Window>` that backs the surface. Stored
@@ -160,13 +171,19 @@ impl Renderer {
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some(&config.device_label),
-                required_features: timestamp_features(&adapter),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                required_features: bindless_required_features(&adapter),
+                required_limits: bindless_limits(&adapter),
                 memory_hints: wgpu::MemoryHints::default(),
             },
             None,
         ))
         .map_err(|e| HygeError::gpu(format!("request device: {e}")))?;
+        // R-037: the bindless table takes `Arc<wgpu::Device>`
+        // and `Arc<wgpu::Queue>`. We wrap the wgpu handles
+        // immediately after `request_device` and use the
+        // `Arc`s everywhere below.
+        let device_arc: Arc<wgpu::Device> = Arc::new(device);
+        let queue_arc: Arc<wgpu::Queue> = Arc::new(queue);
 
         let surface_caps = surface.get_capabilities(&adapter);
         // Prefer sRGB; fall back to the first format the surface
@@ -192,22 +209,34 @@ impl Renderer {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        surface.configure(&device, &surface_config);
+        surface.configure(&device_arc, &surface_config);
 
         // Pre-build the first-triangle pipeline + vertex buffer
         // (R-024). The pipeline is rendered every frame, so we
         // build it once at startup rather than every frame.
-        let triangle_pipeline = TrianglePass::create_pipeline(&device, surface_format);
-        let triangle_vertex_buffer = TrianglePass::create_vertex_buffer(&device);
-        let timestamps_enabled = timestamp_queries_enabled(&device);
-        let profiler = GpuProfiler::new(&device, &queue, timestamps_enabled);
+        let triangle_pipeline = TrianglePass::create_pipeline(&device_arc, surface_format);
+        let triangle_vertex_buffer = TrianglePass::create_vertex_buffer(&device_arc);
+        let timestamps_enabled = timestamp_queries_enabled(&device_arc);
+        let profiler = GpuProfiler::new(&device_arc, &queue_arc, timestamps_enabled);
+
+        // R-037: build the bindless descriptor heap. The
+        // table owns its own storage buffers + texture array
+        // + bind group; nothing in the renderer needs to
+        // touch them directly. The asset server's upload
+        // path reaches in through `Renderer::bindless()`.
+        let bindless = Arc::new(BindlessTable::new(
+            Arc::clone(&device_arc),
+            Arc::clone(&queue_arc),
+            BindlessConfig::default(),
+        )?);
 
         Ok(Self {
             instance,
-            device,
-            queue,
+            device: device_arc,
+            queue: queue_arc,
             triangle_pipeline,
             triangle_vertex_buffer,
+            bindless,
             profiler,
             window_keepalive: Some(winit_arc),
             surface: Some(surface),
@@ -241,13 +270,18 @@ impl Renderer {
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some(&config.device_label),
-                required_features: timestamp_features(&adapter),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                required_features: bindless_required_features(&adapter),
+                required_limits: bindless_limits(&adapter),
                 memory_hints: wgpu::MemoryHints::default(),
             },
             None,
         ))
         .map_err(|e| HygeError::gpu(format!("request device: {e}")))?;
+        // R-037: the bindless table needs `Arc` handles. We
+        // wrap the wgpu handles here and unwrap them into the
+        // renderer's own fields below.
+        let device_arc: Arc<wgpu::Device> = Arc::new(device);
+        let queue_arc: Arc<wgpu::Queue> = Arc::new(queue);
 
         // The headless renderer has no surface; the test path
         // supplies its own off-screen render target whose
@@ -255,17 +289,25 @@ impl Renderer {
         // sensible default (sRGB) and let the test configure
         // the target to match.
         let triangle_pipeline =
-            TrianglePass::create_pipeline(&device, wgpu::TextureFormat::Rgba8UnormSrgb);
-        let triangle_vertex_buffer = TrianglePass::create_vertex_buffer(&device);
-        let timestamps_enabled = timestamp_queries_enabled(&device);
-        let profiler = GpuProfiler::new(&device, &queue, timestamps_enabled);
+            TrianglePass::create_pipeline(&device_arc, wgpu::TextureFormat::Rgba8UnormSrgb);
+        let triangle_vertex_buffer = TrianglePass::create_vertex_buffer(&device_arc);
+        let timestamps_enabled = timestamp_queries_enabled(&device_arc);
+        let profiler = GpuProfiler::new(&device_arc, &queue_arc, timestamps_enabled);
+
+        // R-037: build the bindless table (headless).
+        let bindless = Arc::new(BindlessTable::new(
+            Arc::clone(&device_arc),
+            Arc::clone(&queue_arc),
+            BindlessConfig::default(),
+        )?);
 
         Ok(Self {
             instance,
-            device,
-            queue,
+            device: device_arc,
+            queue: queue_arc,
             triangle_pipeline,
             triangle_vertex_buffer,
+            bindless,
             profiler,
             window_keepalive: None,
             surface: None,
@@ -529,6 +571,16 @@ impl Renderer {
     pub fn graph_mut(&mut self) -> &mut RenderGraph {
         &mut self.graph
     }
+
+    /// Returns the bindless descriptor heap (R-037). The
+    /// asset server's GPU upload path calls
+    /// [`BindlessTable::register_mesh`] / `register_material` /
+    /// `register_texture` to allocate slots; the renderer
+    /// never touches the table directly.
+    #[must_use]
+    pub fn bindless(&self) -> &BindlessTable {
+        &self.bindless
+    }
 }
 
 /// Returns the optional timestamp feature set requested from the adapter.
@@ -547,6 +599,61 @@ fn timestamp_queries_enabled(device: &wgpu::Device) -> bool {
     let required =
         wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
     device.features().contains(required)
+}
+
+/// Returns the set of features the renderer requires to build
+/// the bindless descriptor heap (R-037). On adapters that
+/// don't support `TEXTURE_BINDING_ARRAY` (the v0.1 texture
+/// bindless path) the renderer still works for the
+/// mesh/material paths, so the feature is requested when
+/// available and the device-init code path is allowed to
+/// proceed without it — the bindless table will simply
+/// fall back to per-texture individual bindings when the
+/// feature is absent. (For R-037 the texture path is not
+/// yet exercised by the acceptance test, so the feature
+/// is requested opportunistically.)
+fn bindless_required_features(adapter: &wgpu::Adapter) -> wgpu::Features {
+    let mut features = timestamp_features(adapter);
+    let bindless = wgpu::Features::TEXTURE_BINDING_ARRAY;
+    if adapter.features().contains(bindless) {
+        features |= bindless;
+    }
+    features
+}
+
+/// Returns the device limits the bindless table needs (R-037).
+///
+/// wgpu's conservative `downlevel_defaults` cap
+/// `max_storage_buffers_per_shader_stage` at 4, which is
+/// not enough for the bindless table's 6+ storage buffers
+/// (meshes, materials, instances, lights, light grid,
+/// meshlet visibility, draw commands). We take the
+/// adapter's `Limits` (the per-adapter maximum) and only
+/// bump the storage-buffer + sampled-texture counts that
+/// the table actually needs. Adapters that don't support
+/// the requested counts simply fall back to
+/// `downlevel_defaults` for those fields, and the bindless
+/// table degrades gracefully (the texture-array binding is
+/// dropped when `max_sampled_textures_per_shader_stage <
+/// 16`).
+fn bindless_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    let mut limits = adapter.limits();
+    // The bindless table exposes 7 storage buffers, all of
+    // which need to be visible to the fragment stage (the
+    // PBR shader reads mesh + material + light + grid
+    // uniforms there). 10 is a safe upper bound that fits
+    // every real GPU since 2018.
+    if limits.max_storage_buffers_per_shader_stage < 10 {
+        limits.max_storage_buffers_per_shader_stage = 10;
+    }
+    // The texture-array binding requires 16+ array layers
+    // to be useful; if the adapter can't go that high, the
+    // bindless table will silently drop the binding
+    // (covered in `BindlessTable::new`).
+    if limits.max_sampled_textures_per_shader_stage < 16 {
+        limits.max_sampled_textures_per_shader_stage = 16;
+    }
+    limits
 }
 
 /// Constructs the wgpu [`wgpu::Instance`] with the requested

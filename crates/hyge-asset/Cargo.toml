@@ -10,7 +10,9 @@ description = "Content-addressed asset DB (BLAKE3), loader registry, hot-reload 
 [dependencies]
 hyge-core = { workspace = true }
 hyge-ecs = { workspace = true }
+hyge-render = { workspace = true }
 bevy_app = { workspace = true }
+bevy_tasks = { workspace = true }
 rusqlite = { workspace = true }
 blake3 = { workspace = true }
 notify = { workspace = true }

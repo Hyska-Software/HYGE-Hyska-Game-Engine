@@ -1279,11 +1279,13 @@ name = "hyge-asset"
 version = "0.1.0"
 dependencies = [
  "bevy_app",
+ "bevy_tasks",
  "blake3",
  "bytemuck",
  "gltf",
  "hyge-core",
  "hyge-ecs",
+ "hyge-render",
  "image",
  "lz4_flex",
  "meshopt",
@@ -1365,6 +1367,7 @@ dependencies = [
  "hyge-core",
  "hyge-ecs",
  "hyge-render-graph",
+ "hyge-runtime-test",
  "hyge-window",
  "naga",
  "pollster",
