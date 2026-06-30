@@ -678,10 +678,11 @@ title = "PBR shader (pbr.wgsl)"
 phase = "phase_4"
 owner = "render"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "high"
 dependencies = ["R-038"]
 summary = "Vertex + fragment shader implementing GGX BRDF with metallic-roughness PBR."
+completion_notes = "Implemented crates/hyge-render/src/shader/pbr.wgsl and crates/hyge-render/src/pbr.rs. The shader defines the R-040 PBR contract: @group(0) bindless access to meshes/materials/instances/draw commands/textures, @group(1) frame/geometry/IBL resources, storage-buffer vertex pulling from GpuMesh::vertex_offset, world position/normal/tangent/UV outputs, GGX distribution + Smith geometry + Schlick Fresnel metallic-roughness BRDF, irradiance + prefiltered environment + BRDF LUT IBL, emissive-map contribution through MATERIAL_FLAG_EMISSIVE_MAP, cutout discard via ALPHA_MODE_CUTOUT, and alpha output for ALPHA_MODE_BLEND. Added crates/hyge-render/tests/pbr_shader.rs with Naga parse/validate coverage and ABI feature checks. Validation evidence: cargo test -p hyge-render --test pbr_shader (4 passed), cargo test -p hyge-render (28 unit + bindless_stress + lit_sphere + pbr_shader passed), cargo clippy -p hyge-render --all-targets -- --deny warnings passed. cargo fmt --all was run; rustfmt emitted existing stable-toolchain warnings for unstable rustfmt options. R-041/R-042 remain responsible for IBL bake products and clustered light-grid integration; R-043 remains responsible for wiring global PBR vertex buffers from RenderExtract."
 acceptance = [
   "vertex shader pulls from bindless buffer, outputs world position, normal, tangent, UV",
   "fragment shader evaluates GGX BRDF (metallic-roughness, IBL prefilter + irradiance)",

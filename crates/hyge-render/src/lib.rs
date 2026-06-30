@@ -4,12 +4,14 @@
 //! thread), the wgpu surface and swapchain configuration bound to
 //! the application window, the per-frame render graph, the
 //! pre-built first-triangle pipeline (R-024), the bindless
-//! descriptor heap (R-037), and the Lambert lit-sphere pass
-//! (M2 / R-038). R-040+ add the clustered forward pipeline,
+//! descriptor heap (R-037), the Lambert lit-sphere pass
+//! (M2 / R-038), and the PBR shader contract (R-040).
+//! R-041+ add the IBL bake path and clustered forward pipeline,
 //! cascaded shadows, meshlet culling, post-process, and IBL.
 //!
 //! # R-023 (skeleton), R-024 (first triangle), R-025 (profiler),
-//!   R-037 (bindless table), R-038 (Lambert lit-sphere)
+//!   R-037 (bindless table), R-038 (Lambert lit-sphere),
+//!   R-040 (PBR shader)
 //!
 //! The public surface:
 //!
@@ -42,6 +44,8 @@
 //!   The pass uses a per-frame uniform for the material
 //!   (`LambertPass::set_material`) so the bindless material
 //!   slot allocated in R-037 is exercised end-to-end.
+//! - [`pbr::SHADER_SOURCE`] — the R-040 clustered-forward PBR
+//!   shader contract. The WGSL shader lives at `src/shader/pbr.wgsl`.
 //! - [`FrameStats`](profiler::FrameStats) — the per-frame profiling
 //!   resource populated by timestamp queries and draw counters.
 //!
@@ -54,6 +58,7 @@
 pub mod bindless;
 pub mod config;
 pub mod lambert;
+pub mod pbr;
 pub mod profiler;
 pub mod renderer;
 pub mod triangle;
