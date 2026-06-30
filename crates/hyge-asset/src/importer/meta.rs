@@ -71,9 +71,17 @@ pub struct TextureRecord {
     pub width: u32,
     /// Height in pixels.
     pub height: u32,
-    /// Pixel format (the integer encoding of
+    /// Source pixel format (the integer encoding of
     /// [`crate::importer::texture::TextureFormat`]).
     pub format: u8,
+    /// Vulkan format the KTX2 file declares (`vkFormat`).
+    /// `0` when the source is a passthrough KTX1 from a
+    /// pre-R-036 cache; populated by R-036.
+    pub vk_format: u32,
+    /// Number of mip levels written to the KTX2 file. `1`
+    /// when mipmaps are disabled or the source is a
+    /// pre-R-036 passthrough.
+    pub level_count: u32,
     /// `true` for passthrough bytes; `false` once R-036 has
     /// transcoded the file to a real KTX2 container.
     pub transcode_pending: bool,
@@ -92,8 +100,13 @@ pub struct TextureInfo {
     pub width: u32,
     /// Height in pixels.
     pub height: u32,
-    /// Pixel format.
+    /// Source pixel format.
     pub format: TextureFormat,
+    /// Vulkan format the KTX2 file declares. `0` when the
+    /// source is a passthrough.
+    pub vk_format: u32,
+    /// Number of mip levels written to the KTX2 file.
+    pub level_count: u32,
     /// `true` for passthrough bytes; `false` for an already-valid
     /// KTX2 container.
     pub transcode_pending: bool,
@@ -124,6 +137,8 @@ pub fn build(
             width: t.width,
             height: t.height,
             format: t.format as u8,
+            vk_format: t.vk_format,
+            level_count: t.level_count,
             transcode_pending: t.transcode_pending,
             source_mime: t.source_mime.clone(),
         })
@@ -179,6 +194,8 @@ mod tests {
                 width: 16,
                 height: 16,
                 format: TextureFormat::R8G8B8A8,
+                vk_format: 0,
+                level_count: 1,
                 transcode_pending: true,
                 source_mime: "image/png".into(),
             },
@@ -187,6 +204,8 @@ mod tests {
                 width: 32,
                 height: 32,
                 format: TextureFormat::R8G8B8A8,
+                vk_format: 0,
+                level_count: 1,
                 transcode_pending: true,
                 source_mime: "image/ktx2".into(),
             },
@@ -224,6 +243,8 @@ mod tests {
             width: 8,
             height: 8,
             format: TextureFormat::R8G8B8A8,
+            vk_format: 37,
+            level_count: 4,
             transcode_pending: false,
             source_mime: "image/ktx2".into(),
         }];

@@ -200,11 +200,7 @@ mod tests {
         let manifests: Vec<_> = fs::read_dir(&cook_dir)
             .expect("cook dir")
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .ends_with(".source-path")
-            })
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".source-path"))
             .collect();
         assert_eq!(manifests.len(), 3, "one manifest per imported file");
     }

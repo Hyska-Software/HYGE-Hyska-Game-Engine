@@ -27,6 +27,7 @@ use serial_test::serial;
 
 use crate::asset::AssetId;
 use crate::db::AssetDb;
+use crate::importer::transcode::{CompressionMode, TargetFormat};
 use crate::importer::{import_gltf, ImportOptions, ImportReport};
 
 /// Minimal valid glTF 2.0 document containing a single triangle,
@@ -175,6 +176,9 @@ fn run_import(gltf_path: &Path, out_dir: &Path) -> HygeResult<ImportReport> {
         source: gltf_path.to_path_buf(),
         out_dir: out_dir.to_path_buf(),
         asset_db: Some(out_dir.join(".hyge.db")),
+        compression_mode: CompressionMode::Uncompressed,
+        target_format: TargetFormat::Uncompressed,
+        toktx_path: None,
     };
     import_gltf(&opts).map_err(|e| e.0)
 }
@@ -546,4 +550,175 @@ fn r035_meshlet_bake_lands_on_disk_with_three_lods() {
         mesh_bytes, bytes_b,
         "R-035 determinism: same input glTF must produce identical .hyge-mesh bytes"
     );
+}
+
+/// R-036 acceptance test: a glTF that references a real
+/// embedded PNG texture must end up with a content-addressed
+/// `.ktx2` cache file that is a real KTX2 container with the
+/// expected mip chain. The fixture embeds the PNG via a
+/// buffer view (`image.bufferView`) so the test does not
+/// depend on the `gltf` crate's external-reference loader.
+#[test]
+#[serial]
+fn r036_ktx2_transcode_writes_real_ktx2_with_mip_chain() {
+    let dir = golden_dir("r036");
+    // Build a real 2x2 RGBA PNG.
+    let img = image::RgbaImage::from_fn(2, 2, |x, y| match (x, y) {
+        (0, 0) => image::Rgba([255, 0, 0, 255]),
+        (1, 0) => image::Rgba([0, 255, 0, 255]),
+        (0, 1) => image::Rgba([0, 0, 255, 255]),
+        _ => image::Rgba([255, 255, 255, 255]),
+    });
+    let mut png_buf: Vec<u8> = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut png_buf);
+        img.write_to(&mut cursor, image::ImageFormat::Png)
+            .expect("encode PNG");
+    }
+    let png_len = png_buf.len();
+    // Round png_len up to 4 bytes for the buffer view alignment.
+    let png_padded = round_up_4(png_len);
+    while png_buf.len() < png_padded {
+        png_buf.push(0);
+    }
+    // Geometry occupies bytes 0..108; the PNG payload starts at
+    // 108. The buffers[0].byteLength must cover both.
+    let total_buf_len = 108 + png_padded;
+
+    // Hand-rolled glTF: a 1-triangle mesh, one material that
+    // references the base-color texture by bufferView. The
+    // image bufferView (index 4) sits after the geometry
+    // bufferViews in the same BIN chunk.
+    let gltf_json = format!(
+        r#"{{
+            "asset": {{ "version": "2.0" }},
+            "scene": 0,
+            "scenes": [ {{ "nodes": [0] }} ],
+            "nodes":  [ {{ "mesh": 0 }} ],
+            "meshes": [ {{
+              "primitives": [ {{
+                "attributes": {{ "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 }},
+                "indices": 3,
+                "material": 0
+              }} ]
+            }} ],
+            "accessors": [
+              {{ "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3", "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0] }},
+              {{ "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3" }},
+              {{ "bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2" }},
+              {{ "bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR" }}
+            ],
+            "materials": [ {{
+              "name": "R036",
+              "pbrMetallicRoughness": {{
+                "baseColorTexture": {{ "index": 0 }},
+                "baseColorFactor": [1.0, 1.0, 1.0, 1.0]
+              }}
+            }} ],
+            "textures": [ {{ "source": 0 }} ],
+            "images":   [ {{ "bufferView": 4, "mimeType": "image/png" }} ],
+            "buffers":  [ {{ "byteLength": {total_buf_len} }} ],
+            "bufferViews": [
+              {{ "buffer": 0, "byteOffset": 0,    "byteLength": 36 }},
+              {{ "buffer": 0, "byteOffset": 36,   "byteLength": 36 }},
+              {{ "buffer": 0, "byteOffset": 72,   "byteLength": 24 }},
+              {{ "buffer": 0, "byteOffset": 96,   "byteLength": 12 }},
+              {{ "buffer": 0, "byteOffset": 108,  "byteLength": {png_len} }}
+            ]
+          }}"#
+    );
+    // The geometry bin (108 bytes: 36 pos + 36 nrm + 24 uv +
+    // 12 u16 indices with 4-byte padding) followed by the
+    // PNG payload (padded to 4 bytes).
+    let mut bin: Vec<u8> = Vec::with_capacity(total_buf_len);
+    // positions (36)
+    for chunk in [[0.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+        for v in chunk {
+            bin.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    // normals (36)
+    for chunk in [[0.0f32, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]] {
+        for v in chunk {
+            bin.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    // uvs (24)
+    for chunk in [[0.0f32, 0.0], [1.0, 0.0], [0.0, 1.0]] {
+        for v in chunk {
+            bin.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    // indices (6 bytes + 6 bytes padding to 12)
+    bin.extend_from_slice(&0u16.to_le_bytes());
+    bin.extend_from_slice(&1u16.to_le_bytes());
+    bin.extend_from_slice(&2u16.to_le_bytes());
+    bin.extend_from_slice(&[0u8; 6]);
+    // bin is now 108 bytes; append the PNG payload.
+    bin.extend_from_slice(&png_buf);
+    // Pad to 4-byte boundary.
+    while bin.len() < round_up_4(bin.len()) {
+        bin.push(0);
+    }
+
+    let json_bytes = gltf_json.as_bytes();
+    let bin_padded_total = round_up_4(bin.len());
+    let json_padded = round_up_4(json_bytes.len());
+    let total = 12 + 8 + json_padded + 8 + bin_padded_total;
+    let mut glb = Vec::with_capacity(total);
+    glb.extend_from_slice(b"glTF");
+    glb.extend_from_slice(&2u32.to_le_bytes());
+    glb.extend_from_slice(&(total as u32).to_le_bytes());
+    glb.extend_from_slice(&(json_padded as u32).to_le_bytes());
+    glb.extend_from_slice(&0x4E4F_534Au32.to_le_bytes());
+    glb.extend_from_slice(json_bytes);
+    glb.resize(12 + 8 + json_padded, 0x20);
+    glb.extend_from_slice(&(bin_padded_total as u32).to_le_bytes());
+    glb.extend_from_slice(&0x004E_4942u32.to_le_bytes());
+    glb.extend_from_slice(&bin);
+    glb.resize(total, 0);
+
+    let src = write_gltf(&dir, "r036.glb", &glb);
+    let out = dir.join("cook");
+    let report = run_import(&src, &out).expect("R-036 import must succeed");
+
+    // R-036 must produce exactly one texture, and the report
+    // must declare it as no longer pending transcode.
+    assert_eq!(report.texture_hashes.len(), 1, "one texture in the fixture");
+    assert!(
+        !report.transcode_pending,
+        "R-036 must report transcode_pending=false once the KTX2 is on disk"
+    );
+
+    // The cache file is content-addressed and a real KTX2.
+    let tex_path = out.join(format!("{}.ktx2", report.texture_hashes[0]));
+    assert!(
+        tex_path.is_file(),
+        "KTX2 file missing: {}",
+        tex_path.display()
+    );
+    let raw = fs::read(&tex_path).expect("KTX2 readable");
+    assert_eq!(
+        &raw[0..12],
+        &crate::importer::texture::KTX2_MAGIC,
+        "transcoded texture must be a real KTX2 container"
+    );
+    // 2x2 -> floor(log2(2)) + 1 = 2 levels (2, 1).
+    let level_count = u32::from_le_bytes(raw[24..28].try_into().unwrap());
+    assert_eq!(level_count, 2, "expected 2 mip levels for 2x2 source");
+    // vkFormat: 37 = R8G8B8A8_UNORM (uncompressed fallback).
+    let vk_format = u32::from_le_bytes(raw[12..16].try_into().unwrap());
+    assert_eq!(vk_format, 37, "expected VK_FORMAT_R8G8B8A8_UNORM (37)");
+
+    // The meta document must record the new per-texture fields.
+    let meta_raw = fs::read_to_string(out.join(format!("{}.hyge-meta.json", report.mesh_hash)))
+        .expect("meta readable");
+    let parsed: serde_json::Value = serde_json::from_str(&meta_raw).unwrap();
+    let textures = parsed["textures"].as_array().expect("textures array");
+    assert_eq!(textures.len(), 1);
+    let tex = &textures[0];
+    assert_eq!(tex["vk_format"], 37);
+    assert_eq!(tex["level_count"], 2);
+    assert_eq!(tex["transcode_pending"], false);
+    assert_eq!(parsed["transcode_pending"], false);
 }

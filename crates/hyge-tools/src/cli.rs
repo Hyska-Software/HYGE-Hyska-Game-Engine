@@ -170,8 +170,6 @@ impl Cmd {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use hyge_core::result::HygeError;

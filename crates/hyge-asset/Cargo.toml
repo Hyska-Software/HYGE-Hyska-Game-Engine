@@ -25,3 +25,6 @@ meshopt = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }
+# `image` is used by the R-036 golden test to produce a small
+# PNG fixture that the importer feeds to the KTX2 transcoder.
+image = { workspace = true, features = ["png"] }
