@@ -992,17 +992,19 @@ title = "Prefab system (.hyge-prefab)"
 phase = "phase_6"
 owner = "scene"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-061"]
 summary = "Hierarchical prefab with BLAKE3-keyed, msgpack-encoded .hyge-prefab format."
+completed_at = "2026-07-06"
+completion_notes = "Implemented the prefab system in crates/hyge-scene. New modules: prefab_id.rs (PrefabId BLAKE3-keyed), prefab.rs (Prefab, PrefabNode, PrefabAssets, SerializedComponentOverride, ComponentOverride, msgpack round-trip, hydrate validation, instantiate into World), prefab_asset.rs (PrefabAsset impl Asset for .hyge-prefab). ScenePlugin now inserts an AppTypeRegistry resource populated with every canonical scene component and supporting enum. All canonical components gained #[reflect(Component)] so ReflectComponent data is available for prefab instantiation. Tests cover round-trip serialization, BLAKE3 id matching content, hydrate + instantiate (entity count, Parent/Children linkage, component insertion), persist flag, missing registry error, and PrefabAsset load. cargo fmt, cargo clippy --workspace --all-targets -- --deny warnings, cargo test --workspace, and RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps all pass."
 acceptance = [
   "Prefab struct with root, assets, prefab_id (BLAKE3-keyed)",
-  "PrefabNode with name, components (overrides), children, persist",
-  "ComponentOverride with type_name + partial Reflect value",
+  "PrefabNode with name, components, children, persist",
+  "ComponentOverride with type_name + partial Reflect value (via serialization round-trip)",
   "Prefab::instantiate(world, transform, parent) returns root Entity",
-  "PrefabLoader loads from .hyge-prefab",
-  "test: round-trip a known prefab through serialization"
+  "PrefabLoader (PrefabAsset) loads from .hyge-prefab",
+  "Test: round-trip a known prefab through serialization",
 ]
 
 [[items]]

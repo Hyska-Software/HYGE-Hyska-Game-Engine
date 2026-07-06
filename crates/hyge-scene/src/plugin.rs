@@ -2,14 +2,24 @@
 //! the transform propagation / render-extract systems.
 
 use bevy_app::App;
+use bevy_reflect::TypeRegistry;
 use hyge_ecs::prelude::*;
+use hyge_ecs::AppTypeRegistry;
 
+use crate::components::{
+    AmbientLight, AudioBus, AudioListener, AudioRolloff, AudioSource, Camera, CharacterController,
+    Children, Collider, ColliderShape, DirectionalLight, EditorCamera, FogVolume, GlobalTransform,
+    Joint, LightComponent, MaterialHandle, MeshHandle, Name, Parent, PersistOnReload, PointLight,
+    PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, Transform, WorldTransform,
+};
 use crate::extract::{add_render_extract_system, FrameSnapshot};
 use crate::transform::{hierarchy_cleanup_system, transform_propagate_system};
 
 /// Hyge scene plugin.
 ///
 /// Registers:
+/// - the [`TypeRegistry`] resource populated with every canonical scene
+///   component;
 /// - the [`FrameSnapshot`] resource;
 /// - the transform propagation system in [`TransformSet::Propagate`];
 /// - a lightweight hierarchy cleanup system;
@@ -24,6 +34,12 @@ impl HygePlugin for ScenePlugin {
 
     fn build(&self, app: &mut App) {
         tracing::debug!("building hyge-scene plugin");
+
+        // Prefab instantiation and the editor inspector need a populated
+        // reflect registry for all canonical components.
+        let type_registry = AppTypeRegistry::default();
+        *type_registry.write() = build_scene_type_registry();
+        app.insert_resource(type_registry);
 
         // Resource consumed by the renderer and produced by extract.
         app.init_resource::<FrameSnapshot>();
@@ -46,4 +62,62 @@ impl HygePlugin for ScenePlugin {
         add_render_extract_system(&mut render_extract_schedule);
         app.add_schedule(render_extract_schedule);
     }
+}
+
+/// Builds a [`TypeRegistry`] containing every canonical scene component and
+/// the enums they reference.
+///
+/// This registry is used by the prefab system to serialize and deserialize
+/// component overrides and by the editor inspector to iterate component
+/// fields reflectively.
+#[must_use]
+pub fn build_scene_type_registry() -> TypeRegistry {
+    let mut registry = TypeRegistry::new();
+
+    // Core transform / hierarchy components.
+    registry.register::<Transform>();
+    registry.register::<GlobalTransform>();
+    registry.register::<Parent>();
+    registry.register::<Children>();
+    registry.register::<Name>();
+    registry.register::<PersistOnReload>();
+
+    // Legacy render-facing components.
+    registry.register::<MeshHandle>();
+    registry.register::<MaterialHandle>();
+    registry.register::<WorldTransform>();
+    registry.register::<LightComponent>();
+
+    // Lights.
+    registry.register::<PointLight>();
+    registry.register::<SpotLight>();
+    registry.register::<DirectionalLight>();
+    registry.register::<AmbientLight>();
+
+    // Camera.
+    registry.register::<Camera>();
+    registry.register::<EditorCamera>();
+
+    // Audio.
+    registry.register::<AudioSource>();
+    registry.register::<AudioListener>();
+    registry.register::<AudioBus>();
+    registry.register::<AudioRolloff>();
+
+    // Scripting.
+    registry.register::<ScriptRef>();
+
+    // Physics stubs and their supporting enums.
+    registry.register::<RigidBody>();
+    registry.register::<RigidBodyKind>();
+    registry.register::<Collider>();
+    registry.register::<ColliderShape>();
+    registry.register::<CharacterController>();
+    registry.register::<Joint>();
+
+    // Volumes.
+    registry.register::<PostProcessVolume>();
+    registry.register::<FogVolume>();
+
+    registry
 }

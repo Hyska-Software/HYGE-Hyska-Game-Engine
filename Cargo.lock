@@ -1426,6 +1426,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_reflect",
+ "blake3",
  "bytemuck",
  "gltf",
  "hyge-asset",

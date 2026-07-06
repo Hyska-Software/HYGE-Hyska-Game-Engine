@@ -1,10 +1,9 @@
 //! R-060 / R-061 ECS component catalog.
 //!
 //! This module defines the canonical scene components used by the Hyge
-//! engine. Components are first-class Rust types that derive
-//! [`Component`](bevy_ecs::component::Component) and
-//! [`Reflect`](bevy_reflect::Reflect) so they can be inspected by the
-//! editor and manipulated by scripts (ADR-0008).
+//! engine. Components are first-class Rust types that derive [`Component`]
+//! and [`Reflect`] so they can be inspected by the editor and manipulated by
+//! scripts (ADR-0008).
 //!
 //! The module keeps a small set of "legacy" render-facing POD components
 //! (`WorldTransform`, `LightComponent`, `MeshHandle`, `MaterialHandle`)
@@ -18,6 +17,7 @@
 //! Conversion helpers keep the public API ergonomic.
 
 use bevy_ecs::prelude::{Component, Entity};
+use bevy_ecs::reflect::ReflectComponent;
 use bevy_reflect::Reflect;
 use bytemuck::{Pod, Zeroable};
 use hyge_core::prelude::{Mat4, Quat, Vec3};
@@ -32,6 +32,7 @@ use hyge_core::prelude::{Mat4, Quat, Vec3};
 /// scale first, then rotation, then translation. This matches the
 /// convention used by glTF and most DCC tools.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq)]
+#[reflect(Component)]
 pub struct Transform {
     /// Translation in parent space.
     pub translation: [f32; 3],
@@ -87,6 +88,7 @@ impl Default for Transform {
 /// [`transform_propagate_system`](crate::transform::transform_propagate_system)
 /// every frame.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq)]
+#[reflect(Component)]
 pub struct GlobalTransform {
     /// Column-major 4x4 matrix stored as four columns.
     pub matrix: [[f32; 4]; 4],
@@ -130,6 +132,7 @@ impl Default for GlobalTransform {
 /// Parent entity reference. An entity with this component belongs to a
 /// hierarchy rooted at `0`.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Eq)]
+#[reflect(Component)]
 pub struct Parent(pub Entity);
 
 impl Default for Parent {
@@ -140,10 +143,12 @@ impl Default for Parent {
 
 /// Children entity references, stored on the parent.
 #[derive(Component, Reflect, Clone, Debug, PartialEq, Eq, Default)]
+#[reflect(Component)]
 pub struct Children(pub Vec<Entity>);
 
 /// Human-readable name for an entity.
 #[derive(Component, Reflect, Clone, Debug, PartialEq, Eq, Default)]
+#[reflect(Component)]
 pub struct Name(pub String);
 
 impl Name {
@@ -156,6 +161,7 @@ impl Name {
 
 /// Marker component: the entity survives a scene hot-reload.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[reflect(Component)]
 pub struct PersistOnReload;
 
 // =============================================================================
@@ -167,10 +173,12 @@ pub struct PersistOnReload;
 /// `hyge_render::bindless`; stored on the ECS as a plain `u32`
 /// so the scene does not need to import the render type.
 #[derive(Component, Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[reflect(Component)]
 pub struct MeshHandle(pub u32);
 
 /// The bindless material id.
 #[derive(Component, Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[reflect(Component)]
 pub struct MaterialHandle(pub u32);
 
 /// World-space transform of a renderable entity. Three rows of
@@ -178,6 +186,7 @@ pub struct MaterialHandle(pub u32);
 /// `w` of the homogeneous row and is left at `1.0`.
 #[repr(C)]
 #[derive(Component, Copy, Clone, Debug, Default, Pod, Zeroable, Reflect)]
+#[reflect(Component)]
 pub struct WorldTransform {
     /// Column-major 3x4 affine matrix.
     pub cols: [[f32; 4]; 3],
@@ -221,6 +230,7 @@ impl From<GlobalTransform> for WorldTransform {
 /// Packed GPU-friendly light component (legacy R-043).
 /// The typed light components below are the canonical scene source.
 #[derive(Component, Copy, Clone, Debug, Default, Reflect)]
+#[reflect(Component)]
 pub struct LightComponent {
     /// World-space position. `w` is light type (0=point, 1=spot,
     /// 2=directional).
@@ -259,6 +269,7 @@ impl LightComponent {
 
 /// A point light emits uniformly in every direction from a position.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct PointLight {
     /// World-space color (linear RGB).
     pub color: [f32; 3],
@@ -270,6 +281,7 @@ pub struct PointLight {
 
 /// A spot light emits in a cone from a position.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct SpotLight {
     /// World-space color (linear RGB).
     pub color: [f32; 3],
@@ -287,6 +299,7 @@ pub struct SpotLight {
 
 /// A directional light (sun / moon).
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct DirectionalLight {
     /// Light direction (from the light toward the scene).
     pub direction: [f32; 3],
@@ -298,6 +311,7 @@ pub struct DirectionalLight {
 
 /// Ambient light applied to the whole scene.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct AmbientLight {
     /// Ambient color (linear RGB).
     pub color: [f32; 3],
@@ -311,6 +325,7 @@ pub struct AmbientLight {
 
 /// Runtime camera component.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct Camera {
     /// Vertical field of view in radians.
     pub fov_y: f32,
@@ -340,6 +355,7 @@ impl Camera {
 
 /// Marker for the editor fly camera; runtime uses [`Camera`].
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[reflect(Component)]
 pub struct EditorCamera;
 
 // =============================================================================
@@ -348,6 +364,7 @@ pub struct EditorCamera;
 
 /// An audio source attached to an entity.
 #[derive(Component, Reflect, Clone, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct AudioSource {
     /// Asset path to the audio clip.
     pub clip: String,
@@ -394,6 +411,7 @@ pub enum AudioRolloff {
 
 /// An audio listener attached to an entity (typically the main camera).
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct AudioListener {
     /// Output bus index; `-1` means the default master bus.
     pub bus_index: i32,
@@ -403,6 +421,7 @@ pub struct AudioListener {
 
 /// Named audio bus routing.
 #[derive(Component, Reflect, Clone, Debug, PartialEq, Eq, Default)]
+#[reflect(Component)]
 pub struct AudioBus {
     /// Bus name.
     pub name: String,
@@ -414,6 +433,7 @@ pub struct AudioBus {
 
 /// Reference to a Lua script asset.
 #[derive(Component, Reflect, Clone, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct ScriptRef {
     /// Asset path (`.lua`).
     pub path: String,
@@ -460,6 +480,7 @@ pub enum RigidBodyKind {
 
 /// Rigid-body component (stub).
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct RigidBody {
     /// Rigid-body kind.
     pub kind: RigidBodyKind,
@@ -504,6 +525,7 @@ pub enum ColliderShape {
 
 /// Collider component (stub).
 #[derive(Component, Reflect, Clone, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct Collider {
     /// Collider shape.
     pub shape: ColliderShape,
@@ -523,6 +545,7 @@ pub struct Collider {
 
 /// Character controller component (stub).
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct CharacterController {
     /// Maximum horizontal speed in m/s.
     pub max_speed: f32,
@@ -538,6 +561,7 @@ pub struct CharacterController {
 
 /// Joint component (stub).
 #[derive(Component, Reflect, Clone, Debug, PartialEq, Eq)]
+#[reflect(Component)]
 pub struct Joint {
     /// Entity of the other body connected by this joint.
     pub other: Entity,
@@ -560,6 +584,7 @@ impl Default for Joint {
 
 /// Post-process volume (placeholder).
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct PostProcessVolume {
     /// Blend weight of this volume.
     pub weight: f32,
@@ -571,6 +596,7 @@ pub struct PostProcessVolume {
 
 /// Fog volume (placeholder).
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[reflect(Component)]
 pub struct FogVolume {
     /// Fog density.
     pub density: f32,

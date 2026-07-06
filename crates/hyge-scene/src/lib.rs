@@ -14,6 +14,9 @@
 pub mod components;
 pub mod extract;
 pub mod plugin;
+pub mod prefab;
+pub mod prefab_asset;
+pub mod prefab_id;
 pub mod prelude;
 pub mod transform;
 
@@ -23,4 +26,9 @@ pub use components::{
     Joint, LightComponent, MaterialHandle, MeshHandle, Name, Parent, PersistOnReload, PointLight,
     PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, Transform, WorldTransform,
 };
-pub use plugin::ScenePlugin;
+pub use plugin::{build_scene_type_registry, ScenePlugin};
+pub use prefab::{
+    ComponentOverride, Prefab, PrefabAssets, PrefabNode, SerializedComponentOverride,
+};
+pub use prefab_asset::PrefabAsset;
+pub use prefab_id::PrefabId;

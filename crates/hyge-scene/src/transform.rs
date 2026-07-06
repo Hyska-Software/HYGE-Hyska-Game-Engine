@@ -1,8 +1,7 @@
 //! Transform propagation system.
 //!
-//! Walks the entity hierarchy defined by [`Parent`](crate::components::Parent)
-//! and [`Children`](crate::components::Children) and writes a
-//! [`GlobalTransform`](crate::components::GlobalTransform) for every entity.
+//! Walks the entity hierarchy defined by [`Parent`] and [`Children`] and
+//! writes a [`GlobalTransform`] for every entity.
 //!
 //! The system runs in the [`TransformSet::Propagate`](hyge_ecs::set::TransformSet)
 //! set so later transform-dependent systems (render extract, physics sync,

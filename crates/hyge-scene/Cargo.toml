@@ -21,3 +21,4 @@ bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 bytemuck = { workspace = true }
 tracing = { workspace = true }
+blake3 = { workspace = true }
