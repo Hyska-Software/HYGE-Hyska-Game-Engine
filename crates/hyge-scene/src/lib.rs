@@ -7,3 +7,9 @@
 //!
 //! See `docs/architecture.md` §6.6 for the planned public surface.
 //! Implementation is tracked in `docs/roadmap.toml` under R-035, R-060..R-064.
+
+pub mod components;
+pub mod extract;
+pub mod prelude;
+
+pub use components::{LightComponent, MaterialHandle, MeshHandle, WorldTransform};

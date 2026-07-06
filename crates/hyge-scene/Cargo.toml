@@ -9,3 +9,6 @@ description = "glTF import, .hyge-world / .hyge-prefab formats, hierarchical pre
 
 [dependencies]
 hyge-core = { workspace = true }
+hyge-ecs = { workspace = true }
+bevy_ecs = { workspace = true }
+bytemuck = { workspace = true }

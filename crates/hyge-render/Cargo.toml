@@ -29,3 +29,7 @@ blake3 = { workspace = true }
 hyge-runtime-test = { workspace = true }
 hyge-asset = { workspace = true }
 hyge-render-graph = { workspace = true }
+hyge-scene = { workspace = true }
+hyge-ecs = { workspace = true }
+bevy_ecs = { workspace = true }
+bytemuck = { workspace = true }
