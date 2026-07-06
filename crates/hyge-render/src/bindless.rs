@@ -231,6 +231,14 @@ pub struct LightGrid {
     pub count: u32,
 }
 
+impl LightGrid {
+    /// Creates a new light-grid entry.
+    #[must_use]
+    pub fn new(offset: u32, count: u32) -> Self {
+        Self { offset, count }
+    }
+}
+
 impl Default for LightGrid {
     fn default() -> Self {
         Self::zeroed()
@@ -1277,6 +1285,118 @@ impl BindlessTable {
                     mapped_at_creation: false,
                 }))
             })
+    }
+
+    /// Returns the wgpu instance storage buffer.
+    #[must_use]
+    pub fn get_instance_buffer(&self) -> Arc<wgpu::Buffer> {
+        self.inner
+            .lock()
+            .map(|g| Arc::clone(&g.instance_buffer))
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "bindless table mutex poisoned");
+                Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("hyge-bindless/instance-buffer-fallback"),
+                    size: 4,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                }))
+            })
+    }
+
+    /// Returns the wgpu light storage buffer.
+    #[must_use]
+    pub fn get_light_buffer(&self) -> Arc<wgpu::Buffer> {
+        self.inner
+            .lock()
+            .map(|g| Arc::clone(&g.light_buffer))
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "bindless table mutex poisoned");
+                Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("hyge-bindless/light-buffer-fallback"),
+                    size: 4,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                }))
+            })
+    }
+
+    /// Returns the wgpu light-grid storage buffer.
+    #[must_use]
+    pub fn get_light_grid_buffer(&self) -> Arc<wgpu::Buffer> {
+        self.inner
+            .lock()
+            .map(|g| Arc::clone(&g.light_grid_buffer))
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "bindless table mutex poisoned");
+                Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("hyge-bindless/light-grid-buffer-fallback"),
+                    size: 4,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                }))
+            })
+    }
+
+    /// Returns the wgpu draw-command storage buffer.
+    #[must_use]
+    pub fn get_draw_command_buffer(&self) -> Arc<wgpu::Buffer> {
+        self.inner
+            .lock()
+            .map(|g| Arc::clone(&g.draw_command_buffer))
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "bindless table mutex poisoned");
+                Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("hyge-bindless/draw-command-buffer-fallback"),
+                    size: 4,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                }))
+            })
+    }
+
+    /// Writes a slice of instances starting at slot `start`.
+    /// Does not allocate; slots must already be valid.
+    pub fn write_instances(&self, start: u32, instances: &[Instance]) {
+        if instances.is_empty() {
+            return;
+        }
+        let byte_offset = (start as u64) * (std::mem::size_of::<Instance>() as u64);
+        self.queue
+            .write_buffer(&self.get_instance_buffer(), byte_offset, bytemuck::cast_slice(instances));
+    }
+
+    /// Writes a slice of lights starting at slot `start`.
+    /// Does not allocate; slots must already be valid.
+    pub fn write_lights(&self, start: u32, lights: &[Light]) {
+        if lights.is_empty() {
+            return;
+        }
+        let byte_offset = (start as u64) * (std::mem::size_of::<Light>() as u64);
+        self.queue
+            .write_buffer(&self.get_light_buffer(), byte_offset, bytemuck::cast_slice(lights));
+    }
+
+    /// Writes a slice of light-grid entries starting at slot `start`.
+    /// Does not allocate; slots must already be valid.
+    pub fn write_light_grid(&self, start: u32, entries: &[LightGrid]) {
+        if entries.is_empty() {
+            return;
+        }
+        let byte_offset = (start as u64) * (std::mem::size_of::<LightGrid>() as u64);
+        self.queue
+            .write_buffer(&self.get_light_grid_buffer(), byte_offset, bytemuck::cast_slice(entries));
+    }
+
+    /// Writes a slice of draw commands starting at slot `start`.
+    /// Does not allocate; slots must already be valid.
+    pub fn write_draw_commands(&self, start: u32, commands: &[DrawCommand]) {
+        if commands.is_empty() {
+            return;
+        }
+        let byte_offset = (start as u64) * (std::mem::size_of::<DrawCommand>() as u64);
+        self.queue
+            .write_buffer(&self.get_draw_command_buffer(), byte_offset, bytemuck::cast_slice(commands));
     }
 
     /// Returns the wgpu texture array, or `None` if the

@@ -41,6 +41,29 @@ pub struct IblResources {
     pub brdf_lut_view: Arc<wgpu::TextureView>,
 }
 
+impl IblResources {
+    /// Returns the irradiance view (alias for
+    /// `self.irradiance_view.clone()`).
+    #[must_use]
+    pub fn irradiance(&self) -> Arc<wgpu::TextureView> {
+        Arc::clone(&self.irradiance_view)
+    }
+
+    /// Returns the prefiltered environment view (alias for
+    /// `self.prefiltered_view.clone()`).
+    #[must_use]
+    pub fn prefilter(&self) -> Arc<wgpu::TextureView> {
+        Arc::clone(&self.prefiltered_view)
+    }
+
+    /// Returns the BRDF LUT view (alias for
+    /// `self.brdf_lut_view.clone()`).
+    #[must_use]
+    pub fn brdf_lut(&self) -> Arc<wgpu::TextureView> {
+        Arc::clone(&self.brdf_lut_view)
+    }
+}
+
 /// Uploads `bake` to three wgpu textures and returns the
 /// views. The caller is responsible for binding the views
 /// into the PBR pass's frame bind group.

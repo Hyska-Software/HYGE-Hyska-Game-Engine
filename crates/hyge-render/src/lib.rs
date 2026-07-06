@@ -70,6 +70,7 @@
 #![warn(missing_docs)]
 
 pub mod bindless;
+pub mod clustered_forward;
 pub mod config;
 pub mod ibl;
 pub mod ibl_gpu;
