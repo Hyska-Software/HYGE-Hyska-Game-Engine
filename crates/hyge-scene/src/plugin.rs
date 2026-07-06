@@ -10,10 +10,16 @@ use crate::components::{
     AmbientLight, AudioBus, AudioListener, AudioRolloff, AudioSource, Camera, CharacterController,
     Children, Collider, ColliderShape, DirectionalLight, EditorCamera, FogVolume, GlobalTransform,
     Joint, LightComponent, MaterialHandle, MeshHandle, Name, Parent, PersistOnReload, PointLight,
-    PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, Transform, WorldTransform,
+    PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, StaticMeshAssetRefs,
+    Transform, WorldTransform,
 };
 use crate::env::{AmbientParams, FogParams, PostProcessProfile};
 use crate::extract::{add_render_extract_system, FrameSnapshot};
+use crate::runtime::{
+    resolve_static_mesh_asset_refs_system, scene_hot_reload_system, EnvironmentLibrary,
+    LoadedSceneState, PrefabLibrary, SceneDocumentDiff, SceneEnvironmentState,
+    ScenePostProcessState,
+};
 use crate::transform::{hierarchy_cleanup_system, transform_propagate_system};
 
 /// Hyge scene plugin.
@@ -44,6 +50,12 @@ impl HygePlugin for ScenePlugin {
 
         // Resource consumed by the renderer and produced by extract.
         app.init_resource::<FrameSnapshot>();
+        app.init_resource::<PrefabLibrary>();
+        app.init_resource::<EnvironmentLibrary>();
+        app.init_resource::<SceneEnvironmentState>();
+        app.init_resource::<ScenePostProcessState>();
+        app.init_resource::<SceneDocumentDiff>();
+        app.init_resource::<LoadedSceneState>();
 
         // Transform propagation runs during the variable update so gameplay
         // systems can reparent entities before the render extract.
@@ -57,6 +69,13 @@ impl HygePlugin for ScenePlugin {
             Label::Update,
             hierarchy_cleanup_system.in_set(TransformSet::Flush),
         );
+
+        // Resolve prefab/world-authored `StaticMeshAssetRefs` into runtime
+        // `StaticMesh` handles before the render-extract schedule runs.
+        app.add_systems(Label::Update, resolve_static_mesh_asset_refs_system);
+
+        // `.hyge-world` hot-reload is driven by the global ReloadQueue.
+        app.add_systems(Label::Update, scene_hot_reload_system);
 
         // Render extract produces the per-frame snapshot.
         let mut render_extract_schedule = Schedule::new(Label::RenderExtract);
@@ -82,6 +101,7 @@ pub fn build_scene_type_registry() -> TypeRegistry {
     registry.register::<Children>();
     registry.register::<Name>();
     registry.register::<PersistOnReload>();
+    registry.register::<StaticMeshAssetRefs>();
 
     // Legacy render-facing components.
     registry.register::<MeshHandle>();

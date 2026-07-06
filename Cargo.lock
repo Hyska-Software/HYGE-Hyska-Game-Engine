@@ -1407,6 +1407,7 @@ name = "hyge-asset"
 version = "0.1.0"
 dependencies = [
  "bevy_app",
+ "bevy_reflect",
  "bevy_tasks",
  "blake3",
  "bytemuck",

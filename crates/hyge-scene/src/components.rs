@@ -20,7 +20,10 @@ use bevy_ecs::prelude::{Component, Entity};
 use bevy_ecs::reflect::ReflectComponent;
 use bevy_reflect::Reflect;
 use bytemuck::{Pod, Zeroable};
-use hyge_asset::prelude::{Handle, MaterialAsset, MeshAsset};
+use hyge_asset::{
+    prelude::{Handle, MaterialAsset, MeshAsset},
+    AssetId,
+};
 use hyge_core::prelude::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
@@ -210,6 +213,41 @@ impl StaticMesh {
     #[must_use]
     pub const fn new(mesh: Handle<MeshAsset>, material: Handle<MaterialAsset>) -> Self {
         Self { mesh, material }
+    }
+}
+
+/// Serializable, reflectable scene-side asset references for a static mesh.
+///
+/// Prefabs and `.hyge-world` documents cannot directly serialize
+/// [`StaticMesh`] because its typed `Handle<A>` fields do not implement
+/// `Reflect`. `StaticMeshAssetRefs` is the authoring/runtime bridge used by the
+/// scene system: prefab hydration restores these content-addressed asset ids,
+/// and [`resolve_static_mesh_asset_refs`](crate::runtime::resolve_static_mesh_asset_refs)
+/// materializes the runtime [`StaticMesh`] component from them before render
+/// extraction runs.
+#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[reflect(Component)]
+pub struct StaticMeshAssetRefs {
+    /// Content-addressed mesh asset id (`.hyge-mesh`).
+    pub mesh: AssetId,
+    /// Content-addressed material asset id (`.hyge-mat`).
+    pub material: AssetId,
+}
+
+impl StaticMeshAssetRefs {
+    /// Builds a new pair of content-addressed static-mesh asset references.
+    #[must_use]
+    pub const fn new(mesh: AssetId, material: AssetId) -> Self {
+        Self { mesh, material }
+    }
+}
+
+impl Default for StaticMeshAssetRefs {
+    fn default() -> Self {
+        Self {
+            mesh: AssetId::NULL,
+            material: AssetId::NULL,
+        }
     }
 }
 

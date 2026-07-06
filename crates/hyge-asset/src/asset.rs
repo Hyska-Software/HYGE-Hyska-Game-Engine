@@ -1,5 +1,6 @@
 //! Asset identity and loading traits.
 
+use bevy_reflect::Reflect;
 use serde::{Deserialize, Serialize};
 
 use crate::context::LoadContext;
@@ -9,7 +10,7 @@ use crate::context::LoadContext;
 /// The bytes are the 32-byte BLAKE3 hash of an imported or source asset.
 /// Content addressing lets Hyge deduplicate assets and invalidate cached
 /// data by hash instead of by path.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize, Reflect)]
 #[serde(transparent)]
 pub struct AssetId(pub [u8; 32]);
 

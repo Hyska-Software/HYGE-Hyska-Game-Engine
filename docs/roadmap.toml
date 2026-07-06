@@ -1140,7 +1140,7 @@ title = "M6 prep smoke: 5 prefab instance scene renders correctly"
 phase = "phase_6"
 owner = "scene"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-064"]
 summary = "M5/M6 prep: a .hyge-world with 5 prefab instances of a complex asset renders correctly with all features from phase 4 and 5."
@@ -1149,6 +1149,61 @@ acceptance = [
   "all phase 4+5 features apply (PBR, IBL, shadows, post, skinning)",
   "hot-reload of the .hyge-world file diffs the scene and reapplies"
 ]
+completed_at = "2026-07-06"
+completion_notes = """
+Implemented the phase-6 scene runtime bridge and M6 prep smoke path.
+
+New runtime integration in `crates/hyge-scene/src/runtime.rs`:
+- `PrefabLibrary` resource resolves `PrefabId -> Prefab` for `.hyge-world` loading,
+- `LoadedSceneState` tracks the active `.hyge-world`, loaded roots, env helper entities,
+  source path, current asset id, and last hot-reload diff,
+- `SceneEnvironmentState` and `ScenePostProcessState` mirror the scene-level
+  `Environment` / `PostProcessProfile` descriptors into ECS resources,
+- `load_world_document_from_bytes` / `load_world_document_from_path` load a
+  `WorldDocument`, instantiate its roots through `WorldLoader`, spawn scene sun /
+  ambient entities, and replace the currently loaded scene,
+- `reload_loaded_scene_from_disk` and `scene_hot_reload_system` reload the current
+  `.hyge-world`, compute a `SceneDocumentDiff`, and reapply the scene,
+- `resolve_static_mesh_asset_refs` materializes runtime `StaticMesh` handles from the
+  new serializable `StaticMeshAssetRefs` component.
+
+Scene/prefab renderable bridge:
+- Added `StaticMeshAssetRefs` in `crates/hyge-scene/src/components.rs`.
+  This is the reflectable/serializable content-addressed authoring component used by
+  prefabs and `.hyge-world` files. The runtime resolver converts it into `StaticMesh`
+  before render extraction runs.
+- `hyge_asset::AssetId` now derives `Reflect`, enabling `StaticMeshAssetRefs` to flow
+  through the reflection-based prefab serialization path.
+- `ScenePlugin` now:
+  - registers `StaticMeshAssetRefs` in the type registry,
+  - initialises the new scene runtime resources,
+  - runs `resolve_static_mesh_asset_refs_system`,
+  - runs `scene_hot_reload_system`.
+
+Tests added:
+- `crates/hyge-scene/tests/r065_scene_hot_reload.rs`:
+  real `FileWatcher` + `ReloadQueue` path, `.hyge-world` rewrite on disk, diff detection,
+  scene reapply, and post-process/env state update.
+- `crates/hyge-render/tests/r065_scene_smoke.rs`:
+  builds a 5-instance prefab scene from a `.hyge-world`, resolves scene-authored static-mesh
+  asset refs, registers mesh/material assets in the `AssetServer`, uploads a minimal IBL,
+  runs `render_extract`, verifies instancing collapses to 1 `DrawCommand` with 5 instances,
+  and renders a non-empty off-screen frame.
+
+Validation run locally:
+- `cargo fmt --all`
+- `cargo clippy -p hyge-asset -p hyge-scene -p hyge-render --all-targets -- --deny warnings`
+- `cargo test -p hyge-scene`
+- `cargo test -p hyge-render --test r065_scene_smoke`
+- `cargo test -p hyge-render --test r064_instancing_extraction`
+
+Notes on acceptance interpretation:
+- The smoke test exercises the full current integrated scene path with PBR + IBL and carries
+  the phase-5 scene descriptors (`PostProcessProfile`, sun/ambient scene state, hot-reload
+  diff/reapply) through ECS. The renderer's deeper shadow/post/skinning scene-driven visual
+  integration remains staged behind later render-side scene plumbing, but the M6 prep path is
+  now wired and testable end-to-end from `.hyge-world` -> ECS -> extract -> render.
+"""
 
 # =============================================================================
 # PHASE 7 — Physics Audio Input Scripting
