@@ -469,7 +469,11 @@ impl ClusteredForwardPass {
             self.cluster_config.depth_slices,
             self.cluster_config.max_lights_per_cluster,
         ];
-        queue.write_buffer(&self.frame_data_buffer, 0, bytemuck::bytes_of(&self.frame_data));
+        queue.write_buffer(
+            &self.frame_data_buffer,
+            0,
+            bytemuck::bytes_of(&self.frame_data),
+        );
     }
 
     /// Updates the scene lights and uploads them to the bindless

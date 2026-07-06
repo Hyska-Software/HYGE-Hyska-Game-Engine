@@ -81,7 +81,7 @@ pub fn import_environment(source: &Path, out_dir: &Path) -> HygeResult<Environme
 }
 
 /// Like [`import_environment`], but with a caller-supplied
-/// [`BakeConfig`]. Used by the test suite to run a small,
+/// [`ibl::BakeConfig`]. Used by the test suite to run a small,
 /// deterministic bake without waiting for the full production
 /// resolution.
 ///

@@ -12,6 +12,33 @@
 use bytemuck::{Pod, Zeroable};
 use hyge_ecs::prelude::Component;
 
+/// Per-entity local-space bounds used by CPU frustum culling before
+/// a renderable is emitted into `FrameSnapshot`.
+#[derive(Component, Copy, Clone, Debug, PartialEq)]
+pub struct StaticBounds {
+    /// Local-space minimum corner.
+    pub min: [f32; 3],
+    /// Local-space maximum corner.
+    pub max: [f32; 3],
+}
+
+impl StaticBounds {
+    /// Constructs bounds from explicit min/max corners.
+    #[must_use]
+    pub const fn new(min: [f32; 3], max: [f32; 3]) -> Self {
+        Self { min, max }
+    }
+}
+
+impl Default for StaticBounds {
+    fn default() -> Self {
+        Self {
+            min: [-0.5, -0.5, -0.5],
+            max: [0.5, 0.5, 0.5],
+        }
+    }
+}
+
 /// The bindless mesh id (slot index in the bindless table).
 /// Mirrors the `BindlessSlot<MeshTag>` index exposed by
 /// `hyge_render::bindless`; stored on the ECS as a plain `u32`
@@ -50,11 +77,7 @@ impl WorldTransform {
     #[must_use]
     pub fn from_translation(x: f32, y: f32, z: f32) -> Self {
         Self {
-            cols: [
-                [1.0, 0.0, 0.0, x],
-                [0.0, 1.0, 0.0, y],
-                [0.0, 0.0, 1.0, z],
-            ],
+            cols: [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, y], [0.0, 0.0, 1.0, z]],
         }
     }
 }
@@ -127,5 +150,12 @@ mod tests {
         assert_eq!(p.position[3], 0.0);
         assert_eq!(p.position[0], 0.0);
         assert_eq!(p.position[1], 5.0);
+    }
+
+    #[test]
+    fn static_bounds_default_is_unit_cube() {
+        let b = StaticBounds::default();
+        assert_eq!(b.min, [-0.5, -0.5, -0.5]);
+        assert_eq!(b.max, [0.5, 0.5, 0.5]);
     }
 }

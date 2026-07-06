@@ -72,12 +72,17 @@
 pub mod bindless;
 pub mod clustered_forward;
 pub mod config;
+pub mod cull;
 pub mod ibl;
 pub mod ibl_gpu;
 pub mod lambert;
+pub mod meshlet;
 pub mod pbr;
+pub mod post;
 pub mod profiler;
 pub mod renderer;
+pub mod shadow;
+pub mod skinning;
 pub mod triangle;
 
 /// The renderer prelude.

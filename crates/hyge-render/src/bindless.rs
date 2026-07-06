@@ -1422,8 +1422,11 @@ impl BindlessTable {
             return;
         }
         let byte_offset = (start as u64) * (std::mem::size_of::<Instance>() as u64);
-        self.queue
-            .write_buffer(&self.get_instance_buffer(), byte_offset, bytemuck::cast_slice(instances));
+        self.queue.write_buffer(
+            &self.get_instance_buffer(),
+            byte_offset,
+            bytemuck::cast_slice(instances),
+        );
     }
 
     /// Writes a slice of lights starting at slot `start`.
@@ -1433,8 +1436,11 @@ impl BindlessTable {
             return;
         }
         let byte_offset = (start as u64) * (std::mem::size_of::<Light>() as u64);
-        self.queue
-            .write_buffer(&self.get_light_buffer(), byte_offset, bytemuck::cast_slice(lights));
+        self.queue.write_buffer(
+            &self.get_light_buffer(),
+            byte_offset,
+            bytemuck::cast_slice(lights),
+        );
     }
 
     /// Writes a slice of light-grid entries starting at slot `start`.
@@ -1444,8 +1450,11 @@ impl BindlessTable {
             return;
         }
         let byte_offset = (start as u64) * (std::mem::size_of::<LightGrid>() as u64);
-        self.queue
-            .write_buffer(&self.get_light_grid_buffer(), byte_offset, bytemuck::cast_slice(entries));
+        self.queue.write_buffer(
+            &self.get_light_grid_buffer(),
+            byte_offset,
+            bytemuck::cast_slice(entries),
+        );
     }
 
     /// Writes a slice of u32 light indices starting at slot
@@ -1457,8 +1466,11 @@ impl BindlessTable {
             return;
         }
         let byte_offset = (start as u64) * std::mem::size_of::<u32>() as u64;
-        self.queue
-            .write_buffer(&self.get_light_index_list_buffer(), byte_offset, bytemuck::cast_slice(indices));
+        self.queue.write_buffer(
+            &self.get_light_index_list_buffer(),
+            byte_offset,
+            bytemuck::cast_slice(indices),
+        );
     }
 
     /// Writes a slice of draw commands starting at slot `start`.
@@ -1468,8 +1480,11 @@ impl BindlessTable {
             return;
         }
         let byte_offset = (start as u64) * (std::mem::size_of::<DrawCommand>() as u64);
-        self.queue
-            .write_buffer(&self.get_draw_command_buffer(), byte_offset, bytemuck::cast_slice(commands));
+        self.queue.write_buffer(
+            &self.get_draw_command_buffer(),
+            byte_offset,
+            bytemuck::cast_slice(commands),
+        );
     }
 
     /// Returns the wgpu texture array, or `None` if the
@@ -1720,16 +1735,27 @@ mod tests {
             material_id: u32,
             _pad: [u32; 2],
         }
-        assert_eq!(std::mem::size_of::<SrcInstance>(), std::mem::size_of::<Instance>());
+        assert_eq!(
+            std::mem::size_of::<SrcInstance>(),
+            std::mem::size_of::<Instance>()
+        );
         let src = vec![
             SrcInstance {
-                transform: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
+                transform: [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                ],
                 mesh_id: 7,
                 material_id: 11,
                 _pad: [0; 2],
             },
             SrcInstance {
-                transform: [[2.0, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, 2.0, 0.0]],
+                transform: [
+                    [2.0, 0.0, 0.0, 0.0],
+                    [0.0, 2.0, 0.0, 0.0],
+                    [0.0, 0.0, 2.0, 0.0],
+                ],
                 mesh_id: 8,
                 material_id: 12,
                 _pad: [0; 2],
