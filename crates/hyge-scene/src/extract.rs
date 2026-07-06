@@ -20,7 +20,7 @@ use hyge_ecs::prelude::*;
 
 use crate::components::{
     AmbientLight, DirectionalLight, GlobalTransform, LightComponent, MaterialHandle, MeshHandle,
-    PointLight, SpotLight, WorldTransform,
+    PointLight, SpotLight, StaticBounds, WorldTransform,
 };
 
 /// A single rendered instance, GPU-ready. Mirrors
@@ -170,6 +170,19 @@ impl FrameSnapshot {
 /// entities that share 3 (mesh, material) pairs produces 3
 /// draws, not 1000.
 pub fn render_extract(world: &mut World) -> FrameSnapshot {
+    render_extract_with_culling(world, None)
+}
+
+/// Walks a `World` and produces a [`FrameSnapshot`], optionally
+/// applying CPU frustum culling to entities that carry
+/// [`StaticBounds`].
+///
+/// Entities without `StaticBounds` remain visible so older scenes and
+/// tests keep their previous behavior.
+pub fn render_extract_with_culling(
+    world: &mut World,
+    frustum: Option<&hyge_core::prelude::Frustum>,
+) -> FrameSnapshot {
     use std::collections::BTreeMap;
 
     let mut snapshot = FrameSnapshot::empty();
@@ -244,8 +257,9 @@ pub fn render_extract(world: &mut World) -> FrameSnapshot {
             &MaterialHandle,
             Option<&WorldTransform>,
             Option<&GlobalTransform>,
+            Option<&StaticBounds>,
         )>();
-        for (mesh, material, world_transform, global_transform) in query.iter(world) {
+        for (mesh, material, world_transform, global_transform, bounds) in query.iter(world) {
             // Prefer the canonical GlobalTransform; fall back to the legacy
             // WorldTransform so existing M3 scenes keep rendering.
             let transform: WorldTransform = global_transform
@@ -253,6 +267,17 @@ pub fn render_extract(world: &mut World) -> FrameSnapshot {
                 .map(Into::into)
                 .or(world_transform.copied())
                 .unwrap_or_default();
+            if let (Some(frustum), Some(bounds)) = (frustum, bounds) {
+                let local = hyge_core::prelude::Aabb::new(
+                    hyge_core::prelude::Vec3::from_array(bounds.min),
+                    hyge_core::prelude::Vec3::from_array(bounds.max),
+                );
+                let matrix = world_transform_to_mat4(transform);
+                let world_bounds = transform_aabb(local, matrix);
+                if !frustum.intersects_aabb(&world_bounds) {
+                    continue;
+                }
+            }
             let instance = Instance {
                 transform: transform.cols,
                 mesh_id: mesh.0,
@@ -294,6 +319,50 @@ pub fn render_extract(world: &mut World) -> FrameSnapshot {
     }
 
     snapshot
+}
+
+fn world_transform_to_mat4(transform: WorldTransform) -> hyge_core::prelude::Mat4 {
+    hyge_core::prelude::Mat4::from_cols_array(&[
+        transform.cols[0][0],
+        transform.cols[1][0],
+        transform.cols[2][0],
+        0.0,
+        transform.cols[0][1],
+        transform.cols[1][1],
+        transform.cols[2][1],
+        0.0,
+        transform.cols[0][2],
+        transform.cols[1][2],
+        transform.cols[2][2],
+        0.0,
+        transform.cols[0][3],
+        transform.cols[1][3],
+        transform.cols[2][3],
+        1.0,
+    ])
+}
+
+fn transform_aabb(
+    aabb: hyge_core::prelude::Aabb,
+    transform: hyge_core::prelude::Mat4,
+) -> hyge_core::prelude::Aabb {
+    let corners = [
+        hyge_core::prelude::Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z),
+        hyge_core::prelude::Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z),
+        hyge_core::prelude::Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z),
+        hyge_core::prelude::Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z),
+        hyge_core::prelude::Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z),
+        hyge_core::prelude::Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z),
+        hyge_core::prelude::Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z),
+        hyge_core::prelude::Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z),
+    ];
+    let mut out = hyge_core::prelude::Aabb::EMPTY;
+    for corner in corners {
+        out.merge(&hyge_core::prelude::Aabb::from_point(
+            transform.transform_point3(corner),
+        ));
+    }
+    out
 }
 
 /// Exclusive ECS system that writes the current frame's
