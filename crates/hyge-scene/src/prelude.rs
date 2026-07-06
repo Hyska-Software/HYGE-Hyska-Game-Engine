@@ -6,6 +6,7 @@ pub use crate::components::{
     Joint, LightComponent, MaterialHandle, MeshHandle, Name, Parent, PersistOnReload, PointLight,
     PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, Transform, WorldTransform,
 };
+pub use crate::env::{AmbientParams, Environment, FogParams, PostProcessProfile};
 pub use crate::extract::{
     add_render_extract_system, render_extract, render_extract_system, DrawCommand, FrameSnapshot,
     Instance, Light,
@@ -17,3 +18,5 @@ pub use crate::prefab::{
 pub use crate::prefab_asset::PrefabAsset;
 pub use crate::prefab_id::PrefabId;
 pub use crate::transform::{hierarchy_cleanup_system, transform_propagate_system};
+pub use crate::world::{PrefabInstance, WorldDocument, WorldLoader};
+pub use crate::world_asset::WorldAsset;

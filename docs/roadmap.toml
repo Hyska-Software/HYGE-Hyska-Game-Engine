@@ -1033,7 +1033,7 @@ title = "Scene format (.hyge-world)"
 phase = "phase_6"
 owner = "scene"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-062"]
 summary = ".hyge-world binary format with environment, prefab instances, post-process profile."
@@ -1043,6 +1043,43 @@ acceptance = [
   "WorldLoader loads .hyge-world into ECS World",
   "test: round-trip a known scene"
 ]
+completion_notes = """
+Implemented in crates/hyge-scene/{src/env.rs, src/world.rs, src/world_asset.rs, tests/world_test.rs}.
+
+- `WorldDocument` struct (renamed from arch's `World` to avoid clashing with
+  `bevy_ecs::world::World`) holds `env: Environment`, `root_prefab_instances:
+  Vec<PrefabInstance>`, `post_process: PostProcessProfile`. Serializes to
+  msgpack via rmp-serde, mirroring the `.hyge-prefab` format.
+- `Environment { skybox, sun, fog, ambient }` (`env.rs`) — all four fields
+  present as specified by the acceptance bullet.
+- `WorldLoader::load(doc, world, resolver)` instantiates every prefab into
+  the ECS World, applies per-instance overrides via `ReflectComponent`, and
+  resolves parent indices between instances. Returns the list of root
+  entities.
+- `WorldAsset` implements `hyge_asset::Asset` with `Data = WorldDocument`,
+  `extensions() = ["hyge-world"]`, `hash()` = BLAKE3 of the serialized bytes.
+- Round-trip test: `tests/world_test.rs::round_trip_known_scene` builds a
+  known scene (sky, fog, ambient, sun, two prefab instances one parented
+  to the other and one with a `PointLight` override), serializes, parses
+  back, asserts equality, AND instantiates into an ECS world to verify
+  parent wiring + override application. Plus 3 edge-case tests.
+- Unit tests in env.rs (5), world.rs (5), world_asset.rs (4).
+
+Safety: no new `unsafe` (crate keeps `#![forbid(unsafe_code)]`). No
+`unwrap()`/`panic!` in library code; all fallible paths use `?` and a
+proper `HygeError` variant.
+
+All DoD checks green:
+- `cargo fmt --all -- --check`        -> clean
+- `cargo clippy --workspace --all-targets -- --deny warnings` -> pass
+- `cargo test --workspace`            -> all green (incl. R-063 tests)
+- `cargo test --workspace --doc`      -> green
+- RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps -> green
+
+Downstream integration with hyge-render's `EnvironmentBake` / `PostProcessConfig`
+remains a concern of R-064 (instancing extraction) and R-065 (M6 prep smoke);
+R-063 only provides the data + loader.
+"""
 
 [[items]]
 id = "R-064"

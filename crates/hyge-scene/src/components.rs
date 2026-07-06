@@ -21,6 +21,7 @@ use bevy_ecs::reflect::ReflectComponent;
 use bevy_reflect::Reflect;
 use bytemuck::{Pod, Zeroable};
 use hyge_core::prelude::{Mat4, Quat, Vec3};
+use serde::{Deserialize, Serialize};
 
 // =============================================================================
 // R-060 — Core scene components
@@ -31,7 +32,7 @@ use hyge_core::prelude::{Mat4, Quat, Vec3};
 /// The local transformation matrix is `T * R * S`:
 /// scale first, then rotation, then translation. This matches the
 /// convention used by glTF and most DCC tools.
-#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq)]
+#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[reflect(Component)]
 pub struct Transform {
     /// Translation in parent space.
@@ -325,7 +326,7 @@ pub struct SpotLight {
 }
 
 /// A directional light (sun / moon).
-#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
 #[reflect(Component)]
 pub struct DirectionalLight {
     /// Light direction (from the light toward the scene).

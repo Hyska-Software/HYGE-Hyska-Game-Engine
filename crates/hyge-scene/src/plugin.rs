@@ -12,6 +12,7 @@ use crate::components::{
     Joint, LightComponent, MaterialHandle, MeshHandle, Name, Parent, PersistOnReload, PointLight,
     PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, Transform, WorldTransform,
 };
+use crate::env::{AmbientParams, FogParams, PostProcessProfile};
 use crate::extract::{add_render_extract_system, FrameSnapshot};
 use crate::transform::{hierarchy_cleanup_system, transform_propagate_system};
 
@@ -118,6 +119,12 @@ pub fn build_scene_type_registry() -> TypeRegistry {
     // Volumes.
     registry.register::<PostProcessVolume>();
     registry.register::<FogVolume>();
+
+    // R-063 — Scene-level environment descriptors (used by .hyge-world
+    // overrides and the scene inspector).
+    registry.register::<FogParams>();
+    registry.register::<AmbientParams>();
+    registry.register::<PostProcessProfile>();
 
     registry
 }

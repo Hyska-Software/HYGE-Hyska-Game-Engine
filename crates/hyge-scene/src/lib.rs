@@ -12,6 +12,7 @@
 #![warn(missing_docs)]
 
 pub mod components;
+pub mod env;
 pub mod extract;
 pub mod plugin;
 pub mod prefab;
@@ -19,6 +20,8 @@ pub mod prefab_asset;
 pub mod prefab_id;
 pub mod prelude;
 pub mod transform;
+pub mod world;
+pub mod world_asset;
 
 pub use components::{
     AmbientLight, AudioBus, AudioListener, AudioRolloff, AudioSource, Camera, CharacterController,
@@ -26,9 +29,12 @@ pub use components::{
     Joint, LightComponent, MaterialHandle, MeshHandle, Name, Parent, PersistOnReload, PointLight,
     PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, Transform, WorldTransform,
 };
+pub use env::{AmbientParams, Environment, FogParams, PostProcessProfile};
 pub use plugin::{build_scene_type_registry, ScenePlugin};
 pub use prefab::{
     ComponentOverride, Prefab, PrefabAssets, PrefabNode, SerializedComponentOverride,
 };
 pub use prefab_asset::PrefabAsset;
 pub use prefab_id::PrefabId;
+pub use world::{PrefabInstance, WorldDocument, WorldLoader};
+pub use world_asset::WorldAsset;
