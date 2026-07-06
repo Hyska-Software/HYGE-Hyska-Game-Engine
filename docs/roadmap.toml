@@ -1087,7 +1087,7 @@ title = "Instancing extraction (StaticMesh path)"
 phase = "phase_6"
 owner = "render"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-063", "R-043"]
 summary = "RenderExtract groups StaticMesh entities by (mesh_id, material_id) into DrawCommand."
@@ -1097,6 +1097,42 @@ acceptance = [
   "Group by (mesh_id, material_id), sort by material_id, emit one DrawCommand per group",
   "test: 1000 entities with same mesh+material yield 1 DrawCommand with instance_count=1000"
 ]
+completed_at = "2026-07-06"
+completion_notes = """
+Implemented the canonical `StaticMesh` renderable component in
+`crates/hyge-scene/src/components.rs` with typed
+`Handle<MeshAsset>` / `Handle<MaterialAsset>` fields plus a small constructor.
+
+`render_extract_with_culling` now has two integrated renderable paths:
+- legacy `MeshHandle` / `MaterialHandle` grouping (preserved for R-043 scenes),
+- new `StaticMesh` grouping resolved via `AssetServer::bindless_for`.
+
+The `StaticMesh` path:
+- queries `With<StaticMesh>` entities,
+- resolves typed handles to bindless `mesh_id` / `material_id`,
+- groups by `(mesh_id, material_id)`,
+- sorts by `material_id` first via the packed `(material_id << 32) | mesh_id` key,
+- emits one `DrawCommand` per group into the same `FrameSnapshot` with contiguous
+  `first_instance` offsets shared with the legacy path.
+
+`AssetServer` now implements `Resource` so the extract step can read it from the ECS `World`.
+
+Tests added:
+- unit tests in `crates/hyge-scene/src/extract.rs` for the no-server / unresolved-handle
+  and legacy+static coexistence paths,
+- integration test `crates/hyge-render/tests/r064_instancing_extraction.rs` covering:
+  - 1000 identical `StaticMesh` entities -> 1 `DrawCommand` with `instance_count=1000`,
+  - material-sorted multi-group extraction,
+  - unresolved handles becoming visible after register,
+  - legacy path compatibility,
+  - shared instance-buffer offsets between legacy and static paths.
+
+Validation run locally:
+- `cargo fmt --all`
+- `cargo clippy -p hyge-asset -p hyge-scene -p hyge-render --all-targets -- --deny warnings`
+- `cargo test -p hyge-scene`
+- `cargo test -p hyge-render --test r064_instancing_extraction`
+"""
 
 [[items]]
 id = "R-065"

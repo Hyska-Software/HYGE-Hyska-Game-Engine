@@ -27,7 +27,8 @@ pub use components::{
     AmbientLight, AudioBus, AudioListener, AudioRolloff, AudioSource, Camera, CharacterController,
     Children, Collider, ColliderShape, DirectionalLight, EditorCamera, FogVolume, GlobalTransform,
     Joint, LightComponent, MaterialHandle, MeshHandle, Name, Parent, PersistOnReload, PointLight,
-    PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, Transform, WorldTransform,
+    PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, StaticMesh, Transform,
+    WorldTransform,
 };
 pub use env::{AmbientParams, Environment, FogParams, PostProcessProfile};
 pub use plugin::{build_scene_type_registry, ScenePlugin};

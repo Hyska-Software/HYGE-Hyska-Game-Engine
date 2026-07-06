@@ -20,6 +20,7 @@ use bevy_ecs::prelude::{Component, Entity};
 use bevy_ecs::reflect::ReflectComponent;
 use bevy_reflect::Reflect;
 use bytemuck::{Pod, Zeroable};
+use hyge_asset::prelude::{Handle, MaterialAsset, MeshAsset};
 use hyge_core::prelude::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
@@ -164,6 +165,53 @@ impl Name {
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[reflect(Component)]
 pub struct PersistOnReload;
+
+// =============================================================================
+// R-064 — StaticMesh (canonical renderable component)
+// =============================================================================
+
+/// A static (non-skinned) renderable entity with typed asset handles.
+///
+/// `StaticMesh` is the canonical component for static renderables. Unlike the
+/// legacy [`MeshHandle`] / [`MaterialHandle`] components — which carry raw
+/// bindless slot indices — `StaticMesh` holds typed handles
+/// (`Handle<MeshAsset>`, `Handle<MaterialAsset>`) that are resolved to bindless
+/// slot indices by the [`AssetServer`] during
+/// [`render_extract_with_culling`](crate::extract::render_extract_with_culling).
+///
+/// The resolution flow is: `Handle<MeshAsset>` → `AssetId` →
+/// `AssetServer::bindless_for(id)` → `GpuUploadResult::Mesh(MeshId)` →
+/// `MeshId::index() as u32`.
+///
+/// Entities whose handles have not yet been registered (or whose server entry
+/// was evicted by a hot-reload) are silently skipped during extraction; they
+/// will appear once the upload completes.
+#[derive(Component, Clone, Debug)]
+pub struct StaticMesh {
+    /// Handle to the mesh asset.
+    pub mesh: Handle<MeshAsset>,
+    /// Handle to the material asset.
+    pub material: Handle<MaterialAsset>,
+}
+
+impl PartialEq for StaticMesh {
+    fn eq(&self, other: &Self) -> bool {
+        // `Handle<A>::eq` only compares the `AssetId`; the marker `A` is
+        // erased at runtime so we can compare cross-asset-type without
+        // requiring `A: PartialEq`.
+        self.mesh.id() == other.mesh.id() && self.material.id() == other.material.id()
+    }
+}
+
+impl Eq for StaticMesh {}
+
+impl StaticMesh {
+    /// Builds a new `StaticMesh` from a mesh and a material handle.
+    #[must_use]
+    pub const fn new(mesh: Handle<MeshAsset>, material: Handle<MaterialAsset>) -> Self {
+        Self { mesh, material }
+    }
+}
 
 // =============================================================================
 // Legacy render-facing components (R-043 / M3)

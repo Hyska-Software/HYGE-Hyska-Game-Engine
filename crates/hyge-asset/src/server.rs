@@ -33,6 +33,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
 use hyge_core::prelude::HygeResult;
+use hyge_ecs::prelude::Resource;
 use hyge_render::prelude::BindlessTable;
 
 use crate::asset::{Asset, AssetId};
@@ -129,6 +130,12 @@ impl std::fmt::Debug for AssetServer {
             .finish_non_exhaustive()
     }
 }
+
+// `AssetServer` is stored as a `Resource` in the `World` so that the
+// render-extract system can resolve `StaticMesh` handles to bindless slot
+// indices without the caller having to thread it through every system
+// signature.
+impl Resource for AssetServer {}
 
 impl AssetServer {
     /// Constructs a new asset server. The bindless table is
