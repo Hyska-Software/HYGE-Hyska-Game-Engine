@@ -1363,6 +1363,7 @@ dependencies = [
 name = "hyge-render"
 version = "0.1.0"
 dependencies = [
+ "bevy_ecs",
  "bitflags 2.13.0",
  "blake3",
  "bytemuck",
@@ -1372,6 +1373,7 @@ dependencies = [
  "hyge-ecs",
  "hyge-render-graph",
  "hyge-runtime-test",
+ "hyge-scene",
  "hyge-window",
  "naga",
  "pollster",
@@ -1410,7 +1412,10 @@ dependencies = [
 name = "hyge-scene"
 version = "0.1.0"
 dependencies = [
+ "bevy_ecs",
+ "bytemuck",
  "hyge-core",
+ "hyge-ecs",
 ]
 
 [[package]]

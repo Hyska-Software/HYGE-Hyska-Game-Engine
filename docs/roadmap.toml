@@ -739,7 +739,7 @@ title = "Bindless table integration with ECS"
 phase = "phase_4"
 owner = "render"
 priority = "P0"
-status = "in_progress"
+status = "complete"
 risk = "high"
 dependencies = ["R-037", "R-042"]
 summary = "RenderExtract reads ECS components and produces DrawCommand list for the render thread."
@@ -749,6 +749,8 @@ acceptance = [
   "groups by (mesh_id, material_id) into DrawCommand with instance_count",
   "1000+ meshes + 1000+ materials in test scene; no descriptor thrash; FPS target 60+ on RTX 3060"
 ]
+completed_at = "2026-07-06"
+completion_notes = "Added hyge-scene::components (MeshHandle, MaterialHandle, WorldTransform, LightComponent), hyge-scene::extract (FrameSnapshot, render_extract walking the world), hyge-scene::prelude. Added Renderer::render_frame that uploads a snapshot to the bindless table and runs the ClusteredForwardPass. Added PassContext::for_frame helper for outside-graph pass recording. ClusteredForwardPass::Batch now stores raw u32 slot ids. Tests: 4/4 in r043_bindless_ecs.rs (end-to-end: world -> extract -> render_frame on an off-screen target); 10/10 hyge-scene unit tests; no regressions in any existing hyge-render suite."
 
 [[items]]
 id = "R-044"

@@ -54,6 +54,7 @@ use hyge_render_graph::prelude::*;
 use hyge_window::prelude::Window;
 
 use crate::bindless::{BindlessConfig, BindlessTable};
+use crate::clustered_forward::ClusteredForwardPass;
 use crate::config::RendererConfig;
 use crate::ibl::EnvironmentBake;
 use crate::ibl_gpu::{self, IblResources};
@@ -116,6 +117,10 @@ pub struct Renderer {
     /// frame; the actual `compile` / `execute` integration is
     /// wired in R-024 (the triangle pass) and grows from there.
     graph: RenderGraph,
+    /// Lazily-initialised clustered-forward pass used by
+    /// [`Renderer::render_frame`]. `None` until the first
+    /// `render_frame` call; reused on subsequent frames.
+    clustered: Option<ClusteredForwardPass>,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -251,6 +256,7 @@ impl Renderer {
             current_frame: None,
             config,
             graph: RenderGraph::new(),
+            clustered: None,
         })
     }
 
@@ -323,6 +329,7 @@ impl Renderer {
             current_frame: None,
             config: config.clone(),
             graph: RenderGraph::new(),
+            clustered: None,
         })
     }
 
@@ -509,6 +516,148 @@ impl Renderer {
         }
     }
 
+    /// Renders a frame from a per-frame snapshot. The snapshot
+    /// provides the instance buffer, the draw command list, and
+    /// the lights. They are uploaded to the bindless table, then
+    /// the renderer's `ClusteredForwardPass` is recorded and
+    /// submitted. The target view is cleared to `clear_color`
+    /// before drawing.
+    ///
+    /// `frame_data` is the per-frame uniform consumed by
+    /// `pbr.wgsl` (camera, sun, exposure).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HygeError::Gpu`] if the encoder creation, queue
+    /// submission, or device poll fails. The `ClusteredForwardPass`
+    /// is constructed lazily on the first call; subsequent calls
+    /// reuse it (replacing the snapshot each frame).
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "frame submission is intrinsically many-arg"
+    )]
+    pub fn render_frame(
+        &mut self,
+        target: &wgpu::Texture,
+        target_format: wgpu::TextureFormat,
+        clear_color: wgpu::Color,
+        frame_data: &crate::clustered_forward::FrameData,
+        instances: &[crate::bindless::Instance],
+        draw_commands: &[crate::bindless::DrawCommand],
+        lights: &[crate::bindless::Light],
+    ) -> HygeResult<()> {
+        use crate::bindless::{DrawCommand, Light};
+        use crate::clustered_forward::{Batch as CfBatch, ClusteredForwardPass, ClusterConfig};
+        use std::sync::Arc;
+
+        self.profiler.begin_frame();
+
+        // Lazily construct the clustered-forward pass.
+        if self.clustered.is_none() {
+            let device: &wgpu::Device = &self.device;
+            // Size for at least one packed PBR vertex
+            // (48 bytes per vertex from `pbr.wgsl`).
+            let pbr_stride: u64 = 48;
+            let vertex_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("hyge-render/pbr-vertex-buffer"),
+                size: pbr_stride,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::VERTEX,
+                mapped_at_creation: false,
+            }));
+            let index_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("hyge-render/pbr-index-buffer"),
+                size: std::mem::size_of::<u32>() as u64, // 1 index placeholder
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            let pass = ClusteredForwardPass::new(
+                device,
+                Arc::clone(&self.bindless),
+                None,
+                target_format,
+                ClusterConfig::default(),
+                vertex_buffer,
+                index_buffer,
+                clear_color,
+            );
+            self.clustered = Some(pass);
+        }
+
+        // Upload snapshot to the bindless table.
+        self.bindless.write_instances(0, instances);
+        if !lights.is_empty() {
+            self.bindless.write_lights(0, lights);
+        } else {
+            self.bindless.write_lights(0, &[Light::default()]);
+        }
+        self.bindless.write_draw_commands(0, draw_commands);
+        if draw_commands.is_empty() {
+            // Pad with a single zeroed draw command so the
+            // shader never reads an empty storage buffer.
+            self.bindless
+                .write_draw_commands(0, &[DrawCommand::default()]);
+        }
+
+        // Build the per-frame batch list (one per draw command).
+        // The `Batch` struct now stores raw `u32` slot indexes
+        // (the typed `BindlessSlot<MeshTag>` does not leave the
+        // bindless table), so this is a direct field copy.
+        let batches: Vec<CfBatch> = draw_commands
+            .iter()
+            .map(|cmd| CfBatch {
+                mesh_id: cmd.mesh_id,
+                material_id: cmd.material_id,
+                first_instance: cmd.first_instance,
+                instance_count: cmd.instance_count,
+                index_count: 3,
+                first_index: 0,
+                base_vertex: 0,
+            })
+            .collect();
+
+        if let Some(pass) = self.clustered.as_mut() {
+            pass.set_frame_data(&self.queue, *frame_data);
+            pass.set_lights(
+                &self.queue,
+                if lights.is_empty() {
+                    vec![Light::default()]
+                } else {
+                    lights.to_vec()
+                },
+            );
+            pass.set_geometry(
+                &self.queue,
+                instances.to_vec(),
+                draw_commands.to_vec(),
+                batches,
+            );
+        }
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("hyge-render/frame"),
+            });
+
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut frame_ctx = FrameContext::new(view, target_format);
+        {
+            if let Some(pass) = self.clustered.as_mut() {
+                let mut pass_ctx = PassContext::for_frame(&mut frame_ctx, &mut encoder);
+                pass.record(&mut pass_ctx);
+            }
+        }
+
+        self.profiler.resolve(&mut encoder, 1);
+        self.queue.submit(std::iter::once(encoder.finish()));
+        self.device.poll(wgpu::Maintain::Wait);
+        self.profiler
+            .finish_frame(&self.device, &[String::from("render_frame")], 1, 1);
+        Ok(())
+    }
+
     /// Resizes the surface to the given width and height. A no-op
     /// for headless renderers (no surface to resize).
     ///
@@ -521,6 +670,7 @@ impl Renderer {
             surface.configure(&self.device, cfg);
         }
     }
+
 
     /// Returns the wgpu device.
     #[must_use]

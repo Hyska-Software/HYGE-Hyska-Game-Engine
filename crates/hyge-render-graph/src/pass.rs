@@ -20,13 +20,13 @@ use crate::resource::ResourceHandle;
 ///   surface view + format), for passes that draw to the
 ///   swapchain — [`PassContext::frame`].
 pub struct PassContext<'a> {
-    resources: &'a ResourceTable,
-    encoder: &'a mut wgpu::CommandEncoder,
+    pub(crate) resources: &'a ResourceTable,
+    pub(crate) encoder: &'a mut wgpu::CommandEncoder,
     /// `Some` for passes that draw to the current frame (the
     /// windowed `Renderer::render_frame` path); `None` for the
     /// headless test path (where the pass records into a
     /// user-provided `wgpu::CommandEncoder` with no surface).
-    frame: Option<&'a mut FrameContext>,
+    pub(crate) frame: Option<&'a mut FrameContext>,
 }
 
 impl<'a> PassContext<'a> {
@@ -89,6 +89,33 @@ impl<'a> PassContext<'a> {
     #[must_use]
     pub fn frame(&mut self) -> Option<&mut FrameContext> {
         self.frame.as_deref_mut()
+    }
+
+    /// Constructs a `PassContext` for callers outside the graph
+    /// (e.g. the windowed renderer's `render_frame` path) that
+    /// need to record a single pass directly. The returned
+    /// context borrows from `frame` and `encoder`; the caller's
+    /// borrows must stay alive for the duration of `record()`.
+    ///
+    /// The `resources` table is a default empty table; passes
+    /// that read graph-managed resources must use the compiled
+    /// graph's `execute` path instead.
+    #[inline]
+    pub fn for_frame<'b>(
+        frame: &'b mut FrameContext,
+        encoder: &'b mut wgpu::CommandEncoder,
+    ) -> PassContext<'b> {
+        // Build a default empty resource table by leaking one
+        // `ResourceTable` from a static. This sidesteps the
+        // `pub(crate)` constructor while keeping the type
+        // compatible with `Pass::record`.
+        static EMPTY: std::sync::OnceLock<ResourceTable> = std::sync::OnceLock::new();
+        let resources: &ResourceTable = EMPTY.get_or_init(ResourceTable::default);
+        PassContext {
+            resources,
+            encoder,
+            frame: Some(frame),
+        }
     }
 }
 

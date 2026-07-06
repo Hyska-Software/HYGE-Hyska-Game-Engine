@@ -21,9 +21,7 @@ use bytemuck::{Pod, Zeroable};
 
 use hyge_render_graph::prelude::*;
 
-use crate::bindless::{
-    BindlessTable, DrawCommand, Instance, Light, LightGrid, MaterialId, MeshId,
-};
+use crate::bindless::{BindlessTable, DrawCommand, Instance, Light, LightGrid};
 use crate::ibl_gpu::IblResources;
 
 /// Per-frame uniform block consumed by `pbr.wgsl` at `@group(1)`
@@ -89,10 +87,12 @@ impl Default for ClusterConfig {
 /// A single geometry batch submitted to the clustered-forward pass.
 #[derive(Debug, Clone)]
 pub struct Batch {
-    /// Bindless mesh id.
-    pub mesh_id: MeshId,
-    /// Bindless material id.
-    pub material_id: MaterialId,
+    /// Bindless mesh slot id (the raw `u32` index; the typed
+    /// `BindlessSlot<MeshTag>` lives on the asset server side
+    /// and is not threaded through the render frame).
+    pub mesh_id: u32,
+    /// Bindless material slot id.
+    pub material_id: u32,
     /// First instance in the global instance buffer.
     pub first_instance: u32,
     /// Number of instances.
