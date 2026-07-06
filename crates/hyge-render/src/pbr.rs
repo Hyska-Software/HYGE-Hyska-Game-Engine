@@ -20,6 +20,13 @@ pub const PREFILTER_SHADER_SOURCE: &str = include_str!("shader/prefilter.wgsl");
 /// [`crate::ibl::diffuse_irradiance`] is the source of truth.
 pub const IRRADIANCE_SHADER_SOURCE: &str = include_str!("shader/irradiance.wgsl");
 
+/// WGSL source for the R-042 clustered-forward light-grid compute
+/// shader. naga-validated. The CPU-side grid build in
+/// [`crate::clustered_forward::ClusteredForwardPass`] is the source
+/// of truth; this shader exists for the future GPU-driven culling
+/// path and for naga validation.
+pub const LIGHT_GRID_SHADER_SOURCE: &str = include_str!("shader/light_grid.wgsl");
+
 /// Opaque material alpha mode.
 pub const ALPHA_MODE_OPAQUE: u32 = 0;
 /// Alpha-test / cutout material alpha mode.
