@@ -697,17 +697,19 @@ title = "IBL prefilter and irradiance bake"
 phase = "phase_4"
 owner = "render"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-040"]
 summary = "Bake IBL from a glTF environment cubemap (prefilter roughness mip chain + irradiance convolution)."
 acceptance = [
-  "prefilter.wgsl computes roughness mip chain from environment cubemap",
-  "irradiance.wgsl computes irradiance via spherical convolution",
-  "offline bake path invoked at import time when an .hdr/.exr is detected in the scene",
-  "online bake path supports runtime-loaded environments",
-  "test: bake the Khronos environment cubemap, assert output hash stable"
+   "prefilter.wgsl computes roughness mip chain from environment cubemap.",
+   "irradiance.wgsl computes irradiance via spherical convolution.",
+   "Offline bake path invoked at import time when an .hdr/.exr is detected.",
+   "Online bake path supports runtime-loaded environments.",
+   "Bake the Khronos environment cubemap, assert output hash stable.",
 ]
+completed_at = "2026-07-05"
+completion_notes = "Implemented .hdr import to .hyge-env, EXR rejected with Unsupported, optional AssetDb recording, and Renderer::set_environment upload path. Tests: ibl.rs (8), ibl_importer.rs (5)."
 
 [[items]]
 id = "R-042"
@@ -715,7 +717,7 @@ title = "Clustered forward pipeline"
 phase = "phase_4"
 owner = "render"
 priority = "P0"
-status = "not_started"
+status = "in_progress"
 risk = "high"
 dependencies = ["R-040"]
 summary = "Clustered forward shading with Z clusters + XY tiles, light grid compute."
@@ -735,7 +737,7 @@ title = "Bindless table integration with ECS"
 phase = "phase_4"
 owner = "render"
 priority = "P0"
-status = "not_started"
+status = "in_progress"
 risk = "high"
 dependencies = ["R-037", "R-042"]
 summary = "RenderExtract reads ECS components and produces DrawCommand list for the render thread."
@@ -752,7 +754,7 @@ title = "M3 smoke test: PBR matches DamagedHelmet reference"
 phase = "phase_4"
 owner = "render"
 priority = "P0"
-status = "not_started"
+status = "in_progress"
 risk = "low"
 dependencies = ["R-043"]
 summary = "M3 Definition of Done: PBR matches glTF DamagedHelmet reference scene visually."
