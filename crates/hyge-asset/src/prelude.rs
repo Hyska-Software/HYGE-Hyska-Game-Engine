@@ -10,8 +10,9 @@ pub use crate::{
         TextureUploadData,
     },
     importer::{
-        import_environment, import_gltf, is_environment_source, EnvironmentImportReport,
-        ImportError, ImportOptions, ImportReport,
+        import_environment, import_environment_with_config, import_environment_with_config_and_db,
+        import_gltf, is_environment_source, EnvironmentImportReport, ImportError, ImportOptions,
+        ImportReport,
     },
     server::{AssetServer, GpuResourceKind, LoadedAssetGpu},
     Asset, AssetDb, AssetId, AssetPlugin, AssetResolver, FileWatcher, Handle, LoadContext,

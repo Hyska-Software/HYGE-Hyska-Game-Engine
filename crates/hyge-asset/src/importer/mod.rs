@@ -26,5 +26,8 @@ pub mod transcode;
 #[cfg(test)]
 mod golden;
 
-pub use environment::{import_environment, is_environment_source, EnvironmentImportReport};
+pub use environment::{
+    import_environment, import_environment_with_config, import_environment_with_config_and_db,
+    is_environment_source, EnvironmentImportReport,
+};
 pub use import::{import_gltf, ImportError, ImportOptions, ImportReport};

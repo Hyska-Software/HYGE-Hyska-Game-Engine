@@ -28,6 +28,9 @@ use blake3::Hasher;
 use hyge_core::result::{HygeError, HygeResult};
 use hyge_render::ibl;
 
+use crate::asset::AssetId;
+use crate::db::AssetDb;
+
 /// The result of a successful environment import. Mirrors the
 /// shape of [`crate::importer::import::ImportReport`] for the
 /// mesh / texture / material paths.
@@ -74,6 +77,38 @@ pub fn is_environment_source(path: &Path) -> bool {
 /// - [`HygeError::Io`] for filesystem failures during the
 ///   cook.
 pub fn import_environment(source: &Path, out_dir: &Path) -> HygeResult<EnvironmentImportReport> {
+    import_environment_with_config(source, out_dir, ibl::BakeConfig::default())
+}
+
+/// Like [`import_environment`], but with a caller-supplied
+/// [`BakeConfig`]. Used by the test suite to run a small,
+/// deterministic bake without waiting for the full production
+/// resolution.
+///
+/// # Errors
+///
+/// Same as [`import_environment`].
+pub fn import_environment_with_config(
+    source: &Path,
+    out_dir: &Path,
+    bake_config: ibl::BakeConfig,
+) -> HygeResult<EnvironmentImportReport> {
+    import_environment_with_config_and_db(source, out_dir, bake_config, None)
+}
+
+/// Like [`import_environment_with_config`], with an optional
+/// [`AssetDb`] to record the produced `.hyge-env` asset.
+///
+/// # Errors
+///
+/// Same as [`import_environment`], plus [`HygeError::Io`] if the
+/// DB write fails.
+pub fn import_environment_with_config_and_db(
+    source: &Path,
+    out_dir: &Path,
+    bake_config: ibl::BakeConfig,
+    asset_db: Option<&mut AssetDb>,
+) -> HygeResult<EnvironmentImportReport> {
     if !source.exists() {
         return Err(HygeError::asset_not_found(format!(
             "environment source does not exist: {}",
@@ -113,11 +148,16 @@ pub fn import_environment(source: &Path, out_dir: &Path) -> HygeResult<Environme
     let source_bytes = fs::read(source).map_err(|e| io_with_path(e, "read", source))?;
     let source_hash = hex_lower(Hasher::new().update(&source_bytes).finalize().as_bytes());
 
-    let bake = ibl::bake_from_rgbe_hdr(&source_bytes)?;
+    let bake = ibl::bake_from_rgbe_hdr_with_config(&source_bytes, bake_config)?;
     let env_bytes = ibl::encode_for_test(&bake);
     let env_hash = hex_lower(Hasher::new().update(&env_bytes).finalize().as_bytes());
     let env_path = out_dir.join(format!("{env_hash}.hyge-env"));
     fs::write(&env_path, &env_bytes).map_err(|e| io_with_path(e, "write env", &env_path))?;
+
+    if let Some(db) = asset_db {
+        let env_id = AssetId::from(blake3::hash(env_hash.as_bytes()));
+        db.insert(&env_id, &env_path)?;
+    }
 
     Ok(EnvironmentImportReport {
         source_hash,

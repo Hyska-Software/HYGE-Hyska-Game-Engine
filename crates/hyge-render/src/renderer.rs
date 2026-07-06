@@ -55,6 +55,8 @@ use hyge_window::prelude::Window;
 
 use crate::bindless::{BindlessConfig, BindlessTable};
 use crate::config::RendererConfig;
+use crate::ibl::EnvironmentBake;
+use crate::ibl_gpu::{self, IblResources};
 use crate::profiler::{FrameStats, GpuProfiler};
 use crate::triangle::TrianglePass;
 
@@ -87,6 +89,10 @@ pub struct Renderer {
     /// asset server's GPU upload path registers mesh /
     /// material / texture entries here.
     bindless: Arc<BindlessTable>,
+    /// Optional IBL resources uploaded from a baked environment
+    /// (R-041). Bound into the PBR pass's frame bind group when
+    /// present; when absent the PBR pass uses a fallback ambient.
+    ibl: Option<IblResources>,
     /// GPU timestamp profiler and latest frame statistics.
     profiler: GpuProfiler,
     /// The `Arc<winit::Window>` that backs the surface. Stored
@@ -237,6 +243,7 @@ impl Renderer {
             triangle_pipeline,
             triangle_vertex_buffer,
             bindless,
+            ibl: None,
             profiler,
             window_keepalive: Some(winit_arc),
             surface: Some(surface),
@@ -308,6 +315,7 @@ impl Renderer {
             triangle_pipeline,
             triangle_vertex_buffer,
             bindless,
+            ibl: None,
             profiler,
             window_keepalive: None,
             surface: None,
@@ -590,6 +598,26 @@ impl Renderer {
     #[must_use]
     pub fn bindless_arc(&self) -> Arc<BindlessTable> {
         Arc::clone(&self.bindless)
+    }
+
+    /// Uploads a baked environment to wgpu textures and stores
+    /// the resulting [`IblResources`] on the renderer. The PBR
+    /// pass binds these views in its frame bind group when
+    /// present.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HygeError::Gpu`] if the device is lost during
+    /// texture creation.
+    pub fn set_environment(&mut self, bake: &EnvironmentBake) -> HygeResult<()> {
+        self.ibl = Some(ibl_gpu::upload(&self.device, &self.queue, bake)?);
+        Ok(())
+    }
+
+    /// Returns the currently uploaded IBL resources, if any.
+    #[must_use]
+    pub fn ibl(&self) -> Option<&IblResources> {
+        self.ibl.as_ref()
     }
 }
 
