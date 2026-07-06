@@ -8,8 +8,19 @@
 //! See `docs/architecture.md` §6.6 for the planned public surface.
 //! Implementation is tracked in `docs/roadmap.toml` under R-035, R-060..R-064.
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
 pub mod components;
 pub mod extract;
+pub mod plugin;
 pub mod prelude;
+pub mod transform;
 
-pub use components::{LightComponent, MaterialHandle, MeshHandle, WorldTransform};
+pub use components::{
+    AmbientLight, AudioBus, AudioListener, AudioRolloff, AudioSource, Camera, CharacterController,
+    Children, Collider, ColliderShape, DirectionalLight, EditorCamera, FogVolume, GlobalTransform,
+    Joint, LightComponent, MaterialHandle, MeshHandle, Name, Parent, PersistOnReload, PointLight,
+    PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, Transform, WorldTransform,
+};
+pub use plugin::ScenePlugin;

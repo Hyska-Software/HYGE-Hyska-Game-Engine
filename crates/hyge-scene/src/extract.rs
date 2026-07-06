@@ -18,7 +18,10 @@ use bytemuck::{Pod, Zeroable};
 
 use hyge_ecs::prelude::*;
 
-use crate::components::{LightComponent, MaterialHandle, MeshHandle, WorldTransform};
+use crate::components::{
+    AmbientLight, DirectionalLight, GlobalTransform, LightComponent, MaterialHandle, MeshHandle,
+    PointLight, SpotLight, WorldTransform,
+};
 
 /// A single rendered instance, GPU-ready. Mirrors
 /// `hyge_render::bindless::Instance`.
@@ -79,6 +82,44 @@ impl From<LightComponent> for Light {
     }
 }
 
+impl Light {
+    /// Builds a directional light from array fields.
+    #[must_use]
+    pub fn directional(direction: [f32; 3], color: [f32; 3], intensity: f32) -> Self {
+        Self {
+            position: [0.0, 0.0, 0.0, 2.0],
+            color: [color[0], color[1], color[2], intensity],
+            direction: [direction[0], direction[1], direction[2], 0.0],
+        }
+    }
+
+    /// Builds a point light from array fields.
+    #[must_use]
+    pub fn point(position: [f32; 3], color: [f32; 3], intensity: f32) -> Self {
+        Self {
+            position: [position[0], position[1], position[2], 0.0],
+            color: [color[0], color[1], color[2], intensity],
+            direction: [0.0, -1.0, 0.0, 0.0],
+        }
+    }
+
+    /// Builds a spot light from array fields.
+    #[must_use]
+    pub fn spot(
+        position: [f32; 3],
+        direction: [f32; 3],
+        color: [f32; 3],
+        intensity: f32,
+        outer_cos: f32,
+    ) -> Self {
+        Self {
+            position: [position[0], position[1], position[2], 1.0],
+            color: [color[0], color[1], color[2], intensity],
+            direction: [direction[0], direction[1], direction[2], outer_cos],
+        }
+    }
+}
+
 /// The per-frame snapshot the renderer consumes.
 #[derive(Resource, Clone, Debug, Default)]
 pub struct FrameSnapshot {
@@ -88,6 +129,8 @@ pub struct FrameSnapshot {
     pub draw_commands: Vec<DrawCommand>,
     /// Lights in the scene (directional + point + spot).
     pub lights: Vec<Light>,
+    /// Ambient light.
+    pub ambient: Option<Light>,
 }
 
 impl FrameSnapshot {
@@ -131,11 +174,57 @@ pub fn render_extract(world: &mut World) -> FrameSnapshot {
 
     let mut snapshot = FrameSnapshot::empty();
 
-    // 1. Extract lights.
+    // 1. Extract lights from the legacy LightComponent and the canonical
+    //    typed light components.
     {
         let mut query = world.query::<&LightComponent>();
         for light in query.iter(world) {
             snapshot.lights.push(Light::from(*light));
+        }
+    }
+    {
+        let mut query = world.query::<&PointLight>();
+        for light in query.iter(world) {
+            snapshot
+                .lights
+                .push(Light::point(light.color, light.color, light.intensity));
+        }
+    }
+    {
+        let mut query = world.query::<&SpotLight>();
+        for light in query.iter(world) {
+            snapshot.lights.push(Light::spot(
+                light.color,
+                light.direction,
+                light.color,
+                light.intensity,
+                light.outer_cos,
+            ));
+        }
+    }
+    {
+        let mut query = world.query::<&DirectionalLight>();
+        for light in query.iter(world) {
+            snapshot.lights.push(Light::directional(
+                light.direction,
+                light.color,
+                light.illuminance,
+            ));
+        }
+    }
+    {
+        let mut query = world.query::<&AmbientLight>();
+        if let Some(light) = query.iter(world).next() {
+            snapshot.ambient = Some(Light {
+                position: [0.0; 4],
+                color: [
+                    light.color[0],
+                    light.color[1],
+                    light.color[2],
+                    light.intensity,
+                ],
+                direction: [0.0; 4],
+            });
         }
     }
 
@@ -150,10 +239,20 @@ pub fn render_extract(world: &mut World) -> FrameSnapshot {
     // the high bits, material_id in the low bits).
     let mut groups: BTreeMap<u64, Vec<Instance>> = BTreeMap::new();
     {
-        let mut query = world
-            .query::<(&MeshHandle, &MaterialHandle, Option<&WorldTransform>)>();
-        for (mesh, material, transform) in query.iter(world) {
-            let transform = transform.copied().unwrap_or_default();
+        let mut query = world.query::<(
+            &MeshHandle,
+            &MaterialHandle,
+            Option<&WorldTransform>,
+            Option<&GlobalTransform>,
+        )>();
+        for (mesh, material, world_transform, global_transform) in query.iter(world) {
+            // Prefer the canonical GlobalTransform; fall back to the legacy
+            // WorldTransform so existing M3 scenes keep rendering.
+            let transform: WorldTransform = global_transform
+                .copied()
+                .map(Into::into)
+                .or(world_transform.copied())
+                .unwrap_or_default();
             let instance = Instance {
                 transform: transform.cols,
                 mesh_id: mesh.0,
@@ -222,6 +321,7 @@ pub fn add_render_extract_system(schedule: &mut bevy_ecs::schedule::Schedule) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::components::{MeshHandle, WorldTransform};
 
     fn make_world_with_sun() -> World {
         let mut world = World::new();
@@ -269,11 +369,10 @@ mod tests {
     }
 
     /// R-043 acceptance #3: 1000+ entities that share
-    /// `(mesh, material)` pairs collapse into a small
-    /// number of `DrawCommand`s with `instance_count`
-    /// reflecting the per-group count. The test uses a
-    /// smaller fixture (10 + 5 + 3 = 18 entities / 3
-    /// groups) to stay fast.
+    /// `(mesh, material)` collapse into a small number of
+    /// `DrawCommand`s with `instance_count` reflecting the
+    /// per-group count. The test uses a smaller fixture
+    /// (10 + 5 + 3 = 18 entities / 3 groups) to stay fast.
     #[test]
     fn extract_groups_by_mesh_and_material() {
         let mut world = World::new();
@@ -313,13 +412,18 @@ mod tests {
         // first_instance values must be a contiguous
         // walk: the first group's `first_instance` is 0,
         // and the total spans 0..18.
-        let total: u32 = snapshot.draw_commands.iter().map(|dc| dc.instance_count).sum();
+        let total: u32 = snapshot
+            .draw_commands
+            .iter()
+            .map(|dc| dc.instance_count)
+            .sum();
         assert_eq!(total, 18);
 
         // Each instance buffer entry must reference one
         // of the three (mesh, material) pairs.
         for inst in &snapshot.instances {
-            let in_group_a_or_b = inst.mesh_id == 1 && (inst.material_id == 1 || inst.material_id == 2);
+            let in_group_a_or_b =
+                inst.mesh_id == 1 && (inst.material_id == 1 || inst.material_id == 2);
             let in_group_c = inst.mesh_id == 2 && inst.material_id == 1;
             assert!(
                 in_group_a_or_b || in_group_c,
@@ -389,8 +493,8 @@ mod tests {
 
     #[test]
     fn add_render_extract_system_runs_in_schedule() {
-        use hyge_ecs::schedule::Label;
         use hyge_ecs::prelude::Schedule;
+        use hyge_ecs::schedule::Label;
 
         let mut world = World::new();
         world.spawn((MeshHandle(7), MaterialHandle(8), WorldTransform::identity()));
@@ -404,5 +508,63 @@ mod tests {
         assert_eq!(snapshot.instance_count(), 1);
         assert_eq!(snapshot.draw_commands[0].mesh_id, 7);
         assert_eq!(snapshot.draw_commands[0].material_id, 8);
+    }
+
+    #[test]
+    fn extract_prefers_global_transform() {
+        use crate::components::GlobalTransform;
+        use hyge_core::prelude::{Mat4, Vec3};
+
+        let mut world = World::new();
+        world.spawn((
+            MeshHandle(1),
+            MaterialHandle(1),
+            GlobalTransform::from(Mat4::from_translation(Vec3::Y)),
+            WorldTransform::from_translation(0.0, 0.0, 5.0),
+        ));
+        let snapshot = render_extract(&mut world);
+        assert_eq!(snapshot.instances[0].transform[0][3], 0.0);
+        assert_eq!(snapshot.instances[0].transform[1][3], 1.0);
+        assert_eq!(snapshot.instances[0].transform[2][3], 0.0);
+    }
+
+    #[test]
+    fn extract_canonical_point_light() {
+        let mut world = World::new();
+        world.spawn(PointLight {
+            color: [1.0, 0.0, 0.0],
+            intensity: 2.0,
+            range: 5.0,
+        });
+        let snapshot = render_extract(&mut world);
+        assert_eq!(snapshot.light_count(), 1);
+        assert_eq!(snapshot.lights[0].position[3], 0.0); // point
+        assert_eq!(snapshot.lights[0].color[0], 1.0);
+        assert_eq!(snapshot.lights[0].color[3], 2.0);
+    }
+
+    #[test]
+    fn extract_canonical_directional_light() {
+        let mut world = World::new();
+        world.spawn(DirectionalLight {
+            color: [0.0, 1.0, 0.0],
+            illuminance: 50_000.0,
+            direction: [0.0, -1.0, 0.0],
+        });
+        let snapshot = render_extract(&mut world);
+        assert_eq!(snapshot.light_count(), 1);
+        assert_eq!(snapshot.lights[0].position[3], 2.0); // directional
+    }
+
+    #[test]
+    fn extract_ambient_light() {
+        let mut world = World::new();
+        world.spawn(AmbientLight {
+            color: [1.0, 1.0, 1.0],
+            intensity: 0.1,
+        });
+        let snapshot = render_extract(&mut world);
+        assert!(snapshot.ambient.is_some());
+        assert_eq!(snapshot.ambient.unwrap().color[3], 0.1);
     }
 }

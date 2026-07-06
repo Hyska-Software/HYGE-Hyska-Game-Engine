@@ -72,7 +72,7 @@ strip = "debuginfo"
 [workspace.dependencies]
 
 # Math
-glam = { version = "0.29", features = ["bytemuck"] }
+glam = { version = "0.29", features = ["bytemuck", "mint"] }
 
 # Logging + tracing
 tracing = "0.1"

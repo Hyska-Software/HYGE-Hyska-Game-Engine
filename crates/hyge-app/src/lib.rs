@@ -22,6 +22,7 @@ pub mod prelude;
 
 use hyge_ecs::prelude::*;
 use hyge_render::prelude::*;
+use hyge_scene::prelude::*;
 use hyge_window::prelude::*;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -356,11 +357,15 @@ impl ApplicationHandler for App {
 /// receive them through the [`AppConfig`] argument. Plugins with no
 /// config use sensible defaults.
 ///
-/// Currently includes only [`WindowPlugin`]. The other subsystem plugins
-/// (renderer, asset, scene, physics, audio, input, script, editor) are
-/// added as their respective milestones land (see `docs/roadmap.toml`).
+/// Currently includes [`WindowPlugin`] and [`ScenePlugin`]. The other
+/// subsystem plugins (renderer, asset, physics, audio, input, script,
+/// editor) are added as their respective milestones land (see
+/// `docs/roadmap.toml`).
 pub fn default_plugins(config: &AppConfig) -> Vec<Box<dyn HygePlugin>> {
-    vec![Box::new(WindowPlugin::new(config.window.clone()))]
+    vec![
+        Box::new(WindowPlugin::new(config.window.clone())),
+        Box::new(ScenePlugin),
+    ]
 }
 
 #[cfg(test)]

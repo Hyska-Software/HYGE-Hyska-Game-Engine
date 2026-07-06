@@ -17,6 +17,7 @@ hyge-core = { workspace = true }
 hyge-ecs = { workspace = true }
 hyge-window = { workspace = true }
 hyge-render = { workspace = true }
+hyge-scene = { workspace = true }
 
 [[example]]
 name = "hello_window"
