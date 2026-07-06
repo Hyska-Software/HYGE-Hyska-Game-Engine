@@ -717,7 +717,7 @@ title = "Clustered forward pipeline"
 phase = "phase_4"
 owner = "render"
 priority = "P0"
-status = "in_progress"
+status = "complete"
 risk = "high"
 dependencies = ["R-040"]
 summary = "Clustered forward shading with Z clusters + XY tiles, light grid compute."
@@ -730,6 +730,8 @@ acceptance = [
   "memory: light grid (1920x1080 / 16 / 16) * 16 * (offset+count) = ~512 KB",
   "snapshot test of reference scene within SSIM 0.99"
 ]
+completed_at = "2026-07-06"
+completion_notes = "Added ClusteredForwardPass, light_grid.wgsl (naga-validated), BindlessTable upload helpers (write_instances, write_lights, write_light_grid, write_draw_commands), ClusterConfig with sane defaults, and the FrameData uniform struct. CPU side builds the light grid conservatively (every light in every cluster); the light_grid.wgsl is the GPU-driven culling path. 7/7 tests in r042_clustered_forward.rs pass; no regressions in the existing ibl/lit_sphere/pbr_shader suites."
 
 [[items]]
 id = "R-043"
