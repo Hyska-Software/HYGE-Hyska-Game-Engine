@@ -63,3 +63,29 @@ fn pbr_cpu_constants_match_shader_literals() {
     assert!(IRRADIANCE_SHADER_SOURCE.contains("@compute"));
     assert!(IRRADIANCE_SHADER_SOURCE.contains("hammersley"));
 }
+
+/// R-042 acceptance #4: the PBR fragment shader must iterate
+/// the LightGrid SSBO and dereference the LightIndexList to
+/// pull per-cluster lights. This test asserts the source
+/// contains the iteration loop; naga validation in
+/// `pbr_shader_naga_validation_passes` confirms the loop
+/// type-checks.
+#[test]
+fn pbr_fragment_iterates_light_grid() {
+    // The light grid storage buffer is bound at @group(0)
+    // @binding(8) and the light index list at @binding(12);
+    // the fragment must read both.
+    assert!(PBR_SHADER_SOURCE.contains("light_grid["));
+    assert!(PBR_SHADER_SOURCE.contains("light_index_list["));
+    // The fragment must declare a per-pixel view_z varying
+    // so the cluster Z slice can be computed.
+    assert!(PBR_SHADER_SOURCE.contains("view_z"));
+    // The cluster-id helper must exist and consume the
+    // frame.cluster_params and frame.viewport uniforms.
+    assert!(PBR_SHADER_SOURCE.contains("fn compute_cluster_id"));
+    assert!(PBR_SHADER_SOURCE.contains("fn cluster_linear_index"));
+    // The direct-light evaluator must branch on the light
+    // type (directional vs point/spot).
+    assert!(PBR_SHADER_SOURCE.contains("fn direct_light_radiance"));
+    assert!(PBR_SHADER_SOURCE.contains("light_type == 2u"));
+}

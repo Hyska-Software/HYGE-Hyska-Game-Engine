@@ -38,7 +38,7 @@ fn synthetic_hdr_bytes() -> Vec<u8> {
     let mut buf = Vec::new();
     writeln!(buf, "#?RADIANCE").unwrap();
     writeln!(buf, "FORMAT=32-bit_rle_rgbe").unwrap();
-    writeln!(buf, "").unwrap();
+    writeln!(buf).unwrap();
     writeln!(buf, "-Y 2 +X 4").unwrap();
     // 8 pixels * 4 bytes
     for _ in 0..8 {

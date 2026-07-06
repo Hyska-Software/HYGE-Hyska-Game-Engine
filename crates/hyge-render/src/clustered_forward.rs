@@ -21,12 +21,17 @@ use bytemuck::{Pod, Zeroable};
 
 use hyge_render_graph::prelude::*;
 
-use crate::bindless::{BindlessTable, DrawCommand, Instance, Light, LightGrid};
+use crate::bindless::{
+    BindlessTable, DrawCommand, Instance, Light, LightGrid, LIGHT_INDEX_LIST_CAPACITY,
+};
 use crate::ibl_gpu::IblResources;
 
 /// Per-frame uniform block consumed by `pbr.wgsl` at `@group(1)`
 /// `@binding(1)`. The struct layout must match `FrameData` in the
-/// shader exactly.
+/// shader exactly. Total size: 4×vec4 (64) + 1×vec4 (16) + 1×vec4
+/// (16) + 1×mat4 (64) = 160 bytes. The struct must stay
+/// 16-byte aligned (wgpu's `Uniform` alignment requirement); every
+/// `vec4`/`mat4` member satisfies this.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct FrameData {
@@ -38,11 +43,20 @@ pub struct FrameData {
     pub sun_direction_exposure: [f32; 4],
     /// Sun color in `xyz`, intensity in `w`.
     pub sun_color_intensity: [f32; 4],
+    /// Cluster configuration as `vec4<u32>`:
+    /// `(tiles_x, tiles_y, depth_slices, max_lights_per_cluster)`.
+    pub cluster_params: [u32; 4],
+    /// Viewport in `xy` (pixels), view-space near/far in `zw`.
+    pub viewport: [f32; 4],
+    /// Camera view matrix (column-major). Used by the vertex
+    /// shader to compute view-space Z for the cluster depth slice.
+    pub view: [[f32; 4]; 4],
 }
 
 impl FrameData {
     /// Creates default frame data for an off-centre looking-at-origin
-    /// camera, a single directional sun, and a neutral exposure.
+    /// camera, a single directional sun, a neutral exposure, and
+    /// the default cluster config (16x9x16, 256 max lights).
     #[must_use]
     pub fn default_looking_at_origin() -> Self {
         Self {
@@ -55,6 +69,15 @@ impl FrameData {
             camera_pos_alpha_cutoff: [0.0, 0.0, 5.0, 0.5],
             sun_direction_exposure: [0.0, -1.0, 0.0, 1.0],
             sun_color_intensity: [1.0, 1.0, 1.0, 1.0],
+            cluster_params: [16, 9, 16, 256],
+            // Default viewport: 1080p with a 0.1..1000 m view frustum.
+            viewport: [1920.0, 1080.0, 0.1, 1000.0],
+            view: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
         }
     }
 }
@@ -118,6 +141,15 @@ pub struct ClusteredForwardPass {
         reason = "kept alive so the bind group is rebuilt when the IBL resources change"
     )]
     ibl: Option<IblResources>,
+    /// The wgpu device handle used to (re)build the frame bind
+    /// group when IBL changes. We keep an `Arc<wgpu::Device>`
+    /// rather than a `&wgpu::Device` because the pass owns the
+    /// rebuild lifetime.
+    device: Arc<wgpu::Device>,
+    /// The frame-data bind group layout. Cached so `set_ibl`
+    /// can rebuild the frame bind group against the same
+    /// layout (wgpu's bind groups are immutable).
+    frame_data_layout: Arc<wgpu::BindGroupLayout>,
     frame_data_buffer: Arc<wgpu::Buffer>,
     frame_bind_group: Arc<wgpu::BindGroup>,
     vertex_buffer: Arc<wgpu::Buffer>,
@@ -161,8 +193,12 @@ impl ClusteredForwardPass {
     ///
     /// Returns [`hyge_core::result::HygeError::Gpu`] when the
     /// pipeline layout or shader module cannot be created.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "frame submission is intrinsically many-arg"
+    )]
     pub fn new(
-        device: &wgpu::Device,
+        device: Arc<wgpu::Device>,
         bindless: Arc<BindlessTable>,
         ibl: Option<IblResources>,
         surface_format: wgpu::TextureFormat,
@@ -231,10 +267,11 @@ impl ClusteredForwardPass {
                 },
             ],
         });
+        let frame_data_layout = Arc::new(frame_data_layout);
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("hyge-render/pbr-pipeline-layout"),
-            bind_group_layouts: &[bindless.layout(), &frame_data_layout],
+            bind_group_layouts: &[bindless.layout(), frame_data_layout.as_ref()],
             push_constant_ranges: &[],
         });
 
@@ -286,8 +323,8 @@ impl ClusteredForwardPass {
         }));
 
         let frame_bind_group = Self::build_frame_bind_group(
-            device,
-            &frame_data_layout,
+            &device,
+            frame_data_layout.as_ref(),
             &frame_data_buffer,
             &vertex_buffer,
             &ibl,
@@ -297,6 +334,8 @@ impl ClusteredForwardPass {
             pipeline,
             bindless,
             ibl,
+            device,
+            frame_data_layout,
             frame_data_buffer,
             frame_bind_group,
             vertex_buffer,
@@ -413,10 +452,24 @@ impl ClusteredForwardPass {
         }))
     }
 
-    /// Updates per-frame camera + lighting uniforms.
+    /// Updates per-frame camera + lighting uniforms. The
+    /// `cluster_params` (cluster dims + max lights) and
+    /// `viewport` (screen + near/far) fields are derived from
+    /// the pass's own [`ClusterConfig`]; the caller fills the
+    /// rest (`view_proj`, `view`, `camera_pos`, `sun_*`).
     pub fn set_frame_data(&mut self, queue: &wgpu::Queue, frame_data: FrameData) {
         self.frame_data = frame_data;
-        queue.write_buffer(&self.frame_data_buffer, 0, bytemuck::bytes_of(&frame_data));
+        // Overlay the cluster_params and viewport with the
+        // pass's authoritative configuration so the shader's
+        // light-grid iteration is consistent with what the CPU
+        // uploaded.
+        self.frame_data.cluster_params = [
+            self.cluster_config.tiles_x,
+            self.cluster_config.tiles_y,
+            self.cluster_config.depth_slices,
+            self.cluster_config.max_lights_per_cluster,
+        ];
+        queue.write_buffer(&self.frame_data_buffer, 0, bytemuck::bytes_of(&self.frame_data));
     }
 
     /// Updates the scene lights and uploads them to the bindless
@@ -450,36 +503,74 @@ impl ClusteredForwardPass {
         self.rebuild_light_grid(queue);
     }
 
-    fn rebuild_light_grid(&self, queue: &wgpu::Queue) {
+    fn rebuild_light_grid(&mut self, _queue: &wgpu::Queue) {
         let total_clusters = (self.cluster_config.tiles_x
             * self.cluster_config.tiles_y
             * self.cluster_config.depth_slices) as usize;
-        let mut entries = vec![LightGrid::new(0, 0); total_clusters];
+        let max_per_cluster = self.cluster_config.max_lights_per_cluster as usize;
 
+        let mut entries = vec![LightGrid::new(0, 0); total_clusters];
+        let mut index_list: Vec<u32> = Vec::with_capacity(total_clusters * max_per_cluster);
+
+        // The light-index-list SSBO is sized to
+        // `LIGHT_INDEX_LIST_CAPACITY` (default 65_536). We
+        // cannot write past that boundary; the caller's
+        // `ClusterConfig::max_lights_per_cluster` may be
+        // larger than what the buffer actually holds, so we
+        // cap the write to the buffer capacity and zero out
+        // any cluster whose offset would be out of range.
+        let index_list_capacity = LIGHT_INDEX_LIST_CAPACITY as usize;
+        let max_offsets = index_list_capacity / max_per_cluster.max(1);
         for (cluster_index, entry) in entries.iter_mut().enumerate() {
+            if cluster_index >= max_offsets {
+                *entry = LightGrid::new(0, 0);
+                continue;
+            }
             let mut count = 0u32;
-            let offset = (cluster_index as u32) * self.cluster_config.max_lights_per_cluster;
-            for (light_index, _light) in self.lights.iter().enumerate() {
-                if count >= self.cluster_config.max_lights_per_cluster {
+            let offset = (cluster_index as u32) * (max_per_cluster as u32);
+            for light_index in 0..self.lights.len() {
+                if (count as usize) >= max_per_cluster {
                     break;
                 }
-                // Conservative: every light affects every cluster for
-                // the smoke-test path. R-043 adds frustum-aware
-                // assignment.
+                index_list.push(light_index as u32);
                 count += 1;
-                let _ = light_index;
             }
             *entry = LightGrid::new(offset, count);
         }
 
+        // Pad the index list with a single zero entry so the
+        // shader never reads past the buffer end when
+        // `grid.count > index_list.len() / max_per_cluster`.
+        // The fragment shader's `light_index >= arrayLength(&lights)`
+        // guard catches any out-of-range read.
+        if index_list.is_empty() {
+            index_list.push(0);
+        }
+
         self.bindless.write_light_grid(0, &entries);
+        self.bindless.write_light_index_list(0, &index_list);
+
         // Avoid an empty light-grid read by the shader.
         if entries.is_empty() {
             self.bindless.write_light_grid(0, &[LightGrid::default()]);
         }
+    }
 
-        // Ensure the frame bind group is rebuilt if IBL changed.
-        let _ = queue;
+    /// Replaces the IBL resources and rebuilds the frame bind
+    /// group so the new irradiance / prefilter / BRDF-LUT
+    /// views are bound. The R-041 acceptance test relies on
+    /// this working *after* the first `render_frame` call,
+    /// which is why the binding has to be torn down and
+    /// rebuilt here (the bind group is immutable in wgpu).
+    pub fn set_ibl(&mut self, ibl: IblResources) {
+        self.ibl = Some(ibl);
+        self.frame_bind_group = Self::build_frame_bind_group(
+            &self.device,
+            self.frame_data_layout.as_ref(),
+            &self.frame_data_buffer,
+            &self.vertex_buffer,
+            &self.ibl,
+        );
     }
 
     /// Returns the bindless table.

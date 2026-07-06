@@ -158,7 +158,7 @@ pub fn parse(bytes: &[u8], _source: &Path) -> HygeResult<GltfScene> {
 
     // -- images (passthrough) ----------------------------------------
     let mut image_records: Vec<ImageData> = Vec::new();
-    for (img, data) in document.images().zip(images.into_iter()) {
+    for (img, data) in document.images().zip(images) {
         let source_mime = match img.source() {
             gltf::image::Source::View { mime_type, .. } => mime_type_for(Some(mime_type)),
             gltf::image::Source::Uri { mime_type, .. } => mime_type_for(mime_type),

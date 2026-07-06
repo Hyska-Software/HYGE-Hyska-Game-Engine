@@ -554,7 +554,7 @@ impl Renderer {
 
         // Lazily construct the clustered-forward pass.
         if self.clustered.is_none() {
-            let device: &wgpu::Device = &self.device;
+            let device: Arc<wgpu::Device> = Arc::clone(&self.device);
             // Size for at least one packed PBR vertex
             // (48 bytes per vertex from `pbr.wgsl`).
             let pbr_stride: u64 = 48;
@@ -573,9 +573,9 @@ impl Renderer {
                 mapped_at_creation: false,
             }));
             let pass = ClusteredForwardPass::new(
-                device,
+                Arc::clone(&device),
                 Arc::clone(&self.bindless),
-                None,
+                self.ibl.clone(),
                 target_format,
                 ClusterConfig::default(),
                 vertex_buffer,
@@ -755,12 +755,25 @@ impl Renderer {
     /// pass binds these views in its frame bind group when
     /// present.
     ///
+    /// If the clustered-forward pass has already been
+    /// constructed (via a prior [`Renderer::render_frame`]
+    /// call), its frame bind group is rebuilt against the new
+    /// IBL resources so the very next frame sees the
+    /// environment. This is the R-041 / R-042 acceptance
+    /// "online bake path" smoke surface: the runtime
+    /// environment can change after the renderer is already
+    /// running.
+    ///
     /// # Errors
     ///
     /// Returns [`HygeError::Gpu`] if the device is lost during
     /// texture creation.
     pub fn set_environment(&mut self, bake: &EnvironmentBake) -> HygeResult<()> {
-        self.ibl = Some(ibl_gpu::upload(&self.device, &self.queue, bake)?);
+        let ibl = ibl_gpu::upload(&self.device, &self.queue, bake)?;
+        if let Some(pass) = self.clustered.as_mut() {
+            pass.set_ibl(ibl.clone());
+        }
+        self.ibl = Some(ibl);
         Ok(())
     }
 
@@ -826,13 +839,13 @@ fn bindless_required_features(adapter: &wgpu::Adapter) -> wgpu::Features {
 /// 16`).
 fn bindless_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
     let mut limits = adapter.limits();
-    // The bindless table exposes 7 storage buffers, all of
-    // which need to be visible to the fragment stage (the
-    // PBR shader reads mesh + material + light + grid
-    // uniforms there). 10 is a safe upper bound that fits
-    // every real GPU since 2018.
-    if limits.max_storage_buffers_per_shader_stage < 10 {
-        limits.max_storage_buffers_per_shader_stage = 10;
+    // The bindless table exposes 7 storage buffers (plus the
+    // texture array), all of which need to be visible to the
+    // fragment stage (the PBR shader reads mesh + material +
+    // light + grid uniforms there). 12 is a safe upper bound
+    // that fits every real GPU since 2018.
+    if limits.max_storage_buffers_per_shader_stage < 12 {
+        limits.max_storage_buffers_per_shader_stage = 12;
     }
     // The texture-array binding requires 16+ array layers
     // to be useful; if the adapter can't go that high, the

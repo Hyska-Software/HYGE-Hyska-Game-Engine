@@ -4,9 +4,9 @@
 //! scope without naming them individually.
 
 pub use crate::bindless::{
-    BindlessConfig, BindlessSlot, BindlessTable, DrawCommand, DrawCommand as DrawCmd, GpuMaterial,
-    GpuMesh, Instance, Light, LightGrid, MaterialId, MeshId, MeshletVisibility, Refcount, SlotKind,
-    SlotTag, TextureId,
+    pod_collect_to_vec, BindlessConfig, BindlessSlot, BindlessTable, DrawCommand,
+    DrawCommand as DrawCmd, GpuMaterial, GpuMesh, Instance, Light, LightGrid, MaterialId, MeshId,
+    MeshletVisibility, Refcount, SlotKind, SlotTag, TextureId,
 };
 pub use crate::config::RendererConfig;
 pub use crate::ibl::{

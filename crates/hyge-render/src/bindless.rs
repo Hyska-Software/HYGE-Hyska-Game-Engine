@@ -66,6 +66,12 @@ pub const LIGHT_CAPACITY: u32 = 4_096;
 /// Default number of light-grid entries. The runtime resizes
 /// per frame; this is the upper bound for the SSBO.
 pub const LIGHT_GRID_CAPACITY: u32 = 65_536;
+/// Default number of u32 slots in the per-frame light index
+/// list (one slot per `(cluster, light_in_cluster)` pair). The
+/// upper bound is `LIGHT_GRID_CAPACITY * MAX_LIGHTS_PER_CLUSTER`,
+/// but a flat u32 SSBO of this size keeps the math simple and
+/// fits the conservative CPU build.
+pub const LIGHT_INDEX_LIST_CAPACITY: u32 = 65_536;
 /// Default number of meshlet visibility entries (per frame).
 pub const MESHLET_VISIBILITY_CAPACITY: u32 = 1_048_576;
 /// Default number of draw commands (per frame).
@@ -93,6 +99,9 @@ pub struct BindlessConfig {
     pub light_capacity: u32,
     /// Maximum number of light-grid entries. Default: [`LIGHT_GRID_CAPACITY`].
     pub light_grid_capacity: u32,
+    /// Maximum number of light index list entries. Default:
+    /// [`LIGHT_INDEX_LIST_CAPACITY`].
+    pub light_index_list_capacity: u32,
     /// Maximum number of meshlet visibility entries. Default:
     /// [`MESHLET_VISIBILITY_CAPACITY`].
     pub meshlet_visibility_capacity: u32,
@@ -114,6 +123,7 @@ impl Default for BindlessConfig {
             instance_capacity: INSTANCE_CAPACITY,
             light_capacity: LIGHT_CAPACITY,
             light_grid_capacity: LIGHT_GRID_CAPACITY,
+            light_index_list_capacity: LIGHT_INDEX_LIST_CAPACITY,
             meshlet_visibility_capacity: MESHLET_VISIBILITY_CAPACITY,
             draw_command_capacity: DRAW_COMMAND_CAPACITY,
             texture_capacity: TEXTURE_CAPACITY,
@@ -543,6 +553,9 @@ struct BindlessInner {
     light_buffer: Arc<wgpu::Buffer>,
     /// The wgpu light-grid storage buffer.
     light_grid_buffer: Arc<wgpu::Buffer>,
+    /// The wgpu light-index-list storage buffer (per-frame;
+    /// populated by `ClusteredForwardPass::rebuild_light_grid`).
+    light_index_list_buffer: Arc<wgpu::Buffer>,
     /// The wgpu meshlet-visibility storage buffer.
     meshlet_visibility_buffer: Arc<wgpu::Buffer>,
     /// The wgpu draw-command storage buffer.
@@ -688,6 +701,11 @@ impl BindlessTable {
         let light_bytes = (config.light_capacity as usize) * std::mem::size_of::<Light>();
         let light_grid_bytes =
             (config.light_grid_capacity as usize) * std::mem::size_of::<LightGrid>();
+        // The light index list is a flat u32 SSBO. The capacity
+        // is the same order of magnitude as the light grid (one
+        // index per `light_grid` slot, conservatively).
+        let light_index_list_bytes =
+            (config.light_index_list_capacity as usize) * std::mem::size_of::<u32>();
         let meshlet_vis_bytes = (config.meshlet_visibility_capacity as usize)
             * std::mem::size_of::<MeshletVisibility>();
         let draw_command_bytes =
@@ -723,6 +741,12 @@ impl BindlessTable {
         let light_grid_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("hyge-bindless/light-grid"),
             size: light_grid_bytes as u64,
+            usage: buffer_usages,
+            mapped_at_creation: false,
+        }));
+        let light_index_list_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hyge-bindless/light-index-list"),
+            size: light_index_list_bytes as u64,
             usage: buffer_usages,
             mapped_at_creation: false,
         }));
@@ -944,6 +968,20 @@ impl BindlessTable {
                 },
                 count: None,
             },
+            // Slot 12: light index list (u32 SSBO). Sits
+            // outside the slot 11 texture-array range so the
+            // texture-array feature gate does not affect the
+            // clustered-forward path.
+            wgpu::BindGroupLayoutEntry {
+                binding: 12,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ];
         if has_texture_array {
             // Slot 11+: texture array. The PBR shader
@@ -1016,6 +1054,10 @@ impl BindlessTable {
                 binding: 10,
                 resource: draw_command_buffer.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 12,
+                resource: light_index_list_buffer.as_entire_binding(),
+            },
         ];
         if has_texture_array {
             bind_group_entries.push(wgpu::BindGroupEntry {
@@ -1038,6 +1080,7 @@ impl BindlessTable {
             instance_buffer,
             light_buffer,
             light_grid_buffer,
+            light_index_list_buffer,
             meshlet_visibility_buffer,
             draw_command_buffer,
             texture_array,
@@ -1338,6 +1381,23 @@ impl BindlessTable {
             })
     }
 
+    /// Returns the wgpu light-index-list storage buffer.
+    #[must_use]
+    pub fn get_light_index_list_buffer(&self) -> Arc<wgpu::Buffer> {
+        self.inner
+            .lock()
+            .map(|g| Arc::clone(&g.light_index_list_buffer))
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "bindless table mutex poisoned");
+                Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("hyge-bindless/light-index-list-buffer-fallback"),
+                    size: 4,
+                    usage: wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: false,
+                }))
+            })
+    }
+
     /// Returns the wgpu draw-command storage buffer.
     #[must_use]
     pub fn get_draw_command_buffer(&self) -> Arc<wgpu::Buffer> {
@@ -1386,6 +1446,19 @@ impl BindlessTable {
         let byte_offset = (start as u64) * (std::mem::size_of::<LightGrid>() as u64);
         self.queue
             .write_buffer(&self.get_light_grid_buffer(), byte_offset, bytemuck::cast_slice(entries));
+    }
+
+    /// Writes a slice of u32 light indices starting at slot
+    /// `start`. The PBR fragment shader reads this as the
+    /// backing store for the `LightIndexList` cluster index
+    /// list. Empty slices are a no-op.
+    pub fn write_light_index_list(&self, start: u32, indices: &[u32]) {
+        if indices.is_empty() {
+            return;
+        }
+        let byte_offset = (start as u64) * std::mem::size_of::<u32>() as u64;
+        self.queue
+            .write_buffer(&self.get_light_index_list_buffer(), byte_offset, bytemuck::cast_slice(indices));
     }
 
     /// Writes a slice of draw commands starting at slot `start`.
@@ -1473,6 +1546,53 @@ impl Drop for BindlessTable {
         // any remaining slots at table-drop time simply
         // become unreachable.
     }
+}
+
+/// ABI-bridging helper used by integration tests and the
+/// `hyge-scene` extractor to convert a slice of
+/// layout-compatible PODs defined in one crate (e.g.
+/// `hyge_scene::extract::Instance`) into a `Vec` of the
+/// bindless-table mirror PODs (e.g.
+/// `hyge_render::bindless::Instance`) without going through
+/// `unsafe` raw-pointer casts.
+///
+/// The two types must have the same `size_of` and
+/// `align_of`; this is asserted at runtime via
+/// `debug_assert!` so a refactor that drifts the layout
+/// trips the test rather than silently producing
+/// mis-aligned reads.
+pub fn pod_collect_to_vec<Src, Dst>(src: &[Src]) -> Vec<Dst>
+where
+    Src: Pod,
+    Dst: Pod,
+{
+    debug_assert_eq!(
+        std::mem::size_of::<Src>(),
+        std::mem::size_of::<Dst>(),
+        "pod_collect_to_vec: source and destination layouts must match"
+    );
+    debug_assert_eq!(
+        std::mem::align_of::<Src>(),
+        std::mem::align_of::<Dst>(),
+        "pod_collect_to_vec: source and destination alignments must match"
+    );
+    if src.is_empty() {
+        return Vec::new();
+    }
+    // SAFETY: the two PODs have been asserted layout-compatible
+    // above. The source slice outlives the destination Vec
+    // because we copy the bytes into a fresh allocation.
+    let src_bytes: &[u8] = bytemuck::cast_slice(src);
+    let mut dst = Vec::with_capacity(src.len());
+    let dst_bytes_mut = unsafe {
+        std::slice::from_raw_parts_mut(
+            dst.as_mut_ptr() as *mut u8,
+            dst.capacity() * std::mem::size_of::<Dst>(),
+        )
+    };
+    dst_bytes_mut[..src_bytes.len()].copy_from_slice(src_bytes);
+    unsafe { dst.set_len(src.len()) };
+    dst
 }
 
 #[cfg(test)]
@@ -1584,5 +1704,51 @@ mod tests {
         drop(clone);
         refcount.refs.fetch_sub(1, Ordering::AcqRel);
         assert_eq!(refcount.refs(), 1);
+    }
+
+    /// `pod_collect_to_vec` round-trips two layout-identical
+    /// POD types. We use a hand-rolled source type that
+    /// mirrors `Instance`'s field order to make the test
+    /// independent of the bindless table.
+    #[test]
+    fn pod_collect_to_vec_round_trips() {
+        #[repr(C)]
+        #[derive(Copy, Clone, Debug, Pod, Zeroable)]
+        struct SrcInstance {
+            transform: [[f32; 4]; 3],
+            mesh_id: u32,
+            material_id: u32,
+            _pad: [u32; 2],
+        }
+        assert_eq!(std::mem::size_of::<SrcInstance>(), std::mem::size_of::<Instance>());
+        let src = vec![
+            SrcInstance {
+                transform: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
+                mesh_id: 7,
+                material_id: 11,
+                _pad: [0; 2],
+            },
+            SrcInstance {
+                transform: [[2.0, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, 2.0, 0.0]],
+                mesh_id: 8,
+                material_id: 12,
+                _pad: [0; 2],
+            },
+        ];
+        let dst: Vec<Instance> = pod_collect_to_vec(&src);
+        assert_eq!(dst.len(), 2);
+        assert_eq!(dst[0].mesh_id, 7);
+        assert_eq!(dst[0].material_id, 11);
+        assert_eq!(dst[1].mesh_id, 8);
+        assert_eq!(dst[1].material_id, 12);
+    }
+
+    /// `pod_collect_to_vec` on an empty slice returns an
+    /// empty Vec without touching the unsafe path.
+    #[test]
+    fn pod_collect_to_vec_empty_is_empty() {
+        let src: Vec<Instance> = Vec::new();
+        let dst: Vec<Instance> = pod_collect_to_vec(&src);
+        assert!(dst.is_empty());
     }
 }

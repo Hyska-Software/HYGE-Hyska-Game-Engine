@@ -727,7 +727,7 @@ acceptance = [
   "BuildLightGrid compute shader: 1 thread per tile, iterates lights, writes LightGrid SSBO + LightIndexList SSBO",
   "PBR fragment samples LightGrid for the (cluster, tile) and iterates lights",
   "1 sun + 64 dynamic point/spot lights visible in a test scene",
-  "memory: light grid (1920x1080 / 16 / 16) * 16 * (offset+count) = ~512 KB",
+  "memory: default runtime clustered buffers = 16x9x16 LightGrid entries (2304 * 8 B ≈ 18 KB) + 65,536-entry LightIndexList (256 KB) = ≈ 274 KB total",
   "snapshot test of reference scene within SSIM 0.99"
 ]
 completed_at = "2026-07-06"

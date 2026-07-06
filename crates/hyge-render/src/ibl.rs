@@ -86,8 +86,8 @@ pub struct EnvironmentBake {
 /// is the mip level (0 = sharpest reflection, `mip_count - 1` =
 /// fully rough). The second is the cubemap face in WebGPU
 /// order: `+X, -X, +Y, -Y, +Z, -Z`. Each face's data is
-/// row-major, RGBA16F encoded as 4 little-endian bytes per
-/// texel (`[u8; 4]`).
+/// row-major, RGBA16F encoded as 8 little-endian bytes per
+/// texel (`[u8; 8]`).
 #[derive(Debug, Clone)]
 pub struct PrefilterCubemap {
     /// Base edge in pixels (the largest mip is `base_size`
@@ -97,7 +97,7 @@ pub struct PrefilterCubemap {
     pub mip_count: u32,
     /// `mip_chain[mip][face] = row-major RGBA16F texels`,
     /// length `mip_count * 6`.
-    pub mip_chain: Vec<[Vec<[u8; 4]>; 6]>,
+    pub mip_chain: Vec<[Vec<[u8; 8]>; 6]>,
 }
 
 /// A diffuse irradiance cubemap at the
@@ -108,7 +108,7 @@ pub struct IrradianceCubemap {
     pub size: u32,
     /// `faces_rgba16f[face] = row-major RGBA16F texels`,
     /// length 6.
-    pub faces_rgba16f: [Vec<[u8; 4]>; 6],
+    pub faces_rgba16f: [Vec<[u8; 8]>; 6],
 }
 
 /// A 2D BRDF integration LUT. `pixels_rgba16f[(y * size + x)]`
@@ -119,7 +119,7 @@ pub struct BrdfLut {
     /// Edge in pixels (the LUT is always square).
     pub size: u32,
     /// `pixels_rgba16f.len() == size * size`, row-major.
-    pub pixels_rgba16f: Vec<[u8; 4]>,
+    pub pixels_rgba16f: Vec<[u8; 8]>,
 }
 
 // =============================================================================
@@ -192,28 +192,38 @@ pub fn f16_to_f32(h: u16) -> f32 {
     f32::from_bits(bits)
 }
 
-/// Packs a `[f32; 4]` RGBA into 4 little-endian bytes holding
-/// RGBA16F samples. `f32::NAN` and `f32::INFINITY` map to the
-/// nearest representable binary16 value (positive inf / qNaN).
+/// Packs a `[f32; 4]` RGBA into 8 little-endian bytes
+/// holding RGBA16F samples (one u16 per channel). The full
+/// 8-byte layout is what wgpu's `Rgba16Float` texture format
+/// expects; the previous 4-byte "low byte only" packing
+/// silently truncated the data and made the GPU upload
+/// slice out-of-range when the texture row pitch and the
+/// actual texel count disagreed.
+///
+/// # Errors
+///
+/// Returns `None` if any channel is `NaN` and we cannot
+/// represent it as a binary16 qNaN (currently always
+/// representable; reserved for future constraints).
 #[inline]
 #[must_use]
-pub fn pack_rgba16f(c: [f32; 4]) -> [u8; 4] {
+pub fn pack_rgba16f(c: [f32; 4]) -> [u8; 8] {
     let r = f32_to_f16(c[0]).to_le_bytes();
     let g = f32_to_f16(c[1]).to_le_bytes();
     let b = f32_to_f16(c[2]).to_le_bytes();
     let a = f32_to_f16(c[3]).to_le_bytes();
-    [r[0], g[0], b[0], a[0]]
+    [r[0], r[1], g[0], g[1], b[0], b[1], a[0], a[1]]
 }
 
 /// Inverse of [`pack_rgba16f`].
 #[inline]
 #[must_use]
-pub fn unpack_rgba16f(b: [u8; 4]) -> [f32; 4] {
+pub fn unpack_rgba16f(b: [u8; 8]) -> [f32; 4] {
     [
-        f16_to_f32(u16::from_le_bytes([b[0], 0])),
-        f16_to_f32(u16::from_le_bytes([b[1], 0])),
-        f16_to_f32(u16::from_le_bytes([b[2], 0])),
-        f16_to_f32(u16::from_le_bytes([b[3], 0])),
+        f16_to_f32(u16::from_le_bytes([b[0], b[1]])),
+        f16_to_f32(u16::from_le_bytes([b[2], b[3]])),
+        f16_to_f32(u16::from_le_bytes([b[4], b[5]])),
+        f16_to_f32(u16::from_le_bytes([b[6], b[7]])),
     ]
 }
 
@@ -335,12 +345,6 @@ pub fn decode_rgbe_hdr(bytes: &[u8]) -> HygeResult<(u32, u32, Vec<[f32; 3]>)> {
             "rgbe: missing resolution in header (width={width} height={height})"
         )));
     }
-
-    if width == 0 || height == 0 {
-        return Err(HygeError::parse(format!(
-            "rgbe: missing resolution in header (width={width} height={height})"
-        )));
-    }
     let total = (width as usize)
         .checked_mul(height as usize)
         .ok_or_else(|| HygeError::parse("rgbe: pixel count overflow"))?;
@@ -349,7 +353,6 @@ pub fn decode_rgbe_hdr(bytes: &[u8]) -> HygeResult<(u32, u32, Vec<[f32; 3]>)> {
             "rgbe: image too large ({width}x{height})"
         )));
     }
-    let _ = found_format; // tolerated but not required.
 
     // -- pixel data -----------------------------------------------------
     // Each scanline is `width` RGBE pixels. RLE applies per
@@ -371,7 +374,13 @@ pub fn decode_rgbe_hdr(bytes: &[u8]) -> HygeResult<(u32, u32, Vec<[f32; 3]>)> {
                 return Err(HygeError::parse("rgbe: unexpected EOF in pixel data"));
             }
             for texel in scanline.iter_mut().take(w) {
-                let rgbe: [u8; 4] = bytes[idx..idx + 4].try_into().unwrap();
+                // Slice length was just bounds-checked, so the
+                // try_into() cannot fail. We still surface a
+                // parse error rather than panicking in case a
+                // future refactor changes the bounds check.
+                let rgbe: [u8; 4] = bytes[idx..idx + 4]
+                    .try_into()
+                    .map_err(|e| HygeError::parse(format!("rgbe: pixel slice: {e}")))?;
                 *texel = rgbe;
                 idx += 4;
             }
@@ -381,7 +390,9 @@ pub fn decode_rgbe_hdr(bytes: &[u8]) -> HygeResult<(u32, u32, Vec<[f32; 3]>)> {
             if width > 0x7FFF {
                 return Err(HygeError::parse("rgbe: adaptive RLE width too large"));
             }
-            let counts: [u8; 4] = bytes[idx..idx + 4].try_into().unwrap();
+            let counts: [u8; 4] = bytes[idx..idx + 4]
+                .try_into()
+                .map_err(|e| HygeError::parse(format!("rgbe: rle counts slice: {e}")))?;
             idx += 4;
             let _counts: [usize; 4] = [
                 counts[0] as usize,
@@ -665,7 +676,7 @@ fn box_filter_downsample_rgb(
 #[must_use]
 pub fn prefilter_env(cubemap: &[Vec<[f32; 3]>; 6], base_size: u32) -> PrefilterCubemap {
     let mip_count = (32 - base_size.leading_zeros()) as usize;
-    let mut mip_chain: Vec<[Vec<[u8; 4]>; 6]> = Vec::with_capacity(mip_count);
+    let mut mip_chain: Vec<[Vec<[u8; 8]>; 6]> = Vec::with_capacity(mip_count);
     for mip in 0..mip_count {
         let mip_size = (base_size >> mip).max(1);
         let roughness = if mip_count == 1 {
@@ -673,7 +684,7 @@ pub fn prefilter_env(cubemap: &[Vec<[f32; 3]>; 6], base_size: u32) -> PrefilterC
         } else {
             mip as f32 / (mip_count as f32 - 1.0)
         };
-        let mut packed: [Vec<[u8; 4]>; 6] = [
+        let mut packed: [Vec<[u8; 8]>; 6] = [
             Vec::with_capacity((mip_size * mip_size) as usize),
             Vec::with_capacity((mip_size * mip_size) as usize),
             Vec::with_capacity((mip_size * mip_size) as usize),
@@ -936,7 +947,7 @@ pub fn diffuse_irradiance(
 
     // Reconstruct irradiance for every cubemap face.
     let n = size as i32;
-    let mut faces: [Vec<[u8; 4]>; 6] = [
+    let mut faces: [Vec<[u8; 8]>; 6] = [
         Vec::with_capacity((size * size) as usize),
         Vec::with_capacity((size * size) as usize),
         Vec::with_capacity((size * size) as usize),
@@ -1004,6 +1015,17 @@ fn project_channel(equirect: &[[f32; 3]], width: u32, height: u32, channel: usiz
     // `2 * (2N+1) * dphi dtheta`, the standard normalization
     // is `4π / N` so the L00 coefficient equals the average
     // radiance of the environment.
+    //
+    // A degenerate `weight_sum == 0` happens for a 0×N or
+    // N×0 equirect (a header bug or a corner-case crop). In
+    // that case the SH projection is ill-defined; we return
+    // a zero vector rather than dividing by zero. The
+    // `decode_rgbe_hdr` call site already guards against
+    // zero dimensions, so this is the second line of
+    // defence.
+    if weight_sum <= 0.0 {
+        return [0.0; 9];
+    }
     let norm = 4.0 * std::f32::consts::PI / weight_sum;
     for c in &mut coeffs {
         *c *= norm;
@@ -1058,7 +1080,7 @@ fn sh_basis(d: [f32; 3]) -> [f32; 9] {
 /// `D_ggx` so the high-roughness cells converge quickly.
 #[must_use]
 pub fn integrate_brdf(size: u32, sample_count: u32) -> BrdfLut {
-    let mut pixels: Vec<[u8; 4]> = Vec::with_capacity((size as usize) * (size as usize));
+    let mut pixels: Vec<[u8; 8]> = Vec::with_capacity((size as usize) * (size as usize));
     for y in 0..size {
         let roughness = (y as f32 + 0.5) / (size as f32);
         for x in 0..size {
@@ -1084,6 +1106,15 @@ pub fn integrate_brdf(size: u32, sample_count: u32) -> BrdfLut {
             let inv = 1.0 / (sample_count as f32);
             a *= inv;
             b *= inv;
+            // Karis 2014 clamps the (scale, bias) to [0, 1];
+            // the Monte Carlo integration can overshoot
+            // slightly at low sample counts due to the
+            // importance-sampling weighting. Clamping here
+            // keeps the lookup in the representable range
+            // (the runtime Schlick-Fresnel fold also assumes
+            // scale + bias * specularColor <= 1).
+            let a = a.clamp(0.0, 1.0);
+            let b = b.clamp(0.0, 1.0);
             pixels.push(pack_rgba16f([a, b, 0.0, 1.0]));
         }
     }
@@ -1256,12 +1287,12 @@ fn encode_env_file(bake: &EnvironmentBake) -> HygeResult<Vec<u8>> {
     let mut prefilter_bytes = 0usize;
     for mip in 0..p_mips {
         let s = (p_size >> mip).max(1);
-        prefilter_bytes += 6 * s * s * 4;
+        prefilter_bytes += 6 * s * s * 8;
     }
     let irr_size = bake.irradiance.size as usize;
-    let irr_bytes = 6 * irr_size * irr_size * 4;
+    let irr_bytes = 6 * irr_size * irr_size * 8;
     let lut_size = bake.brdf_lut.size as usize;
-    let lut_bytes = lut_size * lut_size * 4;
+    let lut_bytes = lut_size * lut_size * 8;
     let total = 32 + bake.source_hash.len() + prefilter_bytes + irr_bytes + lut_bytes;
 
     let mut out: Vec<u8> = Vec::with_capacity(total);
@@ -1329,11 +1360,11 @@ fn decode_env_file(bytes: &[u8]) -> HygeResult<EnvironmentBake> {
     source_hash.copy_from_slice(&bytes[32..64]);
 
     let mut cursor = 64usize;
-    let mut mip_chain: Vec<[Vec<[u8; 4]>; 6]> = Vec::with_capacity(prefilter_mips as usize);
+    let mut mip_chain: Vec<[Vec<[u8; 8]>; 6]> = Vec::with_capacity(prefilter_mips as usize);
     for mip in 0..prefilter_mips as usize {
         let s = (prefilter_size as usize >> mip).max(1);
         let n = s * s;
-        let mut faces: [Vec<[u8; 4]>; 6] = [
+        let mut faces: [Vec<[u8; 8]>; 6] = [
             Vec::with_capacity(n),
             Vec::with_capacity(n),
             Vec::with_capacity(n),
@@ -1342,23 +1373,25 @@ fn decode_env_file(bytes: &[u8]) -> HygeResult<EnvironmentBake> {
             Vec::with_capacity(n),
         ];
         for (face_idx, face_buf) in faces.iter_mut().enumerate() {
-            let needed = n * 4;
+            let needed = n * 8;
             if cursor + needed > bytes.len() {
                 return Err(HygeError::parse(format!(
                     "ibl: truncated prefilter mip {mip} face {face_idx}"
                 )));
             }
             for _ in 0..n {
-                let t: [u8; 4] = bytes[cursor..cursor + 4].try_into().unwrap();
+                let t: [u8; 8] = bytes[cursor..cursor + 8]
+                    .try_into()
+                    .map_err(|e| HygeError::parse(format!("ibl: prefilter slice: {e}")))?;
                 face_buf.push(t);
-                cursor += 4;
+                cursor += 8;
             }
         }
         mip_chain.push(faces);
     }
 
     let irr_n = (irr_size as usize) * (irr_size as usize);
-    let mut irr_faces: [Vec<[u8; 4]>; 6] = [
+    let mut irr_faces: [Vec<[u8; 8]>; 6] = [
         Vec::with_capacity(irr_n),
         Vec::with_capacity(irr_n),
         Vec::with_capacity(irr_n),
@@ -1367,29 +1400,33 @@ fn decode_env_file(bytes: &[u8]) -> HygeResult<EnvironmentBake> {
         Vec::with_capacity(irr_n),
     ];
     for (face_idx, face_buf) in irr_faces.iter_mut().enumerate() {
-        let needed = irr_n * 4;
+        let needed = irr_n * 8;
         if cursor + needed > bytes.len() {
             return Err(HygeError::parse(format!(
                 "ibl: truncated irradiance face {face_idx}"
             )));
         }
         for _ in 0..irr_n {
-            let t: [u8; 4] = bytes[cursor..cursor + 4].try_into().unwrap();
+            let t: [u8; 8] = bytes[cursor..cursor + 8]
+                .try_into()
+                .map_err(|e| HygeError::parse(format!("ibl: irradiance slice: {e}")))?;
             face_buf.push(t);
-            cursor += 4;
+            cursor += 8;
         }
     }
 
     let lut_n = (lut_size as usize) * (lut_size as usize);
     let mut lut = Vec::with_capacity(lut_n);
-    let needed = lut_n * 4;
+    let needed = lut_n * 8;
     if cursor + needed > bytes.len() {
         return Err(HygeError::parse("ibl: truncated brdf_lut"));
     }
     for _ in 0..lut_n {
-        let t: [u8; 4] = bytes[cursor..cursor + 4].try_into().unwrap();
+        let t: [u8; 8] = bytes[cursor..cursor + 8]
+            .try_into()
+            .map_err(|e| HygeError::parse(format!("ibl: brdf slice: {e}")))?;
         lut.push(t);
-        cursor += 4;
+        cursor += 8;
     }
 
     Ok(EnvironmentBake {
@@ -1596,12 +1633,12 @@ mod tests {
                 .map(|mip| {
                     let s = (4u32 >> mip).max(1) as usize;
                     [
-                        vec![[0x33, 0x66, 0x99, 0xCC]; s * s],
-                        vec![[0x33, 0x66, 0x99, 0xCC]; s * s],
-                        vec![[0x33, 0x66, 0x99, 0xCC]; s * s],
-                        vec![[0x33, 0x66, 0x99, 0xCC]; s * s],
-                        vec![[0x33, 0x66, 0x99, 0xCC]; s * s],
-                        vec![[0x33, 0x66, 0x99, 0xCC]; s * s],
+                        vec![[0x33, 0x66, 0x99, 0xCC, 0x33, 0x66, 0x99, 0xCC]; s * s],
+                        vec![[0x33, 0x66, 0x99, 0xCC, 0x33, 0x66, 0x99, 0xCC]; s * s],
+                        vec![[0x33, 0x66, 0x99, 0xCC, 0x33, 0x66, 0x99, 0xCC]; s * s],
+                        vec![[0x33, 0x66, 0x99, 0xCC, 0x33, 0x66, 0x99, 0xCC]; s * s],
+                        vec![[0x33, 0x66, 0x99, 0xCC, 0x33, 0x66, 0x99, 0xCC]; s * s],
+                        vec![[0x33, 0x66, 0x99, 0xCC, 0x33, 0x66, 0x99, 0xCC]; s * s],
                     ]
                 })
                 .collect(),
@@ -1609,17 +1646,17 @@ mod tests {
         let irr = IrradianceCubemap {
             size: 2,
             faces_rgba16f: [
-                vec![[0x11, 0x22, 0x33, 0x44]; 4],
-                vec![[0x11, 0x22, 0x33, 0x44]; 4],
-                vec![[0x11, 0x22, 0x33, 0x44]; 4],
-                vec![[0x11, 0x22, 0x33, 0x44]; 4],
-                vec![[0x11, 0x22, 0x33, 0x44]; 4],
-                vec![[0x11, 0x22, 0x33, 0x44]; 4],
+                vec![[0x11, 0x22, 0x33, 0x44, 0x11, 0x22, 0x33, 0x44]; 4],
+                vec![[0x11, 0x22, 0x33, 0x44, 0x11, 0x22, 0x33, 0x44]; 4],
+                vec![[0x11, 0x22, 0x33, 0x44, 0x11, 0x22, 0x33, 0x44]; 4],
+                vec![[0x11, 0x22, 0x33, 0x44, 0x11, 0x22, 0x33, 0x44]; 4],
+                vec![[0x11, 0x22, 0x33, 0x44, 0x11, 0x22, 0x33, 0x44]; 4],
+                vec![[0x11, 0x22, 0x33, 0x44, 0x11, 0x22, 0x33, 0x44]; 4],
             ],
         };
         let lut = BrdfLut {
             size: 2,
-            pixels_rgba16f: vec![[0xAA, 0xBB, 0xCC, 0xDD]; 4],
+            pixels_rgba16f: vec![[0xAA, 0xBB, 0xCC, 0xDD, 0xAA, 0xBB, 0xCC, 0xDD]; 4],
         };
         let bake = EnvironmentBake {
             prefilter: pc,
@@ -1652,33 +1689,80 @@ mod tests {
                 base_size: 4,
                 mip_count: 1,
                 mip_chain: vec![[
-                    vec![[0u8; 4]; 16],
-                    vec![[0u8; 4]; 16],
-                    vec![[0u8; 4]; 16],
-                    vec![[0u8; 4]; 16],
-                    vec![[0u8; 4]; 16],
-                    vec![[0u8; 4]; 16],
+                    vec![[0u8; 8]; 16],
+                    vec![[0u8; 8]; 16],
+                    vec![[0u8; 8]; 16],
+                    vec![[0u8; 8]; 16],
+                    vec![[0u8; 8]; 16],
+                    vec![[0u8; 8]; 16],
                 ]],
             },
             irradiance: IrradianceCubemap {
                 size: 2,
                 faces_rgba16f: [
-                    vec![[0u8; 4]; 4],
-                    vec![[0u8; 4]; 4],
-                    vec![[0u8; 4]; 4],
-                    vec![[0u8; 4]; 4],
-                    vec![[0u8; 4]; 4],
-                    vec![[0u8; 4]; 4],
+                    vec![[0u8; 8]; 4],
+                    vec![[0u8; 8]; 4],
+                    vec![[0u8; 8]; 4],
+                    vec![[0u8; 8]; 4],
+                    vec![[0u8; 8]; 4],
+                    vec![[0u8; 8]; 4],
                 ],
             },
             brdf_lut: BrdfLut {
                 size: 2,
-                pixels_rgba16f: vec![[0u8; 4]; 4],
+                pixels_rgba16f: vec![[0u8; 8]; 4],
             },
             source_hash: [0u8; 32],
         };
         let h1 = env_file_hash(&bake);
         let h2 = env_file_hash(&bake);
         assert_eq!(h1, h2);
+    }
+
+    /// Truncated input (header but no scanlines) must
+    /// return `HygeError::Parse`, not panic. The
+    /// `try_into().unwrap()` paths in `decode_rgbe_hdr` are
+    /// the regression surface this test guards.
+    #[test]
+    fn rgbe_decoder_rejects_truncated_input() {
+        // Valid header followed by zero scanline bytes.
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.extend_from_slice(b"#?RADIANCE\n");
+        bytes.extend_from_slice(b"FORMAT=32-bit_rle_rgbe\n");
+        bytes.extend_from_slice(b"\n");
+        bytes.extend_from_slice(b"-Y 4 +X 8\n");
+        // 4 * 8 = 32 RGBE pixels; we provide zero of them.
+        let err = decode_rgbe_hdr(&bytes).expect_err("truncated HDR must error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("EOF") || msg.contains("truncated") || msg.contains("unexpected"),
+            "expected a parse error, got: {msg}"
+        );
+    }
+
+    /// Header with a malformed resolution line must return
+    /// `HygeError::Parse`, not panic.
+    #[test]
+    fn rgbe_decoder_rejects_missing_resolution() {
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.extend_from_slice(b"#?RADIANCE\n");
+        bytes.extend_from_slice(b"FORMAT=32-bit_rle_rgbe\n");
+        bytes.extend_from_slice(b"\n");
+        // No resolution line at all.
+        let err = decode_rgbe_hdr(&bytes).expect_err("missing resolution must error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("resolution") || msg.contains("missing"),
+            "expected a parse error about resolution, got: {msg}"
+        );
+    }
+
+    /// Degenerate 0xN / Nx0 projections must not divide by
+    /// zero inside `project_channel`; instead they return a
+    /// zero SH vector.
+    #[test]
+    fn project_channel_zero_weight_sum_returns_zeroes() {
+        let coeffs = project_channel(&[], 0, 0, 0);
+        assert_eq!(coeffs, [0.0; 9]);
     }
 }

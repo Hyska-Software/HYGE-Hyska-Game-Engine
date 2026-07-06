@@ -111,7 +111,11 @@ fn upload_prefilter(
     });
     for mip in 0..mips {
         let s = (base >> mip).max(1);
-        let bytes_per_face = (s as usize) * (s as usize) * 4 * 2; // RGBA16F = 8 bytes/texel
+        // Each texel in `prefilter.mip_chain` is the
+        // 8-byte RGBA16F representation (one u16 per
+        // channel × 4 channels = 8 bytes). `s * s` texels
+        // per face, 6 faces per mip.
+        let bytes_per_face = (s as usize) * (s as usize) * 8;
         let mut face_bytes: Vec<u8> = Vec::with_capacity(bytes_per_face * 6);
         for face in 0..6 {
             for t in &prefilter.mip_chain[mip as usize][face] {

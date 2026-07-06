@@ -155,6 +155,19 @@ pub fn import_environment_with_config_and_db(
     fs::write(&env_path, &env_bytes).map_err(|e| io_with_path(e, "write env", &env_path))?;
 
     if let Some(db) = asset_db {
+        // The `AssetId` is derived from the BLAKE3 hash of
+        // the on-disk `.hyge-env` content's *blake3 hex
+        // string* (not the raw bytes). This is intentional:
+        // the env_hash is the content-addressed key on disk
+        // (the filename is `<env_hash>.hyge-env`), and we
+        // reuse the same value as the asset DB key so a
+        // single BLAKE3 pass is sufficient. The trade-off is
+        // that the DB key is a 64-character ASCII hash
+        // string rather than the 32 raw bytes — slightly
+        // longer to store, but stable across all the import
+        // and lookup paths. M3+ can migrate to a typed
+        // `AssetId::for_env_file(bytes)` wrapper if a more
+        // efficient encoding is needed.
         let env_id = AssetId::from(blake3::hash(env_hash.as_bytes()));
         db.insert(&env_id, &env_path)?;
     }

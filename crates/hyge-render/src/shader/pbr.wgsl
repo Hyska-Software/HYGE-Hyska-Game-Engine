@@ -91,6 +91,16 @@ struct FrameData {
     camera_pos_alpha_cutoff : vec4<f32>,
     sun_direction_exposure : vec4<f32>,
     sun_color_intensity : vec4<f32>,
+    // Cluster configuration: tiles_x, tiles_y, depth_slices,
+    // max_lights_per_cluster. Used by the fragment shader to
+    // compute the (cluster, tile) for the current pixel.
+    cluster_params : vec4<u32>,
+    // Screen width, height in `xy`; view-space near, far in `zw`.
+    // Used by the fragment shader to compute the depth slice.
+    viewport : vec4<f32>,
+    // Camera view matrix (column-major). Used to transform the
+    // world position into view space for the Z-slice lookup.
+    view : mat4x4<f32>,
 }
 
 struct VsOut {
@@ -100,6 +110,7 @@ struct VsOut {
     @location(2) world_tangent : vec4<f32>,
     @location(3) uv : vec2<f32>,
     @location(4) material_id : u32,
+    @location(5) view_z : f32,
 }
 
 @group(0) @binding(0) var linear_clamp_sampler : sampler;
@@ -114,6 +125,7 @@ struct VsOut {
 @group(0) @binding(9) var<storage, read> meshlet_visibility : array<MeshletVisibility>;
 @group(0) @binding(10) var<storage, read> draw_commands : array<DrawCommand>;
 @group(0) @binding(11) var material_textures : texture_2d_array<f32>;
+@group(0) @binding(12) var<storage, read> light_index_list : array<u32>;
 
 @group(1) @binding(0) var<storage, read> pbr_vertices : array<PbrPackedVertex>;
 @group(1) @binding(1) var<uniform> frame : FrameData;
@@ -190,6 +202,10 @@ fn vs_main(
     out.world_tangent = vec4<f32>(world_tangent, local_tangent.w);
     out.uv = unpack_uv(vertex);
     out.material_id = draw.material_id;
+    // View-space Z (negative for points in front of the camera).
+    // The fragment uses this to compute the cluster's depth slice.
+    let view_pos = frame.view * vec4<f32>(world_pos, 1.0);
+    out.view_z = view_pos.z;
     return out;
 }
 
@@ -238,22 +254,6 @@ fn geometry_smith(n : vec3<f32>, v : vec3<f32>, l : vec3<f32>, roughness : f32) 
     return ggx_v * ggx_l;
 }
 
-fn direct_sun_radiance(n : vec3<f32>, v : vec3<f32>, base_color : vec3<f32>, metallic : f32, roughness : f32, f0 : vec3<f32>) -> vec3<f32> {
-    let l = normalize(-frame.sun_direction_exposure.xyz);
-    let h = normalize(v + l);
-    let radiance = frame.sun_color_intensity.xyz * frame.sun_color_intensity.w;
-    let ndf = distribution_ggx(n, h, roughness);
-    let g = geometry_smith(n, v, l, roughness);
-    let f = fresnel_schlick(max(dot(h, v), 0.0), f0);
-    let numerator = ndf * g * f;
-    let denominator = max(4.0 * max(dot(n, v), 0.0) * max(dot(n, l), 0.0), EPSILON);
-    let specular = numerator / denominator;
-    let ks = f;
-    let kd = (vec3<f32>(1.0) - ks) * (1.0 - metallic);
-    let n_dot_l = max(dot(n, l), 0.0);
-    return (kd * base_color / PI + specular) * radiance * n_dot_l;
-}
-
 fn ibl_radiance(n : vec3<f32>, v : vec3<f32>, base_color : vec3<f32>, metallic : f32, roughness : f32, f0 : vec3<f32>, ao : f32) -> vec3<f32> {
     let n_dot_v = max(dot(n, v), 0.0);
     let f = fresnel_schlick_roughness(n_dot_v, f0, roughness);
@@ -266,6 +266,78 @@ fn ibl_radiance(n : vec3<f32>, v : vec3<f32>, base_color : vec3<f32>, metallic :
     let brdf = textureSample(brdf_lut, linear_clamp_sampler, vec2<f32>(n_dot_v, roughness)).rg;
     let specular = prefiltered * (f * brdf.x + vec3<f32>(brdf.y));
     return (kd * diffuse + specular) * ao;
+}
+
+// Compute the (cluster_x, cluster_y, cluster_z) for a screen-space
+// pixel and a view-space Z. The cluster grid is a uniform 3D
+// partition of the view frustum:
+//   - XY tiles map from screen-space UV in (0,1) to (tiles_x,
+//     tiles_y).
+//   - Z slices map from view-space Z (clamped to [near, far]) on
+//     a uniform partition into `depth_slices` buckets.
+//
+// `screen_xy` is the pixel's screen coordinates in pixels (0,0) at
+// the top-left. `view_z` is the pixel's view-space Z (negative for
+// points in front of the camera).
+fn compute_cluster_id(screen_xy : vec2<f32>, view_z : f32) -> vec3<u32> {
+    let tiles_x = max(frame.cluster_params.x, 1u);
+    let tiles_y = max(frame.cluster_params.y, 1u);
+    let depth_slices = max(frame.cluster_params.z, 1u);
+    let screen_w = max(frame.viewport.x, 1.0);
+    let screen_h = max(frame.viewport.y, 1.0);
+    let near = frame.viewport.z;
+    let far = frame.viewport.w;
+    // Screen UV -> tile indices.
+    let cx = u32(clamp(screen_xy.x / screen_w * f32(tiles_x), 0.0, f32(tiles_x) - 1.0));
+    let cy = u32(clamp(screen_xy.y / screen_h * f32(tiles_y), 0.0, f32(tiles_y) - 1.0));
+    // Linear depth slice: 0 = nearest, depth_slices-1 = farthest.
+    // The view-space Z is negative in front of the camera; map
+    // |view_z| from [near, far] to [0, depth_slices - 1].
+    let depth_norm = clamp((-view_z - near) / max(far - near, 1e-4), 0.0, 1.0);
+    let cz = u32(clamp(depth_norm * f32(depth_slices), 0.0, f32(depth_slices) - 1.0));
+    return vec3<u32>(cx, cy, cz);
+}
+
+fn cluster_linear_index(tile : vec3<u32>) -> u32 {
+    let tiles_x = max(frame.cluster_params.x, 1u);
+    let tiles_y = max(frame.cluster_params.y, 1u);
+    return tile.x + tile.y * tiles_x + tile.z * tiles_x * tiles_y;
+}
+
+// Direct light contribution from a single Light entry.
+// `world_pos` is the world-space position of the shaded surface;
+// `n` is the world-space normal; `v` is the normalized view vector
+// (from the surface toward the camera).
+fn direct_light_radiance(world_pos : vec3<f32>, n : vec3<f32>, v : vec3<f32>, base_color : vec3<f32>, metallic : f32, roughness : f32, f0 : vec3<f32>, light : Light) -> vec3<f32> {
+    // Light types (matches `LightComponent::sun/point/spot`):
+    //   0 = point, 1 = spot, 2 = directional.
+    let light_type = u32(light.position.w);
+    // Toward-the-light vector.
+    var l_dir : vec3<f32>;
+    if (light_type == 2u) {
+        // Directional: `light.position.xyz` is the *direction
+        // toward* the sun; we negate to get the *toward-the-light*
+        // vector.
+        l_dir = normalize(-light.position.xyz);
+    } else {
+        // Point/spot: `light.position.xyz` is the world position;
+        // the toward-the-light vector is the direction from the
+        // shaded point to the light.
+        l_dir = normalize(light.position.xyz - world_pos);
+    }
+    let l = l_dir;
+    let h = normalize(v + l);
+    let radiance = light.color.rgb * light.color.a;
+    let ndf = distribution_ggx(n, h, roughness);
+    let g = geometry_smith(n, v, l, roughness);
+    let f = fresnel_schlick(max(dot(h, v), 0.0), f0);
+    let numerator = ndf * g * f;
+    let denominator = max(4.0 * max(dot(n, v), 0.0) * max(dot(n, l), 0.0), EPSILON);
+    let specular = numerator / denominator;
+    let ks = f;
+    let kd = (vec3<f32>(1.0) - ks) * (1.0 - metallic);
+    let n_dot_l = max(dot(n, l), 0.0);
+    return (kd * base_color / PI + specular) * radiance * n_dot_l;
 }
 
 @fragment
@@ -288,7 +360,34 @@ fn fs_main(input : VsOut) -> @location(0) vec4<f32> {
     let base_color = max(base_sample.rgb, vec3<f32>(0.0));
     let f0 = mix(vec3<f32>(0.04), base_color, vec3<f32>(metallic));
 
-    var color = direct_sun_radiance(n, v, base_color, metallic, roughness, f0);
+    // Iterate the lights assigned to the cluster/tile this
+    // pixel falls into. R-042 acceptance #4: the PBR
+    // fragment samples the LightGrid for the (cluster, tile)
+    // and iterates the lights in the cluster's index list.
+    let screen_xy = input.clip_pos.xy;
+    let cluster_tile = compute_cluster_id(screen_xy, input.view_z);
+    let cluster_id = cluster_linear_index(cluster_tile);
+    let grid = light_grid[cluster_id];
+
+    var color : vec3<f32> = vec3<f32>(0.0);
+    let max_lights = min(grid.count, frame.cluster_params.w);
+    for (var i : u32 = 0u; i < max_lights; i = i + 1u) {
+        let light_index = light_index_list[grid.offset + i];
+        if (light_index >= arrayLength(&lights)) {
+            continue;
+        }
+        color += direct_light_radiance(
+            input.world_pos,
+            n,
+            v,
+            base_color,
+            metallic,
+            roughness,
+            f0,
+            lights[light_index]
+        );
+    }
+
     color += ibl_radiance(n, v, base_color, metallic, roughness, f0, ao);
 
     if (material.flags & MATERIAL_FLAG_EMISSIVE_MAP) != 0u {

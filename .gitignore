@@ -344,3 +344,5 @@ vulkaninfo-output.txt
 #   git check-ignore -v <path>
 
 
+.hermes/
+
