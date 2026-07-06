@@ -547,7 +547,7 @@ impl Renderer {
         lights: &[crate::bindless::Light],
     ) -> HygeResult<()> {
         use crate::bindless::{DrawCommand, Light};
-        use crate::clustered_forward::{Batch as CfBatch, ClusteredForwardPass, ClusterConfig};
+        use crate::clustered_forward::{Batch as CfBatch, ClusterConfig, ClusteredForwardPass};
         use std::sync::Arc;
 
         self.profiler.begin_frame();
@@ -670,7 +670,6 @@ impl Renderer {
             surface.configure(&self.device, cfg);
         }
     }
-
 
     /// Returns the wgpu device.
     #[must_use]

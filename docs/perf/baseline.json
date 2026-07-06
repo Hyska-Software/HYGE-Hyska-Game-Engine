@@ -1,0 +1,22 @@
+{
+  "milestone": "M4",
+  "roadmap_item": "R-059",
+  "scene": "10k static instances, 64 dynamic lights, PBR + IBL + CSM + TAA + SMAA + Bloom + ACES + skinning + culling",
+  "target_hardware": "RTX 3060",
+  "target_resolution": "1920x1080",
+  "target_fps": 144,
+  "measurement_status": "local_cpu_validation_only",
+  "local_validation": {
+    "date": "2026-07-06",
+    "render_core_tests": "cargo test -p hyge-render --test r050_r059_phase5_core: 9 passed",
+    "render_clippy": "cargo clippy -p hyge-render --all-targets -- --deny warnings: passed"
+  },
+  "pass_benchmarks": [
+    "m4/shadow_cascades_and_atlas",
+    "m4/post_taa_smaa_bloom_aces",
+    "m4/cpu_frustum_cull_10k",
+    "m4/meshlet_cull_lod_10k",
+    "m4/skinning_10k"
+  ],
+  "notes": "The file records the M4 target and the local deterministic validation performed in this workspace. A physical RTX 3060 run should replace measurement_status with measured_gpu and add measured_fps/driver/os fields before release tagging."
+}

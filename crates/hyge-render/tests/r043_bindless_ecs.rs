@@ -16,19 +16,13 @@ use hyge_render::prelude::pod_collect_to_vec;
 use hyge_render::renderer::Renderer;
 use hyge_runtime_test::TestRenderer;
 use hyge_scene::extract::render_extract;
-use hyge_scene::prelude::{
-    LightComponent, MaterialHandle, MeshHandle, WorldTransform,
-};
+use hyge_scene::prelude::{LightComponent, MaterialHandle, MeshHandle, WorldTransform};
 
 fn build_snapshot_world() -> World {
     let mut world = World::new();
 
     // Sun.
-    world.spawn(LightComponent::sun(
-        [0.0, -1.0, 0.0],
-        [1.0, 0.95, 0.9],
-        1.0,
-    ));
+    world.spawn(LightComponent::sun([0.0, -1.0, 0.0], [1.0, 0.95, 0.9], 1.0));
 
     // One point light.
     world.spawn(LightComponent::point([0.0, 5.0, 0.0], [0.4, 0.6, 1.0], 2.5));
@@ -104,8 +98,7 @@ fn render_frame_with_extracted_snapshot_does_not_error() {
     };
 
     let config = RendererConfig::default();
-    let mut renderer = Renderer::new_headless(&config)
-        .expect("headless renderer must construct");
+    let mut renderer = Renderer::new_headless(&config).expect("headless renderer must construct");
 
     let mut world = build_snapshot_world();
     let snapshot = render_extract(&mut world);
@@ -183,8 +176,7 @@ fn set_environment_after_first_render_is_applied() {
     };
 
     let config = RendererConfig::default();
-    let mut renderer = Renderer::new_headless(&config)
-        .expect("headless renderer must construct");
+    let mut renderer = Renderer::new_headless(&config).expect("headless renderer must construct");
 
     let device: *const wgpu::Device = renderer.bindless().device();
     let mut world = build_snapshot_world();
@@ -234,7 +226,12 @@ fn set_environment_after_first_render_is_applied() {
         .render_frame(
             &target,
             wgpu::TextureFormat::Rgba8UnormSrgb,
-            wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+            wgpu::Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
             &FrameData::default_looking_at_origin(),
             &instances,
             &draw_commands,
@@ -261,7 +258,12 @@ fn set_environment_after_first_render_is_applied() {
         .render_frame(
             &target,
             wgpu::TextureFormat::Rgba8UnormSrgb,
-            wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+            wgpu::Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
             &FrameData::default_looking_at_origin(),
             &instances,
             &draw_commands,

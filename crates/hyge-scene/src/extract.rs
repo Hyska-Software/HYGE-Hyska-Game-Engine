@@ -18,7 +18,7 @@ use bytemuck::{Pod, Zeroable};
 
 use hyge_ecs::prelude::*;
 
-use crate::components::{LightComponent, MaterialHandle, MeshHandle, WorldTransform};
+use crate::components::{LightComponent, MaterialHandle, MeshHandle, StaticBounds, WorldTransform};
 
 /// A single rendered instance, GPU-ready. Mirrors
 /// `hyge_render::bindless::Instance`.
@@ -127,6 +127,19 @@ impl FrameSnapshot {
 /// entities that share 3 (mesh, material) pairs produces 3
 /// draws, not 1000.
 pub fn render_extract(world: &mut World) -> FrameSnapshot {
+    render_extract_with_culling(world, None)
+}
+
+/// Walks a `World` and produces a [`FrameSnapshot`], optionally
+/// applying CPU frustum culling to entities that carry
+/// [`StaticBounds`].
+///
+/// Entities without `StaticBounds` remain visible so older scenes and
+/// tests keep their previous behavior.
+pub fn render_extract_with_culling(
+    world: &mut World,
+    frustum: Option<&hyge_core::prelude::Frustum>,
+) -> FrameSnapshot {
     use std::collections::BTreeMap;
 
     let mut snapshot = FrameSnapshot::empty();
@@ -150,10 +163,25 @@ pub fn render_extract(world: &mut World) -> FrameSnapshot {
     // the high bits, material_id in the low bits).
     let mut groups: BTreeMap<u64, Vec<Instance>> = BTreeMap::new();
     {
-        let mut query = world
-            .query::<(&MeshHandle, &MaterialHandle, Option<&WorldTransform>)>();
-        for (mesh, material, transform) in query.iter(world) {
+        let mut query = world.query::<(
+            &MeshHandle,
+            &MaterialHandle,
+            Option<&WorldTransform>,
+            Option<&StaticBounds>,
+        )>();
+        for (mesh, material, transform, bounds) in query.iter(world) {
             let transform = transform.copied().unwrap_or_default();
+            if let (Some(frustum), Some(bounds)) = (frustum, bounds) {
+                let local = hyge_core::prelude::Aabb::new(
+                    hyge_core::prelude::Vec3::from_array(bounds.min),
+                    hyge_core::prelude::Vec3::from_array(bounds.max),
+                );
+                let matrix = world_transform_to_mat4(transform);
+                let world_bounds = transform_aabb(local, matrix);
+                if !frustum.intersects_aabb(&world_bounds) {
+                    continue;
+                }
+            }
             let instance = Instance {
                 transform: transform.cols,
                 mesh_id: mesh.0,
@@ -195,6 +223,50 @@ pub fn render_extract(world: &mut World) -> FrameSnapshot {
     }
 
     snapshot
+}
+
+fn world_transform_to_mat4(transform: WorldTransform) -> hyge_core::prelude::Mat4 {
+    hyge_core::prelude::Mat4::from_cols_array(&[
+        transform.cols[0][0],
+        transform.cols[1][0],
+        transform.cols[2][0],
+        0.0,
+        transform.cols[0][1],
+        transform.cols[1][1],
+        transform.cols[2][1],
+        0.0,
+        transform.cols[0][2],
+        transform.cols[1][2],
+        transform.cols[2][2],
+        0.0,
+        transform.cols[0][3],
+        transform.cols[1][3],
+        transform.cols[2][3],
+        1.0,
+    ])
+}
+
+fn transform_aabb(
+    aabb: hyge_core::prelude::Aabb,
+    transform: hyge_core::prelude::Mat4,
+) -> hyge_core::prelude::Aabb {
+    let corners = [
+        hyge_core::prelude::Vec3::new(aabb.min.x, aabb.min.y, aabb.min.z),
+        hyge_core::prelude::Vec3::new(aabb.max.x, aabb.min.y, aabb.min.z),
+        hyge_core::prelude::Vec3::new(aabb.min.x, aabb.max.y, aabb.min.z),
+        hyge_core::prelude::Vec3::new(aabb.max.x, aabb.max.y, aabb.min.z),
+        hyge_core::prelude::Vec3::new(aabb.min.x, aabb.min.y, aabb.max.z),
+        hyge_core::prelude::Vec3::new(aabb.max.x, aabb.min.y, aabb.max.z),
+        hyge_core::prelude::Vec3::new(aabb.min.x, aabb.max.y, aabb.max.z),
+        hyge_core::prelude::Vec3::new(aabb.max.x, aabb.max.y, aabb.max.z),
+    ];
+    let mut out = hyge_core::prelude::Aabb::EMPTY;
+    for corner in corners {
+        out.merge(&hyge_core::prelude::Aabb::from_point(
+            transform.transform_point3(corner),
+        ));
+    }
+    out
 }
 
 /// Exclusive ECS system that writes the current frame's
@@ -313,13 +385,18 @@ mod tests {
         // first_instance values must be a contiguous
         // walk: the first group's `first_instance` is 0,
         // and the total spans 0..18.
-        let total: u32 = snapshot.draw_commands.iter().map(|dc| dc.instance_count).sum();
+        let total: u32 = snapshot
+            .draw_commands
+            .iter()
+            .map(|dc| dc.instance_count)
+            .sum();
         assert_eq!(total, 18);
 
         // Each instance buffer entry must reference one
         // of the three (mesh, material) pairs.
         for inst in &snapshot.instances {
-            let in_group_a_or_b = inst.mesh_id == 1 && (inst.material_id == 1 || inst.material_id == 2);
+            let in_group_a_or_b =
+                inst.mesh_id == 1 && (inst.material_id == 1 || inst.material_id == 2);
             let in_group_c = inst.mesh_id == 2 && inst.material_id == 1;
             assert!(
                 in_group_a_or_b || in_group_c,
@@ -389,8 +466,8 @@ mod tests {
 
     #[test]
     fn add_render_extract_system_runs_in_schedule() {
-        use hyge_ecs::schedule::Label;
         use hyge_ecs::prelude::Schedule;
+        use hyge_ecs::schedule::Label;
 
         let mut world = World::new();
         world.spawn((MeshHandle(7), MaterialHandle(8), WorldTransform::identity()));

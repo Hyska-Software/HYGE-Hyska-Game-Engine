@@ -29,9 +29,7 @@ use hyge_render::prelude::pod_collect_to_vec;
 use hyge_render::renderer::Renderer;
 use hyge_runtime_test::{capture_frame, hash_image, TestRenderer};
 use hyge_scene::extract::render_extract;
-use hyge_scene::prelude::{
-    LightComponent, MaterialHandle, MeshHandle, WorldTransform,
-};
+use hyge_scene::prelude::{LightComponent, MaterialHandle, MeshHandle, WorldTransform};
 
 const CANVAS_W: u32 = 64;
 const CANVAS_H: u32 = 64;
@@ -64,11 +62,7 @@ fn build_damaged_helmet_world() -> World {
         let angle = t * std::f32::consts::TAU * 4.0;
         let radius = 1.5 + 0.5 * (t * std::f32::consts::TAU).sin();
         let height = 0.5 + 0.5 * (t * std::f32::consts::PI * 2.0).cos();
-        let pos = [
-            angle.cos() * radius,
-            height,
-            angle.sin() * radius,
-        ];
+        let pos = [angle.cos() * radius, height, angle.sin() * radius];
         // Cycle through warm + cool colours so the lights
         // produce varied colour across the image.
         let color = if i % 2 == 0 {
@@ -84,11 +78,7 @@ fn build_damaged_helmet_world() -> World {
     // shader treats it as an opaque material).
     for i in 0..NUM_INSTANCES {
         let angle = i as f32 * 0.1;
-        let translation = [
-            angle.sin() * 0.3,
-            0.0,
-            angle.cos() * 0.3,
-        ];
+        let translation = [angle.sin() * 0.3, 0.0, angle.cos() * 0.3];
         world.spawn((
             MeshHandle(0),
             MaterialHandle(0),
@@ -190,8 +180,7 @@ fn damaged_helmet_smoke_test_runs_end_to_end() {
     };
 
     let config = RendererConfig::default();
-    let mut renderer = Renderer::new_headless(&config)
-        .expect("headless renderer must construct");
+    let mut renderer = Renderer::new_headless(&config).expect("headless renderer must construct");
 
     // Borrow `device` and `queue` once and copy them out so
     // the borrow of `renderer` ends before we take `&mut
@@ -214,7 +203,12 @@ fn damaged_helmet_smoke_test_runs_end_to_end() {
         view_formats: &[],
     });
 
-    render_damaged_helmet(&mut renderer, &mut world, &target, wgpu::TextureFormat::Rgba8UnormSrgb);
+    render_damaged_helmet(
+        &mut renderer,
+        &mut world,
+        &target,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+    );
 
     // SAFETY: the renderer outlives the target and the call
     // is sequential (no other threads mutate the renderer
@@ -232,9 +226,7 @@ fn damaged_helmet_smoke_test_runs_end_to_end() {
             let r = px[0] as f32 / 255.0;
             let g = px[1] as f32 / 255.0;
             let b = px[2] as f32 / 255.0;
-            (r - 0.05).abs() > 0.01
-                || (g - 0.05).abs() > 0.01
-                || (b - 0.07).abs() > 0.01
+            (r - 0.05).abs() > 0.01 || (g - 0.05).abs() > 0.01 || (b - 0.07).abs() > 0.01
         })
         .count();
     assert!(
@@ -251,8 +243,7 @@ fn damaged_helmet_snapshot_hash_is_stable() {
     };
 
     let config = RendererConfig::default();
-    let mut renderer = Renderer::new_headless(&config)
-        .expect("headless renderer must construct");
+    let mut renderer = Renderer::new_headless(&config).expect("headless renderer must construct");
 
     let device: *const wgpu::Device = renderer.bindless().device();
     let queue: *const wgpu::Queue = renderer.queue();
@@ -272,7 +263,12 @@ fn damaged_helmet_snapshot_hash_is_stable() {
         view_formats: &[],
     });
 
-    render_damaged_helmet(&mut renderer, &mut world, &target, wgpu::TextureFormat::Rgba8UnormSrgb);
+    render_damaged_helmet(
+        &mut renderer,
+        &mut world,
+        &target,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+    );
 
     let pixels = capture_frame(unsafe { &*device }, unsafe { &*queue }, &target);
     let hash = hash_image(&pixels);
@@ -304,8 +300,7 @@ fn damaged_helmet_with_ibl_changes_pixels() {
     };
 
     let config = RendererConfig::default();
-    let mut renderer = Renderer::new_headless(&config)
-        .expect("headless renderer must construct");
+    let mut renderer = Renderer::new_headless(&config).expect("headless renderer must construct");
     if !install_white_test_material(&renderer) {
         return;
     }
@@ -313,20 +308,22 @@ fn damaged_helmet_with_ibl_changes_pixels() {
     let device: *const wgpu::Device = renderer.bindless().device();
     let queue: *const wgpu::Queue = renderer.queue();
 
-    let make_target = |label: &str| unsafe { &*device }.create_texture(&wgpu::TextureDescriptor {
-        label: Some(label),
-        size: wgpu::Extent3d {
-            width: CANVAS_W,
-            height: CANVAS_H,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    let make_target = |label: &str| {
+        unsafe { &*device }.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: CANVAS_W,
+                height: CANVAS_H,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        })
+    };
 
     // First render without IBL. Use a world with one sun and
     // no dynamic lights so the IBL term can change the final
@@ -361,14 +358,8 @@ fn damaged_helmet_with_ibl_changes_pixels() {
         // asymmetric so the rendered pixels should change once
         // the environment is uploaded.
         out.extend_from_slice(&[
-            255, 180, 80, 129,
-            80, 160, 255, 129,
-            128, 128, 128, 128,
-            64, 64, 64, 128,
-            255, 220, 200, 128,
-            50, 50, 120, 128,
-            120, 200, 90, 128,
-            32, 32, 32, 128,
+            255, 180, 80, 129, 80, 160, 255, 129, 128, 128, 128, 128, 64, 64, 64, 128, 255, 220,
+            200, 128, 50, 50, 120, 128, 120, 200, 90, 128, 32, 32, 32, 128,
         ]);
         out
     };
@@ -407,9 +398,18 @@ fn damaged_helmet_with_ibl_changes_pixels() {
     );
     let pixels_with_ibl = capture_frame(unsafe { &*device }, unsafe { &*queue }, &target_with_ibl);
 
-    assert!(renderer.ibl().is_some(), "IBL should be installed on the renderer");
+    assert!(
+        renderer.ibl().is_some(),
+        "IBL should be installed on the renderer"
+    );
     let hash_no_ibl = hash_image(&pixels_no_ibl);
     let hash_with_ibl = hash_image(&pixels_with_ibl);
-    assert!(!hash_no_ibl.is_empty(), "baseline frame hash must be non-empty");
-    assert!(!hash_with_ibl.is_empty(), "IBL frame hash must be non-empty");
+    assert!(
+        !hash_no_ibl.is_empty(),
+        "baseline frame hash must be non-empty"
+    );
+    assert!(
+        !hash_with_ibl.is_empty(),
+        "IBL frame hash must be non-empty"
+    );
 }

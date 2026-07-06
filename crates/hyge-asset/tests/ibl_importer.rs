@@ -87,10 +87,10 @@ fn import_hdr_is_hash_stable() {
     std::fs::write(&hdr, synthetic_hdr_bytes()).unwrap();
 
     let out = dir.join("cook");
-    let report_a = import_environment_with_config(&hdr, &out, small_bake_config())
-        .expect("first import");
-    let report_b = import_environment_with_config(&hdr, &out, small_bake_config())
-        .expect("second import");
+    let report_a =
+        import_environment_with_config(&hdr, &out, small_bake_config()).expect("first import");
+    let report_b =
+        import_environment_with_config(&hdr, &out, small_bake_config()).expect("second import");
 
     assert_eq!(report_a.source_hash, report_b.source_hash);
     assert_eq!(report_a.env_hash, report_b.env_hash);
@@ -104,8 +104,8 @@ fn modified_hdr_produces_different_env_hash() {
     std::fs::write(&hdr_a, &bytes).unwrap();
 
     let out = dir.join("cook");
-    let report_a = import_environment_with_config(&hdr_a, &out, small_bake_config())
-        .expect("first import");
+    let report_a =
+        import_environment_with_config(&hdr_a, &out, small_bake_config()).expect("first import");
 
     // Perturb one pixel; source hash changes, env hash changes.
     let last = bytes.len() - 1;
@@ -113,8 +113,8 @@ fn modified_hdr_produces_different_env_hash() {
     let hdr_b = dir.join("sky2.hdr");
     std::fs::write(&hdr_b, &bytes).unwrap();
 
-    let report_b = import_environment_with_config(&hdr_b, &out, small_bake_config())
-        .expect("second import");
+    let report_b =
+        import_environment_with_config(&hdr_b, &out, small_bake_config()).expect("second import");
 
     assert_ne!(report_a.source_hash, report_b.source_hash);
     assert_ne!(report_a.env_hash, report_b.env_hash);
@@ -130,20 +130,13 @@ fn import_hdr_records_in_asset_db() {
     std::fs::create_dir_all(&out).unwrap();
     let db_path = out.join(".hyge.db");
     let mut db = AssetDb::open(&db_path).expect("open db");
-    let report = import_environment_with_config_and_db(
-        &hdr,
-        &out,
-        small_bake_config(),
-        Some(&mut db),
-    )
-    .expect("import_environment");
+    let report =
+        import_environment_with_config_and_db(&hdr, &out, small_bake_config(), Some(&mut db))
+            .expect("import_environment");
 
     let env_id = AssetId::from(blake3::hash(report.env_hash.as_bytes()));
     let path = db.lookup(&env_id).expect("env recorded in db");
-    assert_eq!(
-        path,
-        out.join(format!("{}.hyge-env", report.env_hash))
-    );
+    assert_eq!(path, out.join(format!("{}.hyge-env", report.env_hash)));
 }
 
 #[test]

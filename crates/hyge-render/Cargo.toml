@@ -33,3 +33,8 @@ hyge-scene = { workspace = true }
 hyge-ecs = { workspace = true }
 bevy_ecs = { workspace = true }
 bytemuck = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "m4_pipeline"
+harness = false
