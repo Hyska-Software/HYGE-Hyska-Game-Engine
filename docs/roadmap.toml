@@ -1257,12 +1257,14 @@ title = "hyge-audio crate skeleton (kira)"
 phase = "phase_7"
 owner = "audio"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-061"]
 summary = "Create hyge-audio with kira backend, bus mixer, spatial 3D."
+completed_at = "2026-07-06"
+completion_notes = "Implemented hyge-audio as a real crate with Kira 0.12 backend dependency, headless-safe AudioServer wrapper around kira::AudioManager<DefaultBackend>, AudioBuses/AudioBusVolumes/BusKind, Reflect ECS components AudioSource and AudioListener, PlaySound and StopSound events, AudioPlugin registered in hyge-app default_plugins, spatial attenuation math, and optional audio-hrtf stub. Important dependency note: crates.io has no package named exactly 'kira-spatial-audio'; a temporary local shim was rejected and removed. The implementation uses Kira 0.12's native listener/spatial-track support surface as the real alternative while keeping Hyge's spatial math in hyge-audio::spatial. Tests cover bus volume inheritance, default bus gains, linear/inverse/logarithmic distance attenuation, Reflect round-trips, mock server operation without audio device, and plugin registration. Validation evidence: cargo test -p hyge-audio passed 9 tests; cargo test -p hyge-app passed; cargo clippy -p hyge-audio --all-targets --all-features -- --deny warnings passed."
 acceptance = [
-  "crates/hyge-audio/Cargo.toml declares deps on kira, kira-spatial-audio, hyge-ecs, hyge-core",
+  "crates/hyge-audio/Cargo.toml declares deps on kira, hyge-ecs, hyge-core; spatial audio uses Kira 0.12 native listener/spatial-track API because no crates.io package named kira-spatial-audio exists",
   "AudioServer wraps kira::AudioManager",
   "AudioBuses: master, sfx, voice, ui, ambient, music",
   "components::AudioSource, AudioListener (Reflect)",

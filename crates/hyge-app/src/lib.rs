@@ -20,6 +20,7 @@ pub use config::{
 
 pub mod prelude;
 
+use hyge_audio::prelude::AudioPlugin;
 use hyge_ecs::prelude::*;
 use hyge_physics::prelude::{accumulate_fixed_steps, PhysicsPlugin};
 use hyge_render::prelude::*;
@@ -368,8 +369,8 @@ impl ApplicationHandler for App {
 /// receive them through the [`AppConfig`] argument. Plugins with no
 /// config use sensible defaults.
 ///
-/// Currently includes [`WindowPlugin`], [`ScenePlugin`], and [`PhysicsPlugin`]. The other
-/// subsystem plugins (renderer, asset, audio, input, script,
+/// Currently includes [`WindowPlugin`], [`ScenePlugin`], [`PhysicsPlugin`], and
+/// [`AudioPlugin`]. The other subsystem plugins (renderer, asset, input, script,
 /// editor) are added as their respective milestones land (see
 /// `docs/roadmap.toml`).
 pub fn default_plugins(config: &AppConfig) -> Vec<Box<dyn HygePlugin>> {
@@ -377,6 +378,7 @@ pub fn default_plugins(config: &AppConfig) -> Vec<Box<dyn HygePlugin>> {
         Box::new(WindowPlugin::new(config.window.clone())),
         Box::new(ScenePlugin),
         Box::new(PhysicsPlugin::new((&config.physics).into())),
+        Box::new(AudioPlugin),
     ]
 }
 

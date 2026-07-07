@@ -1,0 +1,102 @@
+//! Spatial audio math and attenuation.
+
+use hyge_core::prelude::Vec3;
+
+use crate::components::AudioRolloff;
+
+/// A listener in world space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpatialListener {
+    /// Listener position in world space.
+    pub position: Vec3,
+    /// Listener orientation, represented as a Kira-compatible orientation in
+    /// higher-level backend setup.
+    pub forward: Vec3,
+    /// Listener up vector.
+    pub up: Vec3,
+}
+
+impl Default for SpatialListener {
+    fn default() -> Self {
+        Self {
+            position: Vec3::ZERO,
+            forward: Vec3::NEG_Z,
+            up: Vec3::Y,
+        }
+    }
+}
+
+/// Spatial emitter descriptor used by the audio backend.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpatialEmitter {
+    /// Emitter position in world space.
+    pub position: Vec3,
+    /// Maximum audible range.
+    pub range: f32,
+}
+
+impl Default for SpatialEmitter {
+    fn default() -> Self {
+        Self {
+            position: Vec3::ZERO,
+            range: 1.0,
+        }
+    }
+}
+
+/// Computes attenuation for `distance`, `range`, and rolloff model.
+#[must_use]
+pub fn attenuation_gain(distance: f32, range: f32, rolloff: AudioRolloff) -> f32 {
+    let range = range.max(f32::EPSILON);
+    let distance = distance.max(0.0);
+    if distance >= range {
+        return 0.0;
+    }
+
+    match rolloff {
+        AudioRolloff::Linear => 1.0 - (distance / range),
+        AudioRolloff::Inverse => 1.0 / (1.0 + distance),
+        AudioRolloff::Logarithmic => 1.0 - (distance + 1.0).ln() / (range + 1.0).ln(),
+    }
+    .clamp(0.0, 1.0)
+}
+
+/// Computes attenuation from listener/emitter positions.
+#[must_use]
+pub fn listener_emitter_gain(
+    listener: SpatialListener,
+    emitter: SpatialEmitter,
+    rolloff: AudioRolloff,
+) -> f32 {
+    attenuation_gain(
+        listener.position.distance(emitter.position),
+        emitter.range,
+        rolloff,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linear_attenuation_fades_to_zero_at_range() {
+        assert_eq!(attenuation_gain(0.0, 10.0, AudioRolloff::Linear), 1.0);
+        assert_eq!(attenuation_gain(5.0, 10.0, AudioRolloff::Linear), 0.5);
+        assert_eq!(attenuation_gain(10.0, 10.0, AudioRolloff::Linear), 0.0);
+    }
+
+    #[test]
+    fn inverse_attenuation_decreases_with_distance() {
+        let near = attenuation_gain(1.0, 10.0, AudioRolloff::Inverse);
+        let far = attenuation_gain(5.0, 10.0, AudioRolloff::Inverse);
+        assert!(near > far);
+        assert!((near - 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn logarithmic_attenuation_is_clamped() {
+        assert_eq!(attenuation_gain(-1.0, 10.0, AudioRolloff::Logarithmic), 1.0);
+        assert_eq!(attenuation_gain(20.0, 10.0, AudioRolloff::Logarithmic), 0.0);
+    }
+}

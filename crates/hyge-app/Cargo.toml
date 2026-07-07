@@ -19,6 +19,7 @@ hyge-window = { workspace = true }
 hyge-render = { workspace = true }
 hyge-scene = { workspace = true }
 hyge-physics = { workspace = true }
+hyge-audio = { workspace = true }
 
 [[example]]
 name = "hello_window"

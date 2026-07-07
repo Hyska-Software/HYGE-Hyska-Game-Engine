@@ -129,6 +129,7 @@ rapier3d = "0.18"
 
 # Audio (deferred to M7 — see roadmap R-160+; declared as workspace dep
 # when hyge-audio is wired up to actually use these crates).
+kira = { version = "0.12", default-features = false, features = ["ogg", "wav"] }
 
 # Windowing + input
 winit = "0.30"

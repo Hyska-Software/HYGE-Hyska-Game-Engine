@@ -12,7 +12,10 @@ default = []
 audio-hrtf = []
 
 [dependencies]
+bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 tracing = { workspace = true }
 hyge-core = { workspace = true }
+hyge-ecs = { workspace = true }
+kira = { workspace = true }
