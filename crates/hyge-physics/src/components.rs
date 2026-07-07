@@ -51,6 +51,57 @@ impl Default for RigidBody {
     }
 }
 
+/// World-space physics translation used by the Rapier backend.
+#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq)]
+#[reflect(Component)]
+pub struct PhysicsPosition {
+    /// Translation in world space.
+    pub translation: [f32; 3],
+}
+
+impl PhysicsPosition {
+    /// Creates a position from a `glam` vector.
+    #[must_use]
+    pub fn from_translation(translation: Vec3) -> Self {
+        Self {
+            translation: translation.into(),
+        }
+    }
+
+    /// Returns the translation as a `glam` vector.
+    #[must_use]
+    pub fn as_vec3(&self) -> Vec3 {
+        Vec3::from(self.translation)
+    }
+}
+
+impl Default for PhysicsPosition {
+    fn default() -> Self {
+        Self {
+            translation: [0.0; 3],
+        }
+    }
+}
+
+/// Linear and angular velocity written by the physics backend.
+#[derive(Component, Reflect, Clone, Copy, Debug, PartialEq)]
+#[reflect(Component)]
+pub struct PhysicsVelocity {
+    /// Linear velocity in world units per second.
+    pub linear: [f32; 3],
+    /// Angular velocity in radians per second.
+    pub angular: [f32; 3],
+}
+
+impl Default for PhysicsVelocity {
+    fn default() -> Self {
+        Self {
+            linear: [0.0; 3],
+            angular: [0.0; 3],
+        }
+    }
+}
+
 /// Collision geometry used by a [`Collider`].
 #[derive(Reflect, Clone, Debug, PartialEq)]
 pub enum ColliderShape {
@@ -269,6 +320,19 @@ mod tests {
         };
 
         assert_reflect_round_trip(controller);
+    }
+
+    #[test]
+    fn physics_position_reflect_round_trip() {
+        assert_reflect_round_trip(PhysicsPosition::from_translation(Vec3::new(1.0, 2.0, 3.0)));
+    }
+
+    #[test]
+    fn physics_velocity_reflect_round_trip() {
+        assert_reflect_round_trip(PhysicsVelocity {
+            linear: [1.0, 2.0, 3.0],
+            angular: [4.0, 5.0, 6.0],
+        });
     }
 
     #[test]

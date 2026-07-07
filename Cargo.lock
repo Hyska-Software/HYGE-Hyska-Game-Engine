@@ -1448,6 +1448,7 @@ dependencies = [
  "bevy_ecs",
  "hyge-core",
  "hyge-ecs",
+ "hyge-physics",
  "hyge-render",
  "hyge-scene",
  "hyge-window",

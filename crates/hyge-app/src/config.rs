@@ -110,6 +110,10 @@ pub struct PhysicsConfig {
     pub fixed_timestep: f32,
     /// Gravity vector in world space.
     pub gravity: Vec3,
+    /// Maximum fixed substeps consumed per render frame.
+    pub max_substeps: u32,
+    /// Solver iteration count for the active backend.
+    pub num_solver_iterations: usize,
 }
 
 impl Default for PhysicsConfig {
@@ -118,6 +122,19 @@ impl Default for PhysicsConfig {
             enabled: true,
             fixed_timestep: 1.0 / 60.0,
             gravity: Vec3::new(0.0, -9.81, 0.0),
+            max_substeps: 5,
+            num_solver_iterations: 4,
+        }
+    }
+}
+
+impl From<&PhysicsConfig> for hyge_physics::PhysicsConfig {
+    fn from(config: &PhysicsConfig) -> Self {
+        Self {
+            fixed_timestep: config.fixed_timestep,
+            max_substeps: config.max_substeps,
+            gravity: config.gravity,
+            num_solver_iterations: config.num_solver_iterations,
         }
     }
 }

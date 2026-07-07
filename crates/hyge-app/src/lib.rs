@@ -21,6 +21,7 @@ pub use config::{
 pub mod prelude;
 
 use hyge_ecs::prelude::*;
+use hyge_physics::prelude::{accumulate_fixed_steps, PhysicsPlugin};
 use hyge_render::prelude::*;
 use hyge_scene::prelude::*;
 use hyge_window::prelude::*;
@@ -175,10 +176,20 @@ impl App {
         let world = self.inner.world_mut();
         world.run_schedule(Label::First);
         world.run_schedule(Label::PreUpdate);
-        // FixedUpdate is special: in a real implementation, it would
-        // consume the fixed-timestep accumulator and run N times.
-        // For now, run once per frame.
-        world.run_schedule(Label::FixedUpdate);
+        let steps = {
+            let config = world
+                .get_resource::<hyge_physics::PhysicsConfig>()
+                .copied()
+                .unwrap_or_default();
+            if let Some(mut time) = world.get_resource_mut::<hyge_physics::PhysicsTime>() {
+                accumulate_fixed_steps(&mut time, &config, config.fixed_timestep)
+            } else {
+                1
+            }
+        };
+        for _ in 0..steps {
+            world.run_schedule(Label::FixedUpdate);
+        }
         world.run_schedule(Label::Update);
         world.run_schedule(Label::RenderExtract);
         // `Render` runs on the dedicated render thread (M2+).
@@ -357,14 +368,15 @@ impl ApplicationHandler for App {
 /// receive them through the [`AppConfig`] argument. Plugins with no
 /// config use sensible defaults.
 ///
-/// Currently includes [`WindowPlugin`] and [`ScenePlugin`]. The other
-/// subsystem plugins (renderer, asset, physics, audio, input, script,
+/// Currently includes [`WindowPlugin`], [`ScenePlugin`], and [`PhysicsPlugin`]. The other
+/// subsystem plugins (renderer, asset, audio, input, script,
 /// editor) are added as their respective milestones land (see
 /// `docs/roadmap.toml`).
 pub fn default_plugins(config: &AppConfig) -> Vec<Box<dyn HygePlugin>> {
     vec![
         Box::new(WindowPlugin::new(config.window.clone())),
         Box::new(ScenePlugin),
+        Box::new(PhysicsPlugin::new((&config.physics).into())),
     ]
 }
 
@@ -422,6 +434,8 @@ mod tests {
         assert_eq!(config.clear_color, [0.1, 0.1, 0.1, 1.0]);
         assert_eq!(config.renderer.backend, RendererBackend::Auto);
         assert!(config.physics.enabled);
+        assert_eq!(config.physics.max_substeps, 5);
+        assert_eq!(config.physics.num_solver_iterations, 4);
         assert!(config.audio.enabled);
         assert!(config.script.enabled);
         assert!(config.script.sandbox);

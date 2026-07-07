@@ -22,7 +22,10 @@ pub mod step;
 #[cfg(feature = "physics-rapier")]
 pub mod rapier_impl;
 
-pub use components::{CharacterController, Collider, ColliderShape, RigidBody, RigidBodyKind};
+pub use components::{
+    CharacterController, Collider, ColliderShape, PhysicsPosition, PhysicsVelocity, RigidBody,
+    RigidBodyKind,
+};
 pub use config::{PhysicsConfig, PhysicsTime};
 pub use events::{CollisionEvent, Contact, ContactForceEvent};
 pub use plugin::PhysicsPlugin;

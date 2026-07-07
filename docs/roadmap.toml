@@ -1237,10 +1237,12 @@ title = "rapier3d integration and fixed timestep"
 phase = "phase_7"
 owner = "physics"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-070"]
 summary = "Wire rapier3d to ECS via fixed-timestep schedule, with worker-thread island build."
+completed_at = "2026-07-06"
+completion_notes = "Implemented R-071 fixed-step Rapier integration. hyge-physics now exposes PhysicsPosition and PhysicsVelocity components, PhysicsPlugin accepts explicit PhysicsConfig and registers physics_step_system in schedule::Label::FixedUpdate. The cfg(feature='physics-rapier') rapier_impl module now owns a real RapierPhysicsWorld resource with PhysicsPipeline, body/collider sets, joints, CCD solver, query pipeline, Entity<->handle maps, ECS body insertion helper, one-substep step() method, position/velocity readback helpers, and a SpatialQuery raycast implementation. Island metadata is built on a worker thread via RapierIslandBuilder using std::thread + mpsc and returns IslandBuildResult to the main resource. hyge-app now depends on hyge-physics, forwards AppConfig physics values into hyge_physics::PhysicsConfig, installs PhysicsPlugin in default_plugins, and consumes PhysicsTime accumulator to run Label::FixedUpdate N times per frame. App PhysicsConfig now exposes max_substeps (default 5) and num_solver_iterations. Tests added: accumulator multi-step behavior; feature-gated deterministic 100 dynamic rigid bodies ball-drop simulation for 10 seconds against a fixed ground, comparing two independent runs and asserting final landing height. Validation: cargo test -p hyge-physics passed without feature (12 tests); cargo test -p hyge-physics --features physics-rapier passed (13 tests); cargo test -p hyge-app passed; cargo clippy -p hyge-physics --all-targets --all-features -- --deny warnings passed; cargo clippy -p hyge-app --all-targets -- --deny warnings passed."
 acceptance = [
   "rapier_impl module behind cfg(feature = 'physics-rapier')",
   "PhysicsStep system in schedule::Label::FixedUpdate, consumes PhysicsTime accumulator",
