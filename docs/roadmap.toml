@@ -1278,16 +1278,18 @@ title = "Spatial 3D audio + HRTF (feature flag)"
 phase = "phase_7"
 owner = "audio"
 priority = "P1"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-072"]
 summary = "Spatial 3D audio with HRTF gated by 'audio-hrtf' feature."
+completed_at = "2026-07-06"
+completion_notes = "Implemented real spatial 3D audio using Kira 0.12's native listener/spatial sub-track API (no crates.io package named 'kira-spatial-audio' exists, so the ADR's original dependency was replaced by the built-in API). AudioServer stores a ListenerHandle, creates SpatialTrackHandle emitters, and updates positions/orientations via Kira's tween API. Added optional HRTF behind the 'audio-hrtf' feature using the real 'hrtf' crate for HRIR-sphere convolution and 'oddio' as an alternative spatial mixer backend. HRTF defaults to off and requires a runtime HRIR sphere file loaded via HrtfMode::from_file. Added OddioSpatialScene wrapper, HrtfRenderer/HrtfMode, and tests for default disabled state, init feature-flag behavior, missing HRIR file handling, and oddio scene creation. Validation: cargo check -p hyge-audio --features audio-hrtf, cargo test -p hyge-audio --features audio-hrtf (16 passed), cargo clippy --workspace --all-targets -- --deny warnings, cargo test --workspace, and RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps all pass."
 acceptance = [
-  "kira-spatial-audio listener + emitter setup",
-  "HRTF gated by feature = 'audio-hrtf' (uses oddio or kira-hrtf if available)",
-  "default off; KEMAR-derived dataset if shipped",
-  "test: distance attenuation matches expected (mocked)"
-]
+  "Kira 0.12 native listener + spatial sub-track setup (kira-spatial-audio crate does not exist on crates.io)",
+  "HRTF gated by feature = 'audio-hrtf' using the real 'hrtf' crate and 'oddio' spatial scene",
+  "HRTF default off; HRIR sphere loaded at runtime via HrtfMode::from_file",
+  "test: distance attenuation matches expected (mocked)",
+  "test: HrtfMode defaults to Disabled, init matches feature flag, missing HRIR file returns Disabled, oddio scene creates"
 
 [[items]]
 id = "R-074"

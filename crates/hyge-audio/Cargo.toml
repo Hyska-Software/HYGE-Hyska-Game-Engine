@@ -9,13 +9,17 @@ description = "Audio engine: kira backend, structured bus mixer, spatial 3D, opt
 
 [features]
 default = []
-audio-hrtf = []
+audio-hrtf = ["dep:oddio", "dep:hrtf"]
 
 [dependencies]
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 tracing = { workspace = true }
+glam = { workspace = true }
 hyge-core = { workspace = true }
 hyge-ecs = { workspace = true }
 kira = { workspace = true }
+mint = { workspace = true }
+oddio = { workspace = true, optional = true }
+hrtf = { workspace = true, optional = true }
