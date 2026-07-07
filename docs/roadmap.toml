@@ -1215,10 +1215,12 @@ title = "hyge-physics crate skeleton (rapier3d behind feature flag)"
 phase = "phase_7"
 owner = "physics"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-061"]
 summary = "Create hyge-physics with rapier3d behind feature flag, components, events, query trait."
+completed_at = "2026-07-06"
+completion_notes = "Implemented hyge-physics as a real crate: optional rapier3d dependency behind feature 'physics-rapier'; modules for components, events, query, config, plugin, step, prelude, and cfg-gated rapier_impl skeleton. Added Reflect ECS components RigidBody, Collider, CharacterController plus ColliderShape variants; CollisionEvent and ContactForceEvent; SpatialQuery trait with StaticSpatialQuery for deterministic AABB raycasts/overlaps; PhysicsConfig and PhysicsTime resources; PhysicsPlugin registers resources and events. Tests cover Reflect round-trip for all components, required ColliderShape variants, raycast against a static box, query filtering/intersections, plugin registration, and fixed-step accumulator. Validation: cargo fmt --all -- --check passed with existing stable rustfmt warnings; cargo test -p hyge-physics passed 9 tests; cargo check -p hyge-physics --features physics-rapier passed; cargo clippy -p hyge-physics --all-targets --all-features -- --deny warnings passed; cargo test --workspace passed; cargo clippy --workspace --all-targets -- --deny warnings passed; RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps passed after fixing stale hyge-scene rustdoc links."
 acceptance = [
   "crates/hyge-physics/Cargo.toml declares optional dep on rapier3d, feature flag 'physics-rapier'",
   "components::RigidBody, Collider, CharacterController (all Reflect)",

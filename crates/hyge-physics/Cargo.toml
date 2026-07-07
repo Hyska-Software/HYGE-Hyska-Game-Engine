@@ -9,7 +9,12 @@ description = "rapier3d wrapper behind a feature flag. Implementation deferred t
 
 [features]
 default = []
-physics-rapier = []
+physics-rapier = ["dep:rapier3d"]
 
 [dependencies]
 hyge-core = { workspace = true }
+hyge-ecs = { workspace = true }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+rapier3d = { workspace = true, optional = true }

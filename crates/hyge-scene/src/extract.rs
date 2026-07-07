@@ -7,11 +7,11 @@
 //! happens here; the snapshot is uploaded to the bindless
 //! table by the renderer in `render_frame`.
 //!
-//! R-064 adds the [`StaticMesh`](crate::components::StaticMesh) path: entities
+//! R-064 adds the [`StaticMesh`] path: entities
 //! carrying typed asset handles (`Handle<MeshAsset>`, `Handle<MaterialAsset>`)
 //! are resolved through the [`AssetServer`] and grouped into `DrawCommand`s
-//! sorted by `material_id`. The legacy [`MeshHandle`](crate::components::MeshHandle)
-//! / [`MaterialHandle`](crate::components::MaterialHandle) path remains for
+//! sorted by `material_id`. The legacy [`MeshHandle`]
+//! / [`MaterialHandle`] path remains for
 //! backward compatibility; both paths emit into the same [`FrameSnapshot`] with
 //! contiguous `first_instance` offsets.
 

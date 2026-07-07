@@ -179,7 +179,7 @@ pub struct PersistOnReload;
 /// legacy [`MeshHandle`] / [`MaterialHandle`] components — which carry raw
 /// bindless slot indices — `StaticMesh` holds typed handles
 /// (`Handle<MeshAsset>`, `Handle<MaterialAsset>`) that are resolved to bindless
-/// slot indices by the [`AssetServer`] during
+/// slot indices by the `AssetServer` during
 /// [`render_extract_with_culling`](crate::extract::render_extract_with_culling).
 ///
 /// The resolution flow is: `Handle<MeshAsset>` → `AssetId` →
