@@ -11,9 +11,11 @@ pub mod api;
 pub mod components;
 pub mod engine;
 pub mod events;
+pub mod hot_reload;
 pub mod plugin;
 pub mod prelude;
 pub mod reflect_bind;
 pub mod sandbox;
 
 pub use engine::ScriptEngine;
+pub use hot_reload::{process_script_hot_reload, ScriptState, ScriptWatcher};

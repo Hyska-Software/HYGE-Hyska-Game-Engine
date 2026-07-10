@@ -129,4 +129,60 @@ mod tests {
             2
         );
     }
+
+    #[test]
+    fn eval_returns_values_and_reports_lua_errors() {
+        let engine = ScriptEngine::new(true).expect("Lua should initialize");
+        assert_eq!(
+            engine
+                .eval("return 6 * 7")
+                .expect("expression should run")
+                .as_i64(),
+            Some(42)
+        );
+        let error = engine
+            .eval("this is not valid Lua")
+            .expect_err("invalid Lua should fail");
+        assert!(
+            matches!(error, hyge_core::prelude::HygeError::Parse(message) if message.contains("Lua evaluation"))
+        );
+        assert!(engine.is_sandboxed());
+    }
+
+    #[test]
+    fn entity_api_creates_and_destroys_entities() {
+        let engine = ScriptEngine::new(true).expect("Lua should initialize");
+        let mut world = World::new();
+        engine
+            .execute_with_world(
+                &mut world,
+                r#"
+                    local entity = hyge.world.entity.new()
+                    assert(hyge.world.entity.destroy(entity))
+                "#,
+                0.1,
+            )
+            .expect("entity API should run");
+        assert_eq!(world.entities().len(), 0);
+    }
+
+    #[test]
+    fn missing_component_without_registry_is_reported() {
+        let engine = ScriptEngine::new(true).expect("Lua should initialize");
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        let error = engine
+            .execute_with_world(
+                &mut world,
+                &format!(
+                    "assert(hyge.world.get({}, 'Missing') == nil)",
+                    entity.to_bits()
+                ),
+                0.1,
+            )
+            .expect_err("missing registry should be explicit");
+        assert!(error
+            .to_string()
+            .contains("AppTypeRegistry is not installed"));
+    }
 }

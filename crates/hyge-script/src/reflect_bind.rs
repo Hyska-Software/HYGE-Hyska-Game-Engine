@@ -171,4 +171,24 @@ mod tests {
             7.5
         );
     }
+
+    #[test]
+    fn unknown_component_and_missing_entity_are_rejected() {
+        let lua = Lua::new();
+        let registry_arc = bevy_reflect::TypeRegistryArc::default();
+        registry_arc.write().register::<TestComponent>();
+        let mut world = World::new();
+        world.insert_resource(AppTypeRegistry(registry_arc));
+        let missing = bevy_ecs::entity::Entity::from_raw(99);
+        let error =
+            get_component(&lua, &world, missing, "Missing").expect_err("unknown type should fail");
+        assert!(error.to_string().contains("unknown reflected component"));
+        let value = lua
+            .load("return { value = 1.0 }")
+            .eval()
+            .expect("table should build");
+        let error = set_component(&lua, &mut world, missing, "TestComponent", value)
+            .expect_err("missing entity should fail");
+        assert!(error.to_string().contains("does not exist"));
+    }
 }

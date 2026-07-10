@@ -32,3 +32,24 @@ impl ScriptRef {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ScriptRef;
+
+    #[test]
+    fn script_ref_builder_defaults_to_enabled_without_table() {
+        let script = ScriptRef::new("assets/player.lua");
+        assert_eq!(script.path, "assets/player.lua");
+        assert!(script.enabled);
+        assert_eq!(script.table, None);
+    }
+
+    #[test]
+    fn script_ref_builder_sets_table_and_preserves_path() {
+        let script = ScriptRef::new("assets/player.lua").table("player");
+        assert_eq!(script.path, "assets/player.lua");
+        assert_eq!(script.table.as_deref(), Some("player"));
+        assert!(script.enabled);
+    }
+}

@@ -87,7 +87,7 @@ pub fn install<'scope, 'env>(
         scope.create_function_mut(move |_, entity: u64| {
             let entity = Entity::from_bits(entity);
             if world_for_destroy.borrow_mut().despawn(entity) {
-                Ok(())
+                Ok(true)
             } else {
                 Err(mlua::Error::external(format!(
                     "entity {entity:?} does not exist"

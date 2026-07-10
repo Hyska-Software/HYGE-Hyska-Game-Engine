@@ -37,4 +37,14 @@ mod tests {
         assert!(matches!(values.3, Value::Nil));
         assert!(matches!(values.4, Value::Nil));
     }
+
+    #[test]
+    fn safe_standard_library_remains_available() {
+        let lua = create_sandboxed_lua().expect("sandbox should initialize");
+        let value: i64 = lua
+            .load("return math.floor(3.9) + string.len('hyge')")
+            .eval()
+            .expect("safe libraries should remain available");
+        assert_eq!(value, 7);
+    }
 }

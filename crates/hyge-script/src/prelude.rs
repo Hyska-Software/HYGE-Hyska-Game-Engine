@@ -4,4 +4,5 @@ pub use crate::api::{ScriptAudio, ScriptEventRecord, ScriptEvents, ScriptInput, 
 pub use crate::components::ScriptRef;
 pub use crate::engine::ScriptEngine;
 pub use crate::events::ScriptError;
+pub use crate::hot_reload::{process_script_hot_reload, ScriptState, ScriptWatcher};
 pub use crate::plugin::{ScriptConfig, ScriptPlugin, ScriptRuntime};
