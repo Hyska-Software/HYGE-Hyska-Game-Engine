@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hyge.dev/schemas/editor-protocol-v1.json",
+  "title": "Hyge Editor IPC Envelope",
+  "type": "object",
+  "required": ["protocol_version", "message_id", "message_type", "payload"],
+  "properties": {
+    "protocol_version": { "const": 1 },
+    "message_id": { "type": "string", "minLength": 1 },
+    "message_type": {
+      "type": "string",
+      "enum": [
+        "hello", "hello_ack", "open_project", "open_scene", "save_scene",
+        "select_entities", "edit_component", "add_component", "remove_component",
+        "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab",
+        "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview",
+        "world_snapshot", "selection_changed", "component_changed", "asset_changed",
+        "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available",
+        "command_completed", "engine_error", "server_shutdown"
+      ]
+    },
+    "payload": {},
+    "error": {
+      "type": ["object", "null"],
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  },
+  "additionalProperties": false
+}

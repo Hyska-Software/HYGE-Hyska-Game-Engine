@@ -79,7 +79,7 @@ pub enum ScriptSet {
 /// Editor panels and commands.
 #[derive(SystemSet, Hash, PartialEq, Eq, Clone, Debug)]
 pub enum EditorSet {
-    /// Render editor UI (egui).
+    /// Run editor-service state and protocol systems.
     UI,
     /// Update selection state.
     Selection,

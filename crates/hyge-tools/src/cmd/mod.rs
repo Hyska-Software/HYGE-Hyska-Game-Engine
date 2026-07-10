@@ -9,6 +9,7 @@
 
 pub mod cook;
 pub mod doctor;
+pub mod editor;
 pub mod headless;
 pub mod import;
 pub mod inspect;

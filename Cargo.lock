@@ -1634,9 +1634,21 @@ dependencies = [
 name = "hyge-editor"
 version = "0.1.0"
 dependencies = [
- "egui",
  "hyge-core",
- "hyge-render",
+ "hyge-editor-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "hyge-editor-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1761,6 +1773,7 @@ dependencies = [
  "clap",
  "hyge-asset",
  "hyge-core",
+ "hyge-editor",
  "image",
  "tracing",
 ]

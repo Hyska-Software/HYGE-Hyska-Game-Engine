@@ -32,8 +32,9 @@ This directory contains the Architecture Decision Records for the Hyge engine. E
 | [0010](0010-kira-audio.md) | kira + spatial 3D + HRTF optional | Accepted | Audio |
 | [0011](0011-windowing-input.md) | winit + gilrs + raw input + TOML | Accepted | Platform |
 | [0012](0012-networking-deferred.md) | Networking out of scope for v0.1 | Accepted | Scope |
-| [0013](0013-full-editor-v0.1.md) | Full visual editor in v0.1 | Accepted | Editor |
+| [0013](0013-full-editor-v0.1.md) | Full visual editor in v0.1 | Superseded by ADR-0015 | Editor |
 | [0014](0014-stable-msrv-1.80.md) | Stable only, MSRV 1.80 | Accepted | Build |
+| [0015](0015-python-qt-editor.md) | External PySide6/QML editor | Accepted | Editor |
 
 ## Conventions
 

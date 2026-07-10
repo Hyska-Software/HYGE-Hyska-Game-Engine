@@ -13,6 +13,7 @@ tracing = { workspace = true }
 blake3 = { workspace = true }
 hyge-core = { workspace = true }
 hyge-asset = { workspace = true }
+hyge-editor = { workspace = true }
 # `image` is used by the `import` subcommand to decode
 # standalone PNG / JPEG / EXR sources for KTX2 transcode (R-036).
 # We enable png + jpeg as the common formats; EXR is opt-in via

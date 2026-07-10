@@ -40,8 +40,7 @@ pub struct AppConfig {
     /// Lua scripting configuration.
     pub script: ScriptConfig,
 
-    /// Editor configuration (the editor is a separate window; its
-    /// enabled flag here is for the in-process editor in M6+).
+    /// Editor-service configuration. The Qt frontend is an external process.
     pub editor: EditorConfig,
 }
 
@@ -186,10 +185,9 @@ impl Default for ScriptConfig {
     }
 }
 
-/// Editor configuration. The editor is a separate window in M6+.
+/// Editor-service configuration for the external PySide6 frontend.
 #[derive(Clone, Debug, Default)]
 pub struct EditorConfig {
-    /// Whether the editor is enabled (the in-process editor, not the
-    /// game window).
+    /// Whether the editor service is enabled for this application.
     pub enabled: bool,
 }

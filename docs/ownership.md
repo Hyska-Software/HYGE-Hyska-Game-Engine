@@ -33,7 +33,7 @@ A **group** is a unit of responsibility that owns one or more crates. Groups are
 | `input` | `hyge-input` | `Action<T>`, TOML binding parser, hot-reload, edge detection. | TOML schema stable; hot-reload idempotent. |
 | `script` | `hyge-script` | `mlua` engine, sandbox, `bevy_reflect` bindings, hot-reload, `on_reload` hook. | Sandbox enforced; Lua FFI overhead profiled. |
 | `app` | `hyge-app` | `AppBuilder`, `AppConfig`, `default_plugins`. The only crate that knows the full graph. | Wiring; minimal logic. |
-| `editor` | `hyge-editor` | `egui` panels (viewport, hierarchy, inspector, content browser, asset graph, console, profiler), undo/redo, docking, theme. | Reflect-driven inspector correctness. |
+| `editor` | `hyge-editor` + `hyge-editor-protocol` | Rust editor service, versioned IPC, snapshots, commands, undo/redo and integration contracts for the PySide6/QML frontend. | Reflect-driven inspector and protocol correctness. |
 | `tools` | `hyge-tools` | CLI (`import`, `cook`, `headless`, `inspect`, `serve`, `doctor`). | Golden output for known inputs. |
 | `tooling` | `hyge-runtime-test` | Test harness: `create_test_renderer`, `capture_frame`, `assert_image_matches`, `hash_image`. | Used by every crate that needs GPU tests. |
 | `examples` | `examples/hyge-sandbox` | The end-to-end demo. Smoke-tests the whole engine. | Builds clean; runs without warnings. |

@@ -107,7 +107,7 @@ These are binding. Any deviation requires a new ADR in `docs/adr/`.
 | 10 | Audio | `kira` 0.9+ + spatial 3D + streaming + HRTF optional + bus-by-category. | ADR-0010 |
 | 11 | Windowing/Input | `winit` 0.30 + `gilrs` 0.10+ + `Action<T>` + TOML bindings + raw input (Windows) + hot-reload. | ADR-0011 |
 | 12 | Networking | Out of scope for v0.1. v0.2: `hyge-net` with `quinn`/QUIC. | ADR-0012 |
-| 13 | Editor | CLI tools + `egui` debug overlay + **full visual editor** in v0.1. | ADR-0013 |
+| 13 | Editor | CLI tools + optional `egui` debug overlay + external PySide6/QML editor in v0.1. | ADR-0015 |
 | 14 | Build | `cargo` workspace, `stable` only. No nightly. MSRV 1.80. | ADR-0014 |
 
 ---
@@ -168,7 +168,8 @@ hyge/                                     # workspace root
 | `hyge-input` | `Action<T>`, TOML bindings, event translation, hot-reload. | `toml`, `serde`, `notify` |
 | `hyge-script` | mlua runtime, reflect bindings, script hot-reload, sandbox. | `mlua`, `bevy_reflect` |
 | `hyge-app` | `App` builder, plugin assembly, runtime orchestration. | `hyge-ecs`, `hyge-window`, `hyge-asset`, `hyge-render`, `hyge-render-graph`, `hyge-scene`, `hyge-physics`, `hyge-audio`, `hyge-input`, `hyge-script` |
-| `hyge-editor` | egui-based editor: viewport, hierarchy, inspector, browser, console, profiler, undo/redo. | `egui`, `egui_dock`, `egui_tiles`, `hyge-app` |
+| `hyge-editor` | Rust editor service: protocol, snapshots, commands, undo/redo and engine integration. | `hyge-editor-protocol`, `hyge-app`, `hyge-scene`, `hyge-render` |
+| `hyge-editor-protocol` | Versioned JSON framing and message types shared with the Qt frontend. | `serde`, `serde_json` |
 | `hyge-tools` | CLI: `import`, `cook`, `headless`, `inspect`, `serve`, `doctor`. | `clap`, `hyge-asset`, `hyge-scene`, `hyge-render`, `hyge-app` |
 | `hyge-runtime-test` | Headless wgpu test harness (no surface); reusable assertion utilities. | `wgpu`, `image`, `hyge-render` |
 
@@ -846,38 +847,25 @@ hyge-app/src/
 
 ### 6.13 `hyge-editor`
 
-**Purpose:** egui-based editor with all required panels.
+**Purpose:** Rust editor service consumed by the external PySide6/QML editor.
 
-**Public surface (sketch):**
+**Public service surface (sketch):**
 ```rust
-pub struct EditorPlugin;
-impl HygePlugin for EditorPlugin { /* registers EditorUi resource + set */ }
-
-pub struct EditorUi { pub panel_state: PanelState, pub selection: Selection, pub clipboard: Clipboard, pub history: CommandHistory }
-pub struct Selection { pub entities: Vec<Entity> }
-pub struct CommandHistory { undo: Vec<Box<dyn Command>>, redo: Vec<Box<dyn Command>> }
-pub trait Command { fn apply(&mut self, world: &mut World, ui: &mut EditorUi); fn revert(&mut self, world: &mut World, ui: &mut EditorUi); fn name(&self) -> &str; }
-
-pub enum PanelKind { Viewport, Hierarchy, Inspector, ContentBrowser, AssetGraph, Console, Profiler, RenderDebug }
+pub struct EditorServer;
+pub struct EditorServerConfig { pub bind_address: String, pub session_token: String }
+pub struct EditorState { pub selected_entities: Vec<String>, pub project: Option<String>, pub scene: Option<String> }
 ```
 
 **File layout:**
 ```
 hyge-editor/src/
   lib.rs
-  plugin.rs
-  ui.rs
+  server.rs
+  state.rs
+  commands.rs
+  snapshots.rs
   viewport.rs
-  hierarchy.rs
-  inspector.rs
-  browser.rs
-  asset_graph.rs
-  console.rs
-  profiler.rs
-  render_debug.rs
-  undo_redo.rs
   hot_reload.rs
-  theme.rs
   prelude.rs
 ```
 
@@ -1252,11 +1240,11 @@ Fixed-timestep physics + integer-hash stable iteration over ECS archetypes = rep
 
 ---
 
-## 12. Editor (`hyge-editor`)
+## 12. Editor (`hyge-editor` + PySide6 frontend)
 
 ### 12.1 Layout
 
-- `egui_dock::DockArea` with default layout (savable):
+- Qt Quick/QML layout with default layout (savable):
   - Left: Hierarchy, ContentBrowser.
   - Right: Inspector.
   - Bottom: Console, Profiler, AssetGraph.
@@ -1309,7 +1297,7 @@ For each `Component` on selected entity:
 ### 12.8 Profiler panel
 
 - Live graph of frame time, GPU time, draw calls, instance count, memory.
-- Sparkline using `egui::plot::Plot`.
+- Sparkline rendered by the Qt frontend from profiler samples.
 
 ### 12.9 Console
 
@@ -1320,7 +1308,7 @@ For each `Component` on selected entity:
 ### 12.10 Theme
 
 - Dark by default, light toggle.
-- Uses `egui_theme` palette aligned with Hyge brand.
+- Uses a QML theme aligned with Hyge brand.
 
 ---
 
@@ -1434,13 +1422,13 @@ hyge-tools doctor path/to/project/
 | `wgpu` mesh shader / advanced features unavailable | Cannot use bleeding-edge GPU features | Medium | Design abstraction so mesh shader backend is swappable when `wgpu` adds it; v0.1 uses compute meshlet culling |
 | `rapier3d` build time | Slows CI | High | Feature flag; pre-built artifact in CI cache; consider `rapier` 0.20+ parallel improvements |
 | BLAKE3 import performance on large projects | Slow iteration | Medium | Incremental import: only re-bake changed glTFs; parallel bake on worker pool |
-| `egui` editor + render thread sync | Stale state in inspector | Medium | Editor reads from same `FrameSnapshot` as render; refresh tick = render tick |
+| External Qt editor + render service sync | Stale state in inspector | Medium | Backend publishes versioned snapshots from the same engine state used by render |
 | Lua FFI overhead | Hot path regression | Medium | Cache reflected lookups in Lua registry; avoid `Reflect::reflect_*` per-call; expose typed accessors in scripts |
 | Raw input on Linux | Loses high-precision mouse | High | Use `evdev` directly behind same `RawInput` trait; design abstraction so backend is swappable |
 | Clustered forward memory for light grid | GPU memory pressure | Low | Z clusters × XY tiles sized to scene scale; configurable; default 16×16×16 keeps it small |
 | Hot-reload state loss | Bad DX | High | `PersistOnReload` component + script-side `on_reload(old_state)` hook + state diff in scene reload |
 | SQLite contention in tests | Flaky CI | Medium | `#[serial_test::serial]` on DB-touching tests; or migrate to `redb` (single-writer MVCC) |
-| Editor docking layout persistence | Annoying UX | Low | Serialize `egui_dock::Tree` to JSON, save in `user_data/editor_layout.json` |
+| Editor docking layout persistence | Annoying UX | Low | Serialize the QML layout model to JSON, save in `user_data/editor_layout.json` |
 | WGSL portability across `wgpu` backends | Shader compile errors per backend | Medium | Shader validation per backend in CI matrix; naga validator run in pre-CI hook |
 | `kira` HRTF dataset licensing | Cannot ship HRTF | Low | Bundle KEMAR-derived (public domain) or skip HRTF (feature default off) |
 | Profiling overhead in dev | Slows iteration | Low | Tracy gated by feature flag; off in release |

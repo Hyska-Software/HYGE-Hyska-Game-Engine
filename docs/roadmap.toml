@@ -1,6 +1,6 @@
 version = 1
 title = "Hyge Engine Implementation Roadmap"
-updated_at = "2026-06-29T13:42Z"
+updated_at = "2026-07-10T00:00Z"
 status_scale = ["not_started", "in_progress", "blocked", "complete"]
 priority_scale = ["P0", "P1", "P2", "P3"]
 risk_scale = ["low", "medium", "high"]
@@ -9,6 +9,9 @@ risk_scale = ["low", "medium", "high"]
 source_architecture = "docs/architecture.md"
 source_agents = "AGENTS.md"
 target_state = "v0.1.0 — production-ready 3D game engine with full editor"
+editor_architecture = "Rust editor service + versioned loopback IPC + PySide6/QML frontend"
+editor_completion_gate = "R-106"
+release_phase = "phase_13"
 msrv = "1.80"
 channel = "stable only (no nightly)"
 
@@ -54,11 +57,31 @@ goal = "`hyge-physics` (rapier3d), `hyge-audio` (kira + HRTF), `hyge-input` (Act
 
 [[phases]]
 id = "phase_8"
-name = "Full Visual Editor"
-goal = "`hyge-editor` with viewport, hierarchy, inspector (reflect-driven), content browser, asset graph, console, profiler, undo/redo, docking persistence."
+name = "Editor Foundation and Service"
+goal = "Establish the editor process contract, Rust service lifecycle, project/session model, protocol validation and engine-facing snapshots without any fake duplicated ECS state."
 
 [[phases]]
 id = "phase_9"
+name = "Editor Data Model and Commands"
+goal = "Expose real scene hierarchy, reflection metadata, assets, diagnostics, selection and transactional undo/redo through the Rust editor service."
+
+[[phases]]
+id = "phase_10"
+name = "Editor Viewport and Render Bridge"
+goal = "Render the real engine scene through the existing render graph and transport frames, camera input, selection and gizmos to the external editor."
+
+[[phases]]
+id = "phase_11"
+name = "PySide6/QML Editor Frontend"
+goal = "Build the complete Qt Quick desktop experience: hierarchy, inspector, viewport, assets, graph, console, profiler, theme and layout persistence."
+
+[[phases]]
+id = "phase_12"
+name = "Editor Integration, Recovery and Distribution"
+goal = "Prove the editor against real projects, hot-reload, persistence, failure/reconnect paths and packaged Windows execution before release."
+
+[[phases]]
+id = "phase_13"
 name = "Polish Sandbox mdbook Performance Release"
 goal = "`hyge-sandbox` example, headless screenshot tool, mdbook site (4 tutorials), performance baseline (144 FPS at 1080p on RTX 3060), v0.1.0 release."
 
@@ -75,11 +98,11 @@ priority = "P0"
 status = "complete"
 risk = "medium"
 dependencies = []
-summary = "Create decision records for the 14 closed architectural decisions in docs/architecture.md §4."
+summary = "Create decision records for the closed architectural decisions in docs/architecture.md §4."
 completed_at = "2026-06-29"
-completion_notes = "Created docs/adr/ with README index + 14 ADRs (0001..0014), each with Status, Context, Decision, Consequences, Alternatives Considered, and References sections."
+completion_notes = "Created docs/adr/ with README index + ADRs 0001..0015. ADR-0013 is superseded by ADR-0015; each record has Status, Context, Decision, Consequences, Alternatives Considered, and References sections."
 acceptance = [
-  "docs/adr/ exists with at least 14 files",
+  "docs/adr/ exists with at least 15 files",
   "ADR-0001 covers wgpu choice with alternatives considered (ash, raw DX12)",
   "ADR-0002 covers bevy_ecs choice with alternatives considered (shipyard, custom)",
   "ADR-0003 covers render stack (bindless + render graph + clustered forward)",
@@ -94,6 +117,7 @@ acceptance = [
   "ADR-0012 covers networking out-of-scope decision (v0.2 plan)",
   "ADR-0013 covers editor scope (full editor in v0.1)",
   "ADR-0014 covers build constraints (stable only, MSRV 1.80)",
+  "ADR-0015 covers the external Rust service + PySide6/QML editor",
   "Each ADR has Status, Context, Decision, Consequences, Alternatives sections"
 ]
 
@@ -1290,6 +1314,7 @@ acceptance = [
   "HRTF default off; HRIR sphere loaded at runtime via HrtfMode::from_file",
   "test: distance attenuation matches expected (mocked)",
   "test: HrtfMode defaults to Disabled, init matches feature flag, missing HRIR file returns Disabled, oddio scene creates"
+]
 
 [[items]]
 id = "R-074"
@@ -1397,199 +1422,356 @@ acceptance = [
 ]
 
 # =============================================================================
-# PHASE 8 — Full Visual Editor
+# PHASE 8 — Editor Foundation and Service
 # =============================================================================
 
 [[items]]
 id = "R-080"
-title = "hyge-editor crate skeleton (egui + docking)"
+title = "Rust editor service and versioned IPC"
 phase = "phase_8"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "in_progress"
 risk = "medium"
 dependencies = ["R-013"]
-summary = "Create hyge-editor with egui + egui_dock + egui_tiles, EditorPlugin, default layout."
+summary = "Create the Rust editor service, protocol schema, authenticated loopback server and optional PySide6 launcher."
 acceptance = [
-  "crates/hyge-editor/Cargo.toml declares deps on egui, egui_dock, egui_tiles, hyge-app, hyge-ecs, hyge-render, hyge-scene, hyge-core",
-  "EditorPlugin implements HygePlugin",
-  "EditorUi resource with panel_state, selection, clipboard, history",
-  "default layout per docs/architecture.md §12.1",
-  "test: editor plugin loads in headless mode without panicking"
+  "protocol/editor.schema.json defines the versioned envelope and message names",
+  "hyge-editor-protocol provides length-prefixed JSON framing with size/version validation",
+  "hyge-editor exposes EditorServer with token-authenticated handshake",
+  "hyge-tools editor parses project, port and optional frontend arguments",
+  "test: valid/invalid handshake and protocol round-trip pass"
 ]
 
 [[items]]
 id = "R-081"
-title = "Viewport panel"
-phase = "phase_8"
-owner = "editor"
-priority = "P0"
-status = "not_started"
-risk = "high"
-dependencies = ["R-080", "R-043"]
-summary = "Editor viewport running the same render graph with editor camera + gizmos."
-acceptance = [
-  "owns a wgpu::Surface (or sub-region of main surface)",
-  "runs the same RenderGraph as runtime with EditorCamera",
-  "selection outline (stencil + outline pass)",
-  "gizmos: translate, rotate, scale (per-entity handles)",
-  "test: viewport renders a scene, selection outline visible on selected entity (snapshot)"
-]
-
-[[items]]
-id = "R-082"
-title = "Hierarchy panel"
-phase = "phase_8"
-owner = "editor"
-priority = "P0"
-status = "not_started"
-risk = "low"
-dependencies = ["R-080", "R-061"]
-summary = "Tree view of World, drag-drop to reparent."
-acceptance = [
-  "tree from Parent/Children components, Name for labels",
-  "drag-drop to reparent via Command::Reparent",
-  "right-click context menu (add component, remove, duplicate, delete)",
-  "test: reparent entity, assert hierarchy updated, undo restores"
-]
-
-[[items]]
-id = "R-083"
-title = "Inspector panel (reflect-driven)"
-phase = "phase_8"
-owner = "editor"
-priority = "P0"
-status = "not_started"
-risk = "high"
-dependencies = ["R-080", "R-061"]
-summary = "Reflect-driven component editor; auto-generates fields from TypeRegistry."
-acceptance = [
-  "reads TypeRegistry, for each component of selected entity generates field editor from Reflect::ReflectRef",
-  "f32/i32/u32/bool -> slider/drag/check",
-  "Vec3/Quat/Mat4 -> multi-slider with gizmo",
-  "String -> text edit",
-  "Handle<A> -> drag-drop thumbnail + open-in-browser button",
-  "nested Reflect -> collapsible group",
-  "modifications emit Command::EditComponent for undo/redo",
-  "test: modify a component value via inspector, undo, assert value restored"
-]
-
-[[items]]
-id = "R-084"
-title = "Content browser panel"
+title = "Protocol schema, compatibility and session lifecycle"
 phase = "phase_8"
 owner = "editor"
 priority = "P0"
 status = "not_started"
 risk = "medium"
-dependencies = ["R-080", "R-031"]
-summary = "File tree of assets/, thumbnails, double-click to open."
+dependencies = ["R-080"]
+summary = "Make the IPC contract independently validatable, version-negotiated, reconnectable and safe to evolve."
 acceptance = [
-  "file tree of assets/",
-  "thumbnails via PreviewRenderJob (headless renderer captures 256x256)",
-  "double-click: select; on .hyge-world open scene; on .hyge-prefab instantiate; on .hyge-mesh preview",
-  "test: open the content browser, assert file tree populated"
+  "protocol/editor.schema.json validates every request, response and event envelope",
+  "handshake rejects incompatible versions and invalid session tokens",
+  "requests have correlation ids, timeout behavior and explicit error envelopes",
+  "reconnect restores project/session identity without duplicating engine state",
+  "test: malformed, oversized, unauthorized and incompatible messages are rejected"
+]
+
+[[items]]
+id = "R-082"
+title = "Editor project and session lifecycle"
+phase = "phase_8"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-080", "R-081"]
+summary = "Open projects/scenes through the engine, own session state, report readiness and shut down cleanly."
+acceptance = [
+  "open_project and open_scene use the real project and world loaders",
+  "service reports loading, ready, degraded and failed states",
+  "save_scene is atomic and reports the persisted revision",
+  "server shutdown closes the frontend child and releases the project lock",
+  "test: open/save/reconnect/close lifecycle leaves no orphan session"
+]
+
+[[items]]
+id = "R-083"
+title = "Engine snapshots and reflection catalog"
+phase = "phase_8"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-080", "R-061"]
+summary = "Expose real ECS hierarchy, selection and TypeRegistry metadata as immutable editor snapshots."
+acceptance = [
+  "hierarchy snapshot is derived from real Parent/Children/Name components",
+  "component catalog is derived from AppTypeRegistry/TypeRegistry",
+  "reflected values have stable type ids, field paths and serialization rules",
+  "snapshot revisions allow the frontend to detect stale edits",
+  "test: snapshot contains a loaded scene entity and registered reflected fields"
+]
+
+[[items]]
+id = "R-084"
+title = "Rust editor command model and transactional history"
+phase = "phase_9"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-082", "R-083"]
+summary = "Implement engine-owned selection, commands and undo/redo with stale-revision protection."
+acceptance = [
+  "commands cover EditComponent, Reparent, Instantiate, Destroy, Duplicate, AddComponent and RemoveComponent",
+  "every command has apply/revert and an explicit failure result",
+  "stale snapshot revisions are rejected without mutating the world",
+  "undo/redo clears redo after a new edit and survives scene save",
+  "test: mixed command sequence with undo five and redo three reaches expected ECS state"
 ]
 
 [[items]]
 id = "R-085"
-title = "Asset graph panel"
-phase = "phase_8"
+title = "Hierarchy, selection and scene editing backend"
+phase = "phase_9"
 owner = "editor"
 priority = "P1"
 status = "not_started"
-risk = "low"
-dependencies = ["R-084", "R-031"]
-summary = "Visualization of the BLAKE3 dependency graph."
+risk = "medium"
+dependencies = ["R-083", "R-084"]
+summary = "Implement hierarchy queries, multi-selection and scene edit commands against the real world."
 acceptance = [
-  "egui::Graph view of the BLAKE3 dependency DAG",
-  "pan/zoom, click to inspect",
-  "highlights cascade when an asset is selected",
-  "test: render the asset graph for a known scene, assert nodes match expected count"
+  "selection supports single and shift multi-select with stable entity ids",
+  "reparent validates cycles and updates Parent/Children consistently",
+  "duplicate/instantiate/destroy preserve scene invariants",
+  "test: hierarchy changes are reflected in a fresh snapshot and undo restores it"
 ]
 
 [[items]]
 id = "R-086"
-title = "Console + Profiler panels"
-phase = "phase_8"
+title = "Asset, console and profiler data services"
+phase = "phase_9"
 owner = "editor"
 priority = "P0"
 status = "not_started"
-risk = "low"
-dependencies = ["R-080", "R-025"]
-summary = "Console (tracing ring buffer) + Profiler (frame stats sparkline)."
+risk = "medium"
+dependencies = ["R-031", "R-025", "R-084"]
+summary = "Expose assets, dependency graph, tracing lines and frame telemetry through bounded snapshots."
 acceptance = [
-  "Console: ring buffer of last 1000 log lines, filter by level/target, click to navigate",
-  "Profiler: live sparkline of frame time, GPU time, draw calls, instance count, memory (egui::plot::Plot)",
-  "test: emit a tracing event, assert it appears in console buffer"
+  "asset tree and BLAKE3 dependency graph are sourced from AssetDb",
+  "preview jobs have cancellation, bounded memory and deterministic output paths",
+  "console ring buffer retains the last 1000 lines with level/target filters",
+  "profiler samples include frame, GPU, draw, instance and memory metrics",
+  "test: asset graph, tracing event and profiler sample round-trip through IPC"
 ]
 
 [[items]]
 id = "R-087"
-title = "Selection and undo/redo"
-phase = "phase_8"
+title = "Editor viewport render bridge"
+phase = "phase_10"
 owner = "editor"
 priority = "P0"
 status = "not_started"
-risk = "low"
-dependencies = ["R-080"]
-summary = "Selection resource, command stack, Ctrl+Z / Ctrl+Y bindings."
+risk = "high"
+dependencies = ["R-043", "R-083"]
+summary = "Connect editor camera and viewport extraction to the same runtime RenderGraph without leaking renderer ownership."
 acceptance = [
-  "Selection resource: Vec<Entity>, multi-select with shift",
-  "CommandHistory with undo/redo Vec<Box<dyn Command>>",
-  "Commands: EditComponent, Reparent, Instantiate, Destroy, Duplicate, AddComponent, RemoveComponent",
-  "Ctrl+Z pops undo, applies Command::revert, pushes to redo",
-  "Ctrl+Y opposite",
-  "test: 10 commands, undo 5, redo 3, assert state correct at each step"
+  "viewport uses the same extracted scene data and RenderGraph passes as runtime",
+  "editor camera is independent from the game camera and persists per session",
+  "offscreen target supports resize and readback without blocking ECS mutation",
+  "test: known scene renders through the editor path and produces a deterministic frame"
 ]
 
 [[items]]
 id = "R-088"
-title = "Editor camera gizmos + theme + docking persistence"
-phase = "phase_8"
+title = "Viewport frame transport and input bridge"
+phase = "phase_10"
 owner = "editor"
 priority = "P1"
 status = "not_started"
-risk = "low"
-dependencies = ["R-081"]
-summary = "Camera gizmos (translate/rotate/scale handles), dark theme, docking layout save/load."
+risk = "high"
+dependencies = ["R-087", "R-080"]
+summary = "Deliver viewport frames and editor input through a shared-memory ring plus versioned control messages."
 acceptance = [
-  "gizmos: translate (3-axis arrows), rotate (3 circles), scale (3 cubes)",
-  "dark theme default, light toggle",
-  "docking layout serialized to user_data/editor_layout.json",
-  "on editor start, layout restored; on close, layout saved",
-  "test: serialize + deserialize dock tree, assert equality"
+  "ring buffer publishes frame id, dimensions, pixel format and synchronization state",
+  "consumer detects dropped frames and reconnects without corrupting memory",
+  "mouse, keyboard and camera commands are rate-limited and revisioned",
+  "test: producer/consumer stress test preserves frame headers and shutdown safety"
 ]
 
 [[items]]
 id = "R-089"
-title = "M6 smoke test: editor + hot-reload of scene"
-phase = "phase_8"
+title = "Qt Quick application shell and model adapters"
+phase = "phase_11"
 owner = "editor"
 priority = "P0"
 status = "not_started"
-risk = "low"
-dependencies = ["R-088"]
-summary = "M6 Definition of Done: editor renders scene, hierarchy/inspector edit live, scene hot-reload preserves PersistOnReload."
+risk = "medium"
+dependencies = ["R-083", "R-086", "R-088"]
+summary = "Create the PySide6/QML shell and adapters for hierarchy, inspector, assets, viewport, console and profiler."
 acceptance = [
-  "viewport rendering runtime scene with editor camera",
-  "hierarchy + inspector editing components live (via Reflect)",
-  "content browser shows assets/ with thumbnails",
-  "hot-reload of .hyge-world preserves PersistOnReload entities",
-  "undo/redo across all editor actions",
-  "profiler panel pulling frame stats from runtime",
-  "docking layout persists across sessions",
-  "AGENTS.md §5.2 M6 DoD checklist satisfied"
+  "QApplication and QQmlApplicationEngine start against the Rust service",
+  "QAbstractItemModel adapters expose snapshots without duplicating ECS ownership",
+  "viewport consumes frame headers and reports dropped/reconnected frames",
+  "frontend tests run without a GPU using a fake protocol server",
+  "test: packaged-free shell connects, renders models and closes cleanly"
+]
+
+[[items]]
+id = "R-098"
+title = "Qt hierarchy and reflection inspector models"
+phase = "phase_11"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-089", "R-084"]
+summary = "Implement QML-facing hierarchy and inspector models backed by immutable Rust snapshots and command responses."
+acceptance = [
+  "hierarchy supports expand/collapse, selection, multi-selection and drag-drop reparent",
+  "inspector renders primitive, vector, quaternion, string, handle and nested reflected values",
+  "stale edits show a conflict and refresh instead of overwriting newer engine state",
+  "test: fake IPC server drives model updates and command failures deterministically"
+]
+
+[[items]]
+id = "R-099"
+title = "Qt assets, graph, console and profiler panels"
+phase = "phase_11"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-089", "R-086"]
+summary = "Complete the operational panels required for daily engine development."
+acceptance = [
+  "content browser lists assets and opens worlds, prefabs and mesh previews",
+  "asset graph supports pan, zoom, selection and dependency highlighting",
+  "console filters 1000 retained lines by level and target",
+  "profiler charts frame/GPU/draw/instance/memory samples",
+  "test: fixture project populates every panel from protocol snapshots"
+]
+
+[[items]]
+id = "R-100"
+title = "Qt theme, layout persistence and editor input"
+phase = "phase_11"
+owner = "editor"
+priority = "P1"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-089", "R-098"]
+summary = "Make the editor usable as a persistent desktop tool rather than a demo shell."
+acceptance = [
+  "dark theme is default with light-theme toggle",
+  "panel layout persists atomically in user_data/editor_layout.json",
+  "keyboard shortcuts cover save, undo, redo, focus, frame selection and play/editor mode",
+  "focus loss stops camera motion and clears transient input",
+  "test: layout and shortcut state survive restart"
+]
+
+[[items]]
+id = "R-101"
+title = "Scene hot-reload and PersistOnReload integration"
+phase = "phase_12"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-082", "R-084", "R-098"]
+summary = "Connect FileWatcher/world diff/reinstantiation to the live editor session without losing persistent state."
+acceptance = [
+  "modified .hyge-world files are detected and diffed by the Rust scene path",
+  "changed prefab instances reload without restarting the service",
+  "PersistOnReload entities/components are preserved by identity",
+  "unsaved editor changes produce an explicit conflict decision",
+  "test: real fixture reload preserves persistent state and refreshes snapshots"
+]
+
+[[items]]
+id = "R-102"
+title = "Editor reconnect, failure recovery and shutdown"
+phase = "phase_12"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-081", "R-088", "R-089"]
+summary = "Define behavior for backend crashes, dropped frames, broken projects, reconnects and clean shutdown."
+acceptance = [
+  "frontend shows disconnected/degraded state and retries with bounded backoff",
+  "backend rejects stale session mutations after reconnect",
+  "shared-memory resources are released after producer or consumer death",
+  "project/scene errors are actionable and do not panic the service",
+  "test: kill/restart backend during an active session and recover safely"
+]
+
+[[items]]
+id = "R-103"
+title = "Real project end-to-end editor workflow"
+phase = "phase_12"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-098", "R-099", "R-100", "R-101", "R-102"]
+summary = "Prove the complete editor against a checked-in scene and asset fixture, not mocks alone."
+acceptance = [
+  "launches backend and PySide6 frontend from hyge-tools",
+  "opens a real .hyge-world and renders it through the engine renderer",
+  "selects an entity, edits Transform through Reflect, and observes the viewport change",
+  "undoes/redoes the edit and saves the scene",
+  "hot-reloads the scene while preserving PersistOnReload",
+  "captures protocol trace, screenshot and persisted output as evidence"
+]
+
+[[items]]
+id = "R-104"
+title = "PySide6/QML packaging and Windows distribution"
+phase = "phase_12"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "medium"
+dependencies = ["R-103"]
+summary = "Produce a reproducible editor package with Python, Qt plugins, QML resources and the Rust backend launcher."
+acceptance = [
+  "pyproject.toml pins the supported Python/PySide6 range",
+  "pyside6-project build succeeds from a clean virtual environment",
+  "pyside6-deploy produces a Windows standalone artifact",
+  "packaged editor locates QML, Qt plugins and hyge-tools without PATH assumptions",
+  "test: clean-machine smoke script launches the packaged editor and connects"
+]
+
+[[items]]
+id = "R-105"
+title = "Editor documentation, fixtures and diagnostics"
+phase = "phase_12"
+owner = "docs"
+priority = "P1"
+status = "not_started"
+risk = "low"
+dependencies = ["R-103"]
+summary = "Document the editor workflow and keep deterministic projects/traces for future regressions."
+acceptance = [
+  "Tutorial covers install, launch, open scene, edit component, undo/redo and hot-reload",
+  "fixture project contains a hierarchy, reflected components, assets and PersistOnReload entity",
+  "protocol trace format and failure diagnostics are documented",
+  "test: documented commands work from a clean checkout"
+]
+
+[[items]]
+id = "R-106"
+title = "Editor integrated Definition of Done"
+phase = "phase_12"
+owner = "editor"
+priority = "P0"
+status = "not_started"
+risk = "high"
+dependencies = ["R-103", "R-104", "R-105"]
+summary = "Close the editor milestone only after code, frontend, renderer, packaging and target-perspective evidence agree."
+acceptance = [
+  "all editor phases 8-12 P0 acceptance items are complete",
+  "Rust workspace tests, clippy and documentation gates pass",
+  "Python protocol/model tests and packaged frontend smoke test pass",
+  "real viewport screenshot, protocol trace and saved scene are retained as evidence",
+  "no duplicate egui editor path remains in roadmap, architecture or ownership docs",
+  "AGENTS.md §5.2 M6 DoD checklist is updated with the actual evidence paths"
 ]
 
 # =============================================================================
-# PHASE 9 — Polish Sandbox mdbook Performance Release
+# PHASE 13 — Polish Sandbox mdbook Performance Release
 # =============================================================================
 
 [[items]]
 id = "R-090"
 title = "hyge-runtime-test crate"
-phase = "phase_9"
+phase = "phase_13"
 owner = "tooling"
 priority = "P0"
 status = "not_started"
@@ -1607,7 +1789,7 @@ acceptance = [
 [[items]]
 id = "R-091"
 title = "Headless screenshot tool (hyge-tools headless)"
-phase = "phase_9"
+phase = "phase_13"
 owner = "tools"
 priority = "P0"
 status = "not_started"
@@ -1624,7 +1806,7 @@ acceptance = [
 [[items]]
 id = "R-092"
 title = "Snapshot tests for renderer output"
-phase = "phase_9"
+phase = "phase_13"
 owner = "render"
 priority = "P0"
 status = "not_started"
@@ -1642,17 +1824,17 @@ acceptance = [
 [[items]]
 id = "R-093"
 title = "examples/hyge-sandbox full demo"
-phase = "phase_9"
+phase = "phase_13"
 owner = "examples"
 priority = "P0"
 status = "not_started"
 risk = "low"
-dependencies = ["R-088"]
+dependencies = ["R-106"]
 summary = "Full demo: PBR scene with IBL, shadows, post, animation, physics, Lua AI, audio, editor-driven."
 acceptance = [
   "examples/hyge-sandbox/ is a binary crate",
   "loads a .hyge-world with a complex scene",
-  "demonstrates every system from phases 1-8",
+  "demonstrates every system from phases 1-12",
   "runs without warnings on cargo build --release",
   "smoke test: cargo run --example hyge-sandbox -p hyge-sandbox --release boots and renders"
 ]
@@ -1660,7 +1842,7 @@ acceptance = [
 [[items]]
 id = "R-094"
 title = "mdbook documentation site"
-phase = "phase_9"
+phase = "phase_13"
 owner = "docs"
 priority = "P0"
 status = "not_started"
@@ -1680,7 +1862,7 @@ acceptance = [
 [[items]]
 id = "R-095"
 title = "Performance baseline + criterion benchmarks"
-phase = "phase_9"
+phase = "phase_13"
 owner = "tooling"
 priority = "P0"
 status = "not_started"
@@ -1697,7 +1879,7 @@ acceptance = [
 [[items]]
 id = "R-096"
 title = "v0.1.0 release tag and GitHub release"
-phase = "phase_9"
+phase = "phase_13"
 owner = "release"
 priority = "P0"
 status = "not_started"
@@ -1715,7 +1897,7 @@ acceptance = [
 [[items]]
 id = "R-097"
 title = "M7 final DoD: 144 FPS at 1080p on RTX 3060"
-phase = "phase_9"
+phase = "phase_13"
 owner = "release"
 priority = "P0"
 status = "not_started"

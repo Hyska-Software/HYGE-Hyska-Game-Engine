@@ -26,7 +26,7 @@ use crate::cmd;
 #[command(
     name = "hyge-tools",
     version,
-    about = "Hyge engine CLI: cook assets, render headless, inspect hashes, serve projects, diagnose projects.",
+    about = "Hyge engine CLI: cook assets, run the editor service, render headless, inspect hashes, serve projects, diagnose projects.",
     long_about = None
 )]
 pub struct Cli {
@@ -126,6 +126,20 @@ pub enum Cmd {
         port: u16,
     },
 
+    /// Start the Rust editor service for the PySide6 frontend.
+    Editor {
+        /// Path to the Hyge project root.
+        project: PathBuf,
+
+        /// TCP port for the loopback editor protocol.
+        #[arg(long, default_value_t = 3765)]
+        port: u16,
+
+        /// Optional Python frontend entry point to launch as a child process.
+        #[arg(long)]
+        frontend: Option<PathBuf>,
+    },
+
     /// Diagnose a project: missing assets, orphan cache files, schema
     /// version mismatches.
     ///
@@ -166,6 +180,11 @@ impl Cmd {
             } => cmd::headless::run(scene, camera, out, *width, *height, *samples),
             Self::Inspect { hash } => cmd::inspect::run(hash),
             Self::Serve { project, port } => cmd::serve::run(project, *port),
+            Self::Editor {
+                project,
+                port,
+                frontend,
+            } => cmd::editor::run(project, *port, frontend.as_deref()),
             Self::Doctor { project } => cmd::doctor::run(project),
         }
     }
@@ -230,6 +249,24 @@ mod tests {
                 assert_eq!(out, Some(PathBuf::from("custom/cook")));
             }
             other => panic!("expected Cook, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_editor_subcommand() {
+        let cli =
+            parse(&["hyge-tools", "editor", ".", "--port", "4000"]).expect("editor must parse");
+        match cli.cmd {
+            Cmd::Editor {
+                project,
+                port,
+                frontend,
+            } => {
+                assert_eq!(project, PathBuf::from("."));
+                assert_eq!(port, 4000);
+                assert!(frontend.is_none());
+            }
+            other => panic!("expected Editor, got {other:?}"),
         }
     }
 
