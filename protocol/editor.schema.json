@@ -2,6 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hyge.dev/schemas/editor-protocol-v1.json",
   "title": "Hyge Editor IPC Envelope",
+  "description": "Version 1 length-prefixed JSON control protocol between hyge-editor and the PySide6/QML frontend. Requests are sent by the frontend; responses and events are sent by the Rust service.",
+  "x-hyge-message-directions": {
+    "requests": ["hello", "open_project", "open_scene", "save_scene", "select_entities", "edit_component", "add_component", "remove_component", "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab", "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview", "server_shutdown"],
+    "responses": ["hello_ack", "command_completed", "engine_error"],
+    "events": ["world_snapshot", "selection_changed", "component_changed", "asset_changed", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available"]
+  },
   "type": "object",
   "required": ["protocol_version", "message_id", "message_type", "payload"],
   "properties": {
@@ -19,10 +25,14 @@
         "command_completed", "engine_error", "server_shutdown"
       ]
     },
-    "payload": {},
+    "payload": {
+      "type": "object",
+      "description": "Message-specific object. Individual payload schemas are introduced with protocol compatibility work in R-081."
+    },
     "error": {
-      "type": ["object", "null"],
+      "type": "object",
       "required": ["code", "message"],
+      "additionalProperties": false,
       "properties": {
         "code": { "type": "string" },
         "message": { "type": "string" }

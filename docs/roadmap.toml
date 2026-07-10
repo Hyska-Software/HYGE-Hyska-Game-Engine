@@ -1431,10 +1431,12 @@ title = "Rust editor service and versioned IPC"
 phase = "phase_8"
 owner = "editor"
 priority = "P0"
-status = "in_progress"
+status = "complete"
 risk = "medium"
 dependencies = ["R-013"]
 summary = "Create the Rust editor service, protocol schema, authenticated loopback server and optional PySide6 launcher."
+completed_at = "2026-07-10"
+completion_notes = "Completed the version-one editor control boundary. protocol/editor.schema.json now defines the versioned envelope, message names, directions, object payloads, and structured errors. hyge-editor-protocol was split into envelope/error/framing modules with big-endian length-prefixed JSON, partial-read support, size/version validation, invalid-envelope rejection, and hello/hello_ack/error constructors. hyge-editor now enforces IPv4 loopback binding, non-empty tokens, per-connection hello authentication, pre-auth rejection, structured unsupported-request errors, real server shutdown, and TCP correlation-id round-trip coverage; EditorState contains only project/scene session metadata. hyge-tools editor validates project directories, supports port 0, generates per-run tokens with HYGE_EDITOR_TOKEN override, and manages the optional Python child. The PySide6 client validates the shared envelope and framing contract. Evidence: cargo test --workspace, cargo clippy --workspace --all-targets -- --deny warnings, cargo fmt --all -- --check, cargo doc --workspace --no-deps, and python -m pytest -q tools/hyge-editor-python/tests (6 passed). R-081+ remain responsible for negotiated compatibility, real scene lifecycle, snapshots, reflection, and commands."
 acceptance = [
   "protocol/editor.schema.json defines the versioned envelope and message names",
   "hyge-editor-protocol provides length-prefixed JSON framing with size/version validation",

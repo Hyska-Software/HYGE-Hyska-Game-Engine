@@ -853,8 +853,16 @@ hyge-app/src/
 ```rust
 pub struct EditorServer;
 pub struct EditorServerConfig { pub bind_address: String, pub session_token: String }
-pub struct EditorState { pub selected_entities: Vec<String>, pub project: Option<String>, pub scene: Option<String> }
+pub struct EditorState { pub project: Option<String>, pub scene: Option<String> }
 ```
+
+R-080 implements the control boundary as length-prefixed, big-endian JSON
+over IPv4 loopback TCP. Every connection must begin with an authenticated
+`hello` envelope; requests received before that handshake are rejected. The
+wire envelope and message names are owned by `protocol/editor.schema.json` and
+shared by `hyge-editor-protocol` and the optional PySide6/QML client. R-080
+stores only service session metadata; ECS snapshots, reflected values and
+editor commands are added by R-081 through R-084.
 
 **File layout:**
 ```

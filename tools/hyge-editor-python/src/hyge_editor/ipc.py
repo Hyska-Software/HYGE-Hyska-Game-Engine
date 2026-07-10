@@ -10,6 +10,15 @@ from typing import Any
 
 PROTOCOL_VERSION = 1
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024
+MESSAGE_TYPES = {
+    "hello", "hello_ack", "open_project", "open_scene", "save_scene",
+    "select_entities", "edit_component", "add_component", "remove_component",
+    "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab",
+    "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview",
+    "world_snapshot", "selection_changed", "component_changed", "asset_changed",
+    "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available",
+    "command_completed", "engine_error", "server_shutdown",
+}
 
 
 @dataclass
@@ -22,7 +31,22 @@ class Envelope:
     protocol_version: int = PROTOCOL_VERSION
     error: dict[str, str] | None = None
 
+    def validate(self) -> None:
+        """Validate fields shared by every version-one envelope."""
+        if self.protocol_version != PROTOCOL_VERSION:
+            raise ValueError(f"unsupported protocol version: {self.protocol_version}")
+        if not self.message_id:
+            raise ValueError("editor protocol message_id must not be empty")
+        if self.message_type not in MESSAGE_TYPES:
+            raise ValueError(f"unknown editor protocol message type: {self.message_type}")
+        if not isinstance(self.payload, dict):
+            raise ValueError("editor protocol payload must be an object")
+        if self.error is not None:
+            if set(self.error) != {"code", "message"}:
+                raise ValueError("editor protocol error must contain code and message")
+
     def to_bytes(self) -> bytes:
+        self.validate()
         body = json.dumps({
             "protocol_version": self.protocol_version,
             "message_id": self.message_id,
@@ -36,16 +60,26 @@ class Envelope:
 
     @classmethod
     def from_bytes(cls, body: bytes) -> "Envelope":
-        data = json.loads(body)
-        if data["protocol_version"] != PROTOCOL_VERSION:
-            raise ValueError(f"unsupported protocol version: {data['protocol_version']}")
-        return cls(
+        if not body or len(body) > MAX_MESSAGE_BYTES:
+            raise ValueError("editor protocol message has an invalid size")
+        try:
+            data = json.loads(body)
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ValueError("editor protocol body is not valid JSON") from error
+        if not isinstance(data, dict):
+            raise ValueError("editor protocol envelope must be an object")
+        required = {"protocol_version", "message_id", "message_type", "payload"}
+        if not required.issubset(data):
+            raise ValueError("editor protocol envelope is missing required fields")
+        envelope = cls(
             message_id=data["message_id"],
             message_type=data["message_type"],
             payload=data.get("payload", {}),
             protocol_version=data["protocol_version"],
             error=data.get("error"),
         )
+        envelope.validate()
+        return envelope
 
 
 class EditorClient:
@@ -61,7 +95,10 @@ class EditorClient:
     def connect(self) -> Envelope:
         """Connect and complete the authenticated handshake."""
         self._socket = socket.create_connection(self._address, self._timeout)
-        return self.request("hello", {"session_token": self._token})
+        response = self.request("hello", {"session_token": self._token})
+        if response.error is not None:
+            self.close()
+        return response
 
     def request(self, message_type: str, payload: dict[str, Any] | None = None) -> Envelope:
         """Send a request and read exactly one response."""
@@ -71,7 +108,7 @@ class EditorClient:
         self._socket.sendall(envelope.to_bytes())
         header = self._read_exact(4)
         length = int.from_bytes(header, "big")
-        if length > MAX_MESSAGE_BYTES:
+        if length == 0 or length > MAX_MESSAGE_BYTES:
             raise ValueError("editor protocol response is too large")
         return Envelope.from_bytes(self._read_exact(length))
 

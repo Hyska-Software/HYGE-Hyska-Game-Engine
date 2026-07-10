@@ -11,6 +11,7 @@ description = "CLI: hyge-tools {import, cook, headless, inspect, serve, doctor}.
 clap = { workspace = true }
 tracing = { workspace = true }
 blake3 = { workspace = true }
+getrandom = { workspace = true }
 hyge-core = { workspace = true }
 hyge-asset = { workspace = true }
 hyge-editor = { workspace = true }
