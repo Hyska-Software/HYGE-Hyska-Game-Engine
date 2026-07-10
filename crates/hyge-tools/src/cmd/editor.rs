@@ -15,6 +15,7 @@ pub fn run(project: &Path, port: u16, frontend: Option<&Path>) -> HygeResult<()>
     let server = EditorServer::bind(EditorServerConfig {
         bind_address: format!("127.0.0.1:{port}"),
         session_token: token.clone(),
+        ..EditorServerConfig::default()
     })?;
     let address = server.local_addr()?;
     tracing::info!(%address, project = %project.display(), "hyge editor service listening");

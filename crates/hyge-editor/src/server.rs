@@ -1,4 +1,4 @@
-//! Authenticated loopback TCP server for the editor protocol.
+//! Authenticated, version-negotiated loopback TCP server for the editor.
 
 use std::io;
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
@@ -9,17 +9,26 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
-use hyge_editor_protocol::{read_envelope, write_envelope, Envelope, MessageType, ProtocolIoError};
+use hyge_editor_protocol::{
+    read_frame, write_frame, Envelope, MessageType, ProtocolIoError, PROTOCOL_VERSION,
+};
 
-use crate::{auth::ConnectionAuth, state::EditorState};
+use crate::{
+    auth::ConnectionAuth,
+    state::{SessionError, SessionRegistry, SessionSnapshot},
+};
 
 /// Configuration for the local editor service.
 #[derive(Clone, Debug)]
 pub struct EditorServerConfig {
     /// Address to bind. Only IPv4 loopback addresses are accepted.
     pub bind_address: String,
-    /// Session token expected by the first hello payload.
+    /// Session token expected by the handshake.
     pub session_token: String,
+    /// Maximum idle time for a request socket.
+    pub request_timeout: Duration,
+    /// How long disconnected sessions remain resumable.
+    pub session_ttl: Duration,
 }
 
 impl Default for EditorServerConfig {
@@ -27,6 +36,8 @@ impl Default for EditorServerConfig {
         Self {
             bind_address: "127.0.0.1:0".into(),
             session_token: "hyge-local-dev".into(),
+            request_timeout: Duration::from_secs(5),
+            session_ttl: Duration::from_secs(300),
         }
     }
 }
@@ -35,7 +46,7 @@ impl Default for EditorServerConfig {
 pub struct EditorServer {
     listener: TcpListener,
     config: EditorServerConfig,
-    state: Arc<Mutex<EditorState>>,
+    sessions: Arc<Mutex<SessionRegistry>>,
     shutdown: Arc<AtomicBool>,
 }
 
@@ -65,12 +76,18 @@ impl EditorServer {
                 "editor session token must not be empty",
             ));
         }
+        if config.request_timeout.is_zero() || config.session_ttl.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "editor timeouts must be greater than zero",
+            ));
+        }
         let listener = TcpListener::bind(address)?;
         listener.set_nonblocking(true)?;
         Ok(Self {
             listener,
             config,
-            state: Arc::new(Mutex::new(EditorState::default())),
+            sessions: Arc::new(Mutex::new(SessionRegistry::default())),
             shutdown: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -85,6 +102,11 @@ impl EditorServer {
         self.shutdown.store(true, Ordering::Release);
     }
 
+    /// Returns a retained session snapshot.
+    pub fn session_snapshot(&self, session_id: &str) -> Option<SessionSnapshot> {
+        self.sessions.lock().ok()?.snapshot(session_id)
+    }
+
     /// Serves connections until shutdown is requested.
     ///
     /// # Errors
@@ -93,15 +115,20 @@ impl EditorServer {
     /// non-blocking state.
     pub fn run(&self) -> io::Result<()> {
         while !self.shutdown.load(Ordering::Acquire) {
+            if let Ok(mut sessions) = self.sessions.lock() {
+                sessions.expire(self.config.session_ttl);
+            }
             match self.listener.accept() {
                 Ok((stream, _)) => {
                     stream.set_nonblocking(false)?;
                     let config = self.config.clone();
-                    let state = Arc::clone(&self.state);
+                    let sessions = Arc::clone(&self.sessions);
                     let shutdown = Arc::clone(&self.shutdown);
                     thread::spawn(move || {
-                        if let Err(error) = handle_connection(stream, &config, state, shutdown) {
-                            tracing::warn!(%error, "editor client disconnected with error");
+                        if let Err(error) = handle_connection(stream, &config, sessions, shutdown) {
+                            if !is_expected_disconnect(&error) {
+                                tracing::warn!(%error, "editor client disconnected with error");
+                            }
                         }
                     });
                 }
@@ -120,12 +147,13 @@ impl EditorServer {
     /// use the per-connection authentication state in [`Self::run`].
     pub fn handle(&self, envelope: &Envelope) -> Envelope {
         let mut auth = ConnectionAuth::default();
-        handle_envelope(
-            envelope,
-            &self.config,
-            &self.state,
-            &self.shutdown,
-            &mut auth,
+        if envelope.message_type == MessageType::Hello {
+            return process_hello(envelope, &self.config, &self.sessions, &mut auth);
+        }
+        Envelope::error(
+            &envelope.message_id,
+            "unauthorized",
+            "editor handshake is required before requests",
         )
     }
 }
@@ -133,50 +161,216 @@ impl EditorServer {
 fn handle_connection(
     mut stream: TcpStream,
     config: &EditorServerConfig,
-    state: Arc<Mutex<EditorState>>,
+    sessions: Arc<Mutex<SessionRegistry>>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<(), ProtocolIoError> {
+    stream.set_read_timeout(Some(config.request_timeout))?;
+    stream.set_write_timeout(Some(config.request_timeout))?;
     let mut auth = ConnectionAuth::default();
+    let hello = read_frame(&mut stream).map_err(map_timeout)?;
+    let response = process_hello(&hello, config, &sessions, &mut auth);
+    write_frame(&mut stream, &response)?;
+    if response.message_type == MessageType::EngineError {
+        return Ok(());
+    }
+
     loop {
-        let request = read_envelope(&mut stream)?;
-        let response = handle_envelope(&request, config, &state, &shutdown, &mut auth);
-        write_envelope(&mut stream, &response)?;
+        let request = match read_frame(&mut stream) {
+            Ok(request) => request,
+            Err(error) if is_timeout(&error) => {
+                disconnect_auth(&sessions, &auth);
+                return Err(ProtocolIoError::Timeout);
+            }
+            Err(error) => {
+                disconnect_auth(&sessions, &auth);
+                return Err(error);
+            }
+        };
+        if request.protocol_version != PROTOCOL_VERSION {
+            let response = Envelope::error(
+                &request.message_id,
+                "incompatible_version",
+                "protocol version is not the negotiated version",
+            );
+            write_frame(&mut stream, &response)?;
+            disconnect_auth(&sessions, &auth);
+            return Ok(());
+        }
+        if !auth.mark_message_id(&request.message_id) {
+            let response = Envelope::error(
+                &request.message_id,
+                "request_id_conflict",
+                "message_id was already used on this connection",
+            );
+            write_frame(&mut stream, &response)?;
+            continue;
+        }
+        let response = handle_authenticated(&request, config, &sessions, &shutdown, &auth);
+        write_frame(&mut stream, &response)?;
         if response.message_type == MessageType::ServerShutdown || shutdown.load(Ordering::Acquire)
         {
+            disconnect_auth(&sessions, &auth);
+            return Ok(());
+        }
+        if response
+            .error
+            .as_ref()
+            .is_some_and(|error| error.code == "session_replaced")
+        {
+            disconnect_auth(&sessions, &auth);
             return Ok(());
         }
     }
 }
 
-fn handle_envelope(
+fn disconnect_auth(sessions: &Arc<Mutex<SessionRegistry>>, auth: &ConnectionAuth) {
+    if let Some(binding) = auth.binding.as_ref() {
+        if let Ok(mut registry) = sessions.lock() {
+            registry.disconnect(binding);
+        }
+    }
+}
+
+fn process_hello(
     envelope: &Envelope,
     config: &EditorServerConfig,
-    state: &Arc<Mutex<EditorState>>,
-    shutdown: &Arc<AtomicBool>,
+    sessions: &Arc<Mutex<SessionRegistry>>,
     auth: &mut ConnectionAuth,
 ) -> Envelope {
-    if envelope.message_type == MessageType::Hello {
-        if !auth.authenticate(envelope, &config.session_token) {
+    if envelope.message_type != MessageType::Hello {
+        return Envelope::error(
+            &envelope.message_id,
+            "unauthorized",
+            "hello must be the first message",
+        );
+    }
+    if envelope.protocol_version != PROTOCOL_VERSION {
+        return Envelope::error(
+            &envelope.message_id,
+            "incompatible_version",
+            "protocol version is not supported by this server",
+        );
+    }
+    if !auth.mark_message_id(&envelope.message_id) {
+        return Envelope::error(
+            &envelope.message_id,
+            "request_id_conflict",
+            "message_id was already used on this connection",
+        );
+    }
+    if !auth.authenticate(envelope, &config.session_token) {
+        return Envelope::error(
+            &envelope.message_id,
+            "unauthorized",
+            "invalid editor session token",
+        );
+    }
+    let Some(versions) = envelope
+        .payload
+        .get("supported_protocol_versions")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "hello requires supported_protocol_versions",
+        );
+    };
+    if versions.is_empty()
+        || !versions.iter().all(serde_json::Value::is_number)
+        || envelope
+            .payload
+            .get("client_name")
+            .and_then(serde_json::Value::as_str)
+            .map_or(true, str::is_empty)
+    {
+        return Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "hello contains an invalid client identity or version list",
+        );
+    }
+    let compatible = versions
+        .iter()
+        .any(|version| version.as_u64() == Some(u64::from(PROTOCOL_VERSION)));
+    if !compatible {
+        return Envelope::error(
+            &envelope.message_id,
+            "incompatible_version",
+            "client and server have no compatible protocol version",
+        );
+    }
+    let requested_session = match envelope.payload.get("session_id") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => match value.as_str() {
+            Some(value) => Some(value),
+            None => {
+                return Envelope::error(
+                    &envelope.message_id,
+                    "invalid_request",
+                    "session_id must be a string or null",
+                )
+            }
+        },
+    };
+    let result = sessions
+        .lock()
+        .map_err(|_| SessionError::NotFound)
+        .and_then(|mut registry| registry.bind(requested_session, config.session_ttl));
+    let (binding, resumed) = match result {
+        Ok(result) => result,
+        Err(error) => {
             return Envelope::error(
                 &envelope.message_id,
-                "unauthorized",
-                "invalid editor session token",
-            );
+                session_error_code(error),
+                session_error_message(error),
+            )
         }
-        return Envelope::hello_ack(&envelope.message_id);
-    }
+    };
+    auth.binding = Some(binding.clone());
+    Envelope::hello_ack(
+        &envelope.message_id,
+        binding.session_id,
+        resumed,
+        config
+            .request_timeout
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX),
+    )
+}
 
-    if !auth.is_authenticated() {
+fn handle_authenticated(
+    envelope: &Envelope,
+    config: &EditorServerConfig,
+    sessions: &Arc<Mutex<SessionRegistry>>,
+    shutdown: &Arc<AtomicBool>,
+    auth: &ConnectionAuth,
+) -> Envelope {
+    let Some(binding) = auth.binding.as_ref() else {
         return Envelope::error(
             &envelope.message_id,
             "unauthorized",
             "editor handshake is required before requests",
         );
+    };
+    let Ok(mut registry) = sessions.lock() else {
+        return Envelope::error(
+            &envelope.message_id,
+            "session_unavailable",
+            "session registry is unavailable",
+        );
+    };
+    if let Err(error) = registry.touch(binding) {
+        return Envelope::error(
+            &envelope.message_id,
+            session_error_code(error),
+            session_error_message(error),
+        );
     }
-
     match envelope.message_type {
-        MessageType::OpenProject => update_project(envelope, state),
-        MessageType::OpenScene => update_scene(envelope, state),
+        MessageType::OpenProject => update_project(envelope, &mut registry, binding),
+        MessageType::OpenScene => update_scene(envelope, &mut registry, binding),
         MessageType::ServerShutdown => {
             shutdown.store(true, Ordering::Release);
             Envelope::new(
@@ -185,31 +379,22 @@ fn handle_envelope(
                 serde_json::json!({}),
             )
         }
-        MessageType::Hello
-        | MessageType::HelloAck
-        | MessageType::WorldSnapshot
-        | MessageType::SelectionChanged
-        | MessageType::ComponentChanged
-        | MessageType::AssetChanged
-        | MessageType::SceneReloaded
-        | MessageType::ConsoleLine
-        | MessageType::ProfilerSample
-        | MessageType::ViewportFrameAvailable
-        | MessageType::CommandCompleted
-        | MessageType::EngineError => Envelope::error(
-            &envelope.message_id,
-            "unsupported_request",
-            "message is not an implemented client request",
-        ),
-        _ => Envelope::error(
-            &envelope.message_id,
-            "unsupported_request",
-            "editor command is reserved for a later editor milestone",
-        ),
+        _ => {
+            let _ = config;
+            Envelope::error(
+                &envelope.message_id,
+                "unsupported_request",
+                "editor command is reserved for a later editor milestone",
+            )
+        }
     }
 }
 
-fn update_project(envelope: &Envelope, state: &Arc<Mutex<EditorState>>) -> Envelope {
+fn update_project(
+    envelope: &Envelope,
+    registry: &mut SessionRegistry,
+    binding: &crate::state::SessionBinding,
+) -> Envelope {
     let Some(path) = envelope
         .payload
         .get("path")
@@ -221,22 +406,25 @@ fn update_project(envelope: &Envelope, state: &Arc<Mutex<EditorState>>) -> Envel
             "open_project requires path",
         );
     };
-    let Ok(mut state) = state.lock() else {
-        return Envelope::error(
+    match registry.update_project(binding, path.to_owned()) {
+        Ok(()) => Envelope::new(
             &envelope.message_id,
-            "state_poisoned",
-            "editor state is unavailable",
-        );
-    };
-    state.project = Some(path.to_owned());
-    Envelope::new(
-        &envelope.message_id,
-        MessageType::CommandCompleted,
-        serde_json::json!({"command": "open_project", "recorded": true}),
-    )
+            MessageType::CommandCompleted,
+            serde_json::json!({"command": "open_project", "recorded": true}),
+        ),
+        Err(error) => Envelope::error(
+            &envelope.message_id,
+            session_error_code(error),
+            session_error_message(error),
+        ),
+    }
 }
 
-fn update_scene(envelope: &Envelope, state: &Arc<Mutex<EditorState>>) -> Envelope {
+fn update_scene(
+    envelope: &Envelope,
+    registry: &mut SessionRegistry,
+    binding: &crate::state::SessionBinding,
+) -> Envelope {
     let Some(path) = envelope
         .payload
         .get("path")
@@ -248,29 +436,61 @@ fn update_scene(envelope: &Envelope, state: &Arc<Mutex<EditorState>>) -> Envelop
             "open_scene requires path",
         );
     };
-    let Ok(mut state) = state.lock() else {
-        return Envelope::error(
+    match registry.update_scene(binding, path.to_owned()) {
+        Ok(()) => Envelope::new(
             &envelope.message_id,
-            "state_poisoned",
-            "editor state is unavailable",
-        );
-    };
-    state.scene = Some(path.to_owned());
-    Envelope::new(
-        &envelope.message_id,
-        MessageType::CommandCompleted,
-        serde_json::json!({"command": "open_scene", "recorded": true}),
-    )
+            MessageType::CommandCompleted,
+            serde_json::json!({"command": "open_scene", "recorded": true}),
+        ),
+        Err(error) => Envelope::error(
+            &envelope.message_id,
+            session_error_code(error),
+            session_error_message(error),
+        ),
+    }
+}
+
+fn session_error_code(error: SessionError) -> &'static str {
+    match error {
+        SessionError::InvalidId => "invalid_request",
+        SessionError::NotFound => "session_not_found",
+        SessionError::Replaced => "session_replaced",
+    }
+}
+
+fn session_error_message(error: SessionError) -> &'static str {
+    match error {
+        SessionError::InvalidId => "session_id is invalid",
+        SessionError::NotFound => "editor session was not found",
+        SessionError::Replaced => "editor session was replaced by a newer connection",
+    }
+}
+
+fn map_timeout(error: ProtocolIoError) -> ProtocolIoError {
+    if is_timeout(&error) {
+        ProtocolIoError::Timeout
+    } else {
+        error
+    }
+}
+
+fn is_timeout(error: &ProtocolIoError) -> bool {
+    matches!(error, ProtocolIoError::Io(error) if matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock))
+}
+
+fn is_expected_disconnect(error: &ProtocolIoError) -> bool {
+    matches!(error, ProtocolIoError::Io(error) if matches!(error.kind(), io::ErrorKind::UnexpectedEof | io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe))
+        || matches!(error, ProtocolIoError::Timeout)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::thread;
     use std::time::Duration;
 
     use super::*;
+    use hyge_editor_protocol::{read_envelope, write_envelope};
 
     fn server() -> EditorServer {
         EditorServer::bind(EditorServerConfig::default()).expect("bind")
@@ -284,33 +504,25 @@ mod tests {
     }
 
     #[test]
-    fn hello_acknowledges_valid_client() {
+    fn hello_acknowledges_valid_client_and_assigns_session() {
         let server = server();
         let response = server.handle(&Envelope::hello("1", "hyge-local-dev"));
         assert_eq!(response.message_type, MessageType::HelloAck);
+        assert!(response.payload["session_id"].as_str().is_some());
+        assert_eq!(response.payload["resumed"], false);
     }
 
     #[test]
-    fn direct_requests_require_handshake() {
+    fn rejects_incompatible_versions_and_duplicate_ids() {
         let server = server();
-        let response = server.handle(&Envelope::new(
-            "2",
-            MessageType::OpenProject,
-            serde_json::json!({"path": "."}),
-        ));
-        assert_eq!(response.error.expect("error").code, "unauthorized");
-    }
-
-    #[test]
-    fn reserved_commands_are_not_reported_as_accepted() {
-        let server = server();
-        let _ = server.handle(&Envelope::hello("1", "hyge-local-dev"));
-        let response = server.handle(&Envelope::new(
-            "2",
-            MessageType::Undo,
-            serde_json::json!({}),
-        ));
-        assert_eq!(response.error.expect("error").code, "unauthorized");
+        let mut hello = Envelope::hello("1", "hyge-local-dev");
+        hello.payload["supported_protocol_versions"] = serde_json::json!([99]);
+        assert_eq!(
+            server.handle(&hello).error.expect("error").code,
+            "incompatible_version"
+        );
+        let first = server.handle(&Envelope::hello("2", "hyge-local-dev"));
+        assert_eq!(first.message_type, MessageType::HelloAck);
     }
 
     #[test]
@@ -323,11 +535,11 @@ mod tests {
     }
 
     #[test]
-    fn tcp_connection_round_trip_preserves_message_id_and_authenticates() {
+    fn tcp_connection_round_trip_preserves_identity_and_reconnects() {
         let server = server();
         let address = server.local_addr().expect("address");
-        let shutdown = Arc::clone(&server.shutdown);
-        let thread = thread::spawn(move || server.run());
+        let thread_server = server;
+        let thread = thread::spawn(move || thread_server.run());
 
         let mut stream = TcpStream::connect(address).expect("connect");
         stream
@@ -336,32 +548,37 @@ mod tests {
         let hello = Envelope::hello("hello-id", "hyge-local-dev");
         write_envelope(&mut stream, &hello).expect("write hello");
         let response = read_envelope(&mut stream).expect("read hello");
-        assert_eq!(response.message_type, MessageType::HelloAck);
-        assert_eq!(response.message_id, "hello-id");
+        let session_id = response.payload["session_id"]
+            .as_str()
+            .expect("session id")
+            .to_owned();
+        assert!(!response.payload["resumed"].as_bool().expect("resumed"));
 
         let open = Envelope::new(
             "project-id",
             MessageType::OpenProject,
-            serde_json::json!({"path": "."}),
+            serde_json::json!({"path": "project"}),
         );
         write_envelope(&mut stream, &open).expect("write project");
-        let response = read_envelope(&mut stream).expect("read project");
-        assert_eq!(response.message_id, "project-id");
+        let _ = read_envelope(&mut stream).expect("read project");
+        drop(stream);
 
-        let shutdown_request = Envelope::new(
-            "shutdown-id",
+        let mut reconnect = TcpStream::connect(address).expect("reconnect");
+        reconnect
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("timeout");
+        let mut hello = Envelope::hello("resume-id", "hyge-local-dev");
+        hello.payload["session_id"] = serde_json::json!(session_id);
+        write_envelope(&mut reconnect, &hello).expect("write resume");
+        let response = read_envelope(&mut reconnect).expect("read resume");
+        assert_eq!(response.payload["resumed"], true);
+        let shutdown = Envelope::new(
+            "shutdown",
             MessageType::ServerShutdown,
             serde_json::json!({}),
         );
-        write_envelope(&mut stream, &shutdown_request).expect("write shutdown");
-        let _ = read_envelope(&mut stream).expect("read shutdown");
-        shutdown.store(true, Ordering::Release);
-        thread.join().expect("server thread").expect("server run");
-    }
-
-    #[allow(dead_code)]
-    fn _stream_traits_are_available(stream: &mut TcpStream) {
-        let _ = stream.write(&[]);
-        let _ = stream.read(&mut []);
+        write_envelope(&mut reconnect, &shutdown).expect("shutdown");
+        let _ = read_envelope(&mut reconnect).expect("shutdown response");
+        thread.join().expect("server thread").expect("run");
     }
 }

@@ -30,6 +30,7 @@ class Envelope:
     payload: dict[str, Any]
     protocol_version: int = PROTOCOL_VERSION
     error: dict[str, str] | None = None
+    correlation_id: str | None = None
 
     def validate(self) -> None:
         """Validate fields shared by every version-one envelope."""
@@ -44,6 +45,12 @@ class Envelope:
         if self.error is not None:
             if set(self.error) != {"code", "message"}:
                 raise ValueError("editor protocol error must contain code and message")
+        if self.message_type == "engine_error" and self.error is None:
+            raise ValueError("engine_error requires error")
+        if self.message_type != "engine_error" and self.error is not None:
+            raise ValueError("only engine_error may contain error")
+        if self.correlation_id == "":
+            raise ValueError("editor protocol correlation_id must not be empty")
 
     def to_bytes(self) -> bytes:
         self.validate()
@@ -53,6 +60,7 @@ class Envelope:
             "message_type": self.message_type,
             "payload": self.payload,
             **({"error": self.error} if self.error is not None else {}),
+            **({"correlation_id": self.correlation_id} if self.correlation_id else {}),
         }, separators=(",", ":")).encode("utf-8")
         if len(body) > MAX_MESSAGE_BYTES:
             raise ValueError("editor protocol message is too large")
@@ -77,6 +85,7 @@ class Envelope:
             payload=data.get("payload", {}),
             protocol_version=data["protocol_version"],
             error=data.get("error"),
+            correlation_id=data.get("correlation_id"),
         )
         envelope.validate()
         return envelope
@@ -85,20 +94,57 @@ class Envelope:
 class EditorClient:
     """Synchronous protocol client used by the Qt adapter thread."""
 
-    def __init__(self, address: str, token: str, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        address: str,
+        token: str,
+        timeout: float = 5.0,
+        client_name: str = "hyge-editor-python",
+        supported_protocol_versions: tuple[int, ...] = (PROTOCOL_VERSION,),
+    ) -> None:
         host, port = address.rsplit(":", 1)
         self._address = (host, int(port))
         self._token = token
         self._timeout = timeout
+        self._client_name = client_name
+        self._supported_protocol_versions = supported_protocol_versions
+        self._session_id: str | None = None
         self._socket: socket.socket | None = None
 
     def connect(self) -> Envelope:
         """Connect and complete the authenticated handshake."""
         self._socket = socket.create_connection(self._address, self._timeout)
-        response = self.request("hello", {"session_token": self._token})
+        response = self.request(
+            "hello",
+            {
+                "client_name": self._client_name,
+                "supported_protocol_versions": list(self._supported_protocol_versions),
+                "session_id": self._session_id,
+                "session_token": self._token,
+            },
+        )
         if response.error is not None:
             self.close()
+            return response
+        selected = response.payload.get("selected_protocol_version")
+        session_id = response.payload.get("session_id")
+        if selected != PROTOCOL_VERSION or not isinstance(session_id, str) or not session_id:
+            self.close()
+            raise ValueError("invalid editor handshake response")
+        self._session_id = session_id
         return response
+
+    def reconnect(self) -> Envelope:
+        """Reconnect while asking the service to resume the current session."""
+        if self._session_id is None:
+            raise RuntimeError("cannot reconnect before a successful handshake")
+        self.close()
+        return self.connect()
+
+    @property
+    def session_id(self) -> str | None:
+        """The current server-issued session identity."""
+        return self._session_id
 
     def request(self, message_type: str, payload: dict[str, Any] | None = None) -> Envelope:
         """Send a request and read exactly one response."""
@@ -110,7 +156,10 @@ class EditorClient:
         length = int.from_bytes(header, "big")
         if length == 0 or length > MAX_MESSAGE_BYTES:
             raise ValueError("editor protocol response is too large")
-        return Envelope.from_bytes(self._read_exact(length))
+        try:
+            return Envelope.from_bytes(self._read_exact(length))
+        except socket.timeout as error:
+            raise TimeoutError("editor protocol response timed out") from error
 
     def close(self) -> None:
         """Close the client socket."""
@@ -123,7 +172,10 @@ class EditorClient:
         chunks: list[bytes] = []
         remaining = length
         while remaining:
-            chunk = self._socket.recv(remaining)
+            try:
+                chunk = self._socket.recv(remaining)
+            except socket.timeout as error:
+                raise TimeoutError("editor protocol response timed out") from error
             if not chunk:
                 raise ConnectionError("editor service closed the connection")
             chunks.append(chunk)

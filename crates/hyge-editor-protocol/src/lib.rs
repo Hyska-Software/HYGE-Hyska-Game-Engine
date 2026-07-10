@@ -13,7 +13,7 @@ mod framing;
 
 pub use envelope::{Envelope, MessageType, ProtocolError};
 pub use error::ProtocolIoError;
-pub use framing::{read_envelope, write_envelope};
+pub use framing::{read_envelope, read_frame, write_envelope, write_frame};
 
 /// Current wire protocol version.
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -111,5 +111,21 @@ mod tests {
             "invalid_request"
         );
         assert_eq!(envelope.message_type, MessageType::EngineError);
+    }
+
+    #[test]
+    fn structurally_reads_unknown_versions_for_negotiation() {
+        let mut envelope = Envelope::new("future", MessageType::Hello, serde_json::json!({}));
+        envelope.protocol_version = PROTOCOL_VERSION + 1;
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &envelope).expect("structural frame must write");
+        let decoded = read_frame(&mut Cursor::new(bytes)).expect("structural frame must read");
+        assert_eq!(decoded.protocol_version, PROTOCOL_VERSION + 1);
+        let mut strict_bytes = Vec::new();
+        write_frame(&mut strict_bytes, &decoded).expect("structural frame must write");
+        assert!(matches!(
+            read_envelope(&mut Cursor::new(strict_bytes)),
+            Err(ProtocolIoError::UnsupportedVersion(2))
+        ));
     }
 }

@@ -13,6 +13,9 @@ pub struct Envelope {
     pub message_id: String,
     /// Semantic message name.
     pub message_type: MessageType,
+    /// Optional request identifier for asynchronous responses or events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
     /// Message-specific JSON object.
     pub payload: serde_json::Value,
     /// Optional structured error.
@@ -105,6 +108,7 @@ impl Envelope {
             protocol_version: PROTOCOL_VERSION,
             message_id: message_id.into(),
             message_type,
+            correlation_id: None,
             payload,
             error: None,
         }
@@ -116,17 +120,33 @@ impl Envelope {
         Self::new(
             message_id,
             MessageType::Hello,
-            serde_json::json!({"session_token": session_token.into()}),
+            serde_json::json!({
+                "client_name": "hyge-editor-client",
+                "supported_protocol_versions": [PROTOCOL_VERSION],
+                "session_id": null,
+                "session_token": session_token.into()
+            }),
         )
     }
 
     /// Creates a successful handshake response.
     #[must_use]
-    pub fn hello_ack(message_id: impl Into<String>) -> Self {
+    pub fn hello_ack(
+        message_id: impl Into<String>,
+        session_id: impl Into<String>,
+        resumed: bool,
+        request_timeout_ms: u64,
+    ) -> Self {
         Self::new(
             message_id,
             MessageType::HelloAck,
-            serde_json::json!({"protocol_version": PROTOCOL_VERSION, "server": "hyge-editor"}),
+            serde_json::json!({
+                "selected_protocol_version": PROTOCOL_VERSION,
+                "session_id": session_id.into(),
+                "resumed": resumed,
+                "server": "hyge-editor",
+                "request_timeout_ms": request_timeout_ms
+            }),
         )
     }
 
@@ -141,6 +161,7 @@ impl Envelope {
             protocol_version: PROTOCOL_VERSION,
             message_id: message_id.into(),
             message_type: MessageType::EngineError,
+            correlation_id: None,
             payload: serde_json::json!({}),
             error: Some(ProtocolError {
                 code: code.into(),
@@ -150,9 +171,14 @@ impl Envelope {
     }
 
     pub(crate) fn validate(&self) -> Result<(), ProtocolIoError> {
+        self.validate_structure()?;
         if self.protocol_version != PROTOCOL_VERSION {
             return Err(ProtocolIoError::UnsupportedVersion(self.protocol_version));
         }
+        Ok(())
+    }
+
+    pub(crate) fn validate_structure(&self) -> Result<(), ProtocolIoError> {
         if self.message_id.is_empty() {
             return Err(ProtocolIoError::InvalidEnvelope(
                 "message_id must not be empty",
@@ -162,6 +188,31 @@ impl Envelope {
             return Err(ProtocolIoError::InvalidEnvelope(
                 "payload must be an object",
             ));
+        }
+        if self.correlation_id.as_ref().is_some_and(String::is_empty) {
+            return Err(ProtocolIoError::InvalidEnvelope(
+                "correlation_id must not be empty",
+            ));
+        }
+        match (&self.message_type, &self.error) {
+            (MessageType::EngineError, None) => {
+                return Err(ProtocolIoError::InvalidEnvelope(
+                    "engine_error requires error",
+                ));
+            }
+            (MessageType::EngineError, Some(error))
+                if error.code.is_empty() || error.message.is_empty() =>
+            {
+                return Err(ProtocolIoError::InvalidEnvelope(
+                    "error code and message must not be empty",
+                ));
+            }
+            (_, Some(_)) => {
+                return Err(ProtocolIoError::InvalidEnvelope(
+                    "only engine_error may contain error",
+                ));
+            }
+            _ => {}
         }
         Ok(())
     }

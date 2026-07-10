@@ -2,27 +2,25 @@
 
 use hyge_editor_protocol::Envelope;
 
+use crate::state::SessionBinding;
+
 /// Authentication state for one TCP connection.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub(crate) struct ConnectionAuth {
-    authenticated: bool,
+    pub(crate) binding: Option<SessionBinding>,
+    seen_message_ids: std::collections::HashSet<String>,
 }
 
 impl ConnectionAuth {
-    pub(crate) fn is_authenticated(self) -> bool {
-        self.authenticated
-    }
-
     pub(crate) fn authenticate(&mut self, request: &Envelope, expected_token: &str) -> bool {
         let token = request
             .payload
             .get("session_token")
             .and_then(serde_json::Value::as_str);
-        if token == Some(expected_token) {
-            self.authenticated = true;
-            true
-        } else {
-            false
-        }
+        token == Some(expected_token)
+    }
+
+    pub(crate) fn mark_message_id(&mut self, message_id: &str) -> bool {
+        self.seen_message_ids.insert(message_id.to_owned())
     }
 }

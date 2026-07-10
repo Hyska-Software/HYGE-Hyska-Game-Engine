@@ -12,7 +12,7 @@ mod server;
 mod state;
 
 pub use server::{EditorServer, EditorServerConfig};
-pub use state::EditorState;
+pub use state::{EditorState, SessionSnapshot};
 
 /// Common editor exports.
 pub mod prelude {

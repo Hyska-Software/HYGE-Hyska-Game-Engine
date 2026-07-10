@@ -4,8 +4,9 @@ import threading
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
-from hyge_editor.ipc import EditorClient, Envelope
+from hyge_editor.ipc import MESSAGE_TYPES, EditorClient, Envelope
 
 
 def test_envelope_round_trip():
@@ -14,6 +15,22 @@ def test_envelope_round_trip():
     assert decoded.message_id == "1"
     assert decoded.message_type == "hello"
     assert decoded.payload["session_token"] == "test"
+
+
+def test_handshake_payload_round_trip_and_correlation_id():
+    envelope = Envelope(
+        "1",
+        "hello",
+        {
+            "client_name": "test",
+            "supported_protocol_versions": [1],
+            "session_id": None,
+            "session_token": "test",
+        },
+        correlation_id="parent",
+    )
+    decoded = Envelope.from_bytes(envelope.to_bytes()[4:])
+    assert decoded.correlation_id == "parent"
 
 
 def test_envelope_rejects_invalid_shared_contract_fields():
@@ -34,10 +51,71 @@ def test_schema_lists_the_version_and_wire_message_names():
     schema = json.loads(
         (Path(__file__).parents[3] / "protocol" / "editor.schema.json").read_text()
     )
-    assert schema["properties"]["protocol_version"]["const"] == 1
+    assert schema["properties"]["protocol_version"] == {"type": "integer", "minimum": 1}
     assert "hello" in schema["properties"]["message_type"]["enum"]
     assert "server_shutdown" in schema["properties"]["message_type"]["enum"]
     assert schema["properties"]["payload"]["type"] == "object"
+    assert Draft202012Validator.check_schema(schema) is None
+
+
+def test_schema_validates_handshake_ack_and_errors():
+    schema = json.loads(
+        (Path(__file__).parents[3] / "protocol" / "editor.schema.json").read_text()
+    )
+    validator = Draft202012Validator(schema)
+    valid_ack = {
+        "protocol_version": 1,
+        "message_id": "ack",
+        "message_type": "hello_ack",
+        "payload": {
+            "selected_protocol_version": 1,
+            "session_id": "session",
+            "resumed": False,
+            "server": "hyge-editor",
+            "request_timeout_ms": 5000,
+        },
+    }
+    assert list(validator.iter_errors(valid_ack)) == []
+    invalid_error = {
+        "protocol_version": 1,
+        "message_id": "error",
+        "message_type": "engine_error",
+        "payload": {},
+    }
+    assert list(validator.iter_errors(invalid_error))
+
+
+def test_schema_validates_every_declared_message_type():
+    schema = json.loads(
+        (Path(__file__).parents[3] / "protocol" / "editor.schema.json").read_text()
+    )
+    validator = Draft202012Validator(schema)
+    for message_type in MESSAGE_TYPES:
+        payload = {}
+        envelope = {
+            "protocol_version": 1,
+            "message_id": message_type,
+            "message_type": message_type,
+            "payload": payload,
+        }
+        if message_type == "hello":
+            envelope["payload"] = {
+                "client_name": "test",
+                "supported_protocol_versions": [1],
+                "session_id": None,
+                "session_token": "test",
+            }
+        elif message_type == "hello_ack":
+            envelope["payload"] = {
+                "selected_protocol_version": 1,
+                "session_id": "session",
+                "resumed": False,
+                "server": "hyge-editor",
+                "request_timeout_ms": 5000,
+            }
+        elif message_type == "engine_error":
+            envelope["error"] = {"code": "test", "message": "test"}
+        assert list(validator.iter_errors(envelope)) == [], message_type
 
 
 def test_client_rejects_requests_before_connecting():
@@ -59,9 +137,17 @@ def test_client_uses_length_prefixed_json():
                 header = connection.recv(4)
                 body = connection.recv(int.from_bytes(header, "big"))
                 request = json.loads(body)
-                response = Envelope(
-                    request["message_id"], "hello_ack", {"protocol_version": 1}
-                ).to_bytes()
+                if request["message_type"] == "hello":
+                    payload = {
+                        "selected_protocol_version": 1,
+                        "session_id": "session",
+                        "resumed": False,
+                        "server": "hyge-editor",
+                        "request_timeout_ms": 5000,
+                    }
+                else:
+                    payload = {}
+                response = Envelope(request["message_id"], "hello_ack", payload).to_bytes()
                 connection.sendall(response)
 
     thread = threading.Thread(target=server)
@@ -94,6 +180,28 @@ def test_client_rejects_oversized_and_truncated_responses():
     thread.start()
     client = EditorClient(address, "test")
     with pytest.raises(ValueError):
+        client.connect()
+    client.close()
+    thread.join(timeout=2)
+    listener.close()
+
+
+def test_client_exposes_timeout_for_a_silent_server():
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    address = f"127.0.0.1:{listener.getsockname()[1]}"
+
+    def server():
+        connection, _ = listener.accept()
+        with connection:
+            connection.recv(4096)
+            threading.Event().wait(0.2)
+
+    thread = threading.Thread(target=server)
+    thread.start()
+    client = EditorClient(address, "test", timeout=0.05)
+    with pytest.raises(TimeoutError):
         client.connect()
     client.close()
     thread.join(timeout=2)

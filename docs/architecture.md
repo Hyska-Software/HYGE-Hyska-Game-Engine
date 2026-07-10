@@ -856,13 +856,21 @@ pub struct EditorServerConfig { pub bind_address: String, pub session_token: Str
 pub struct EditorState { pub project: Option<String>, pub scene: Option<String> }
 ```
 
-R-080 implements the control boundary as length-prefixed, big-endian JSON
-over IPv4 loopback TCP. Every connection must begin with an authenticated
-`hello` envelope; requests received before that handshake are rejected. The
-wire envelope and message names are owned by `protocol/editor.schema.json` and
-shared by `hyge-editor-protocol` and the optional PySide6/QML client. R-080
-stores only service session metadata; ECS snapshots, reflected values and
-editor commands are added by R-081 through R-084.
+R-080/R-081 implement the control boundary as length-prefixed, big-endian JSON
+over IPv4 loopback TCP. Every connection begins with an authenticated `hello`
+envelope that advertises supported protocol versions and optionally carries a
+previous `session_id`. The server returns the selected version, session ID,
+resume flag and request timeout. Requests received before that handshake,
+with duplicate IDs, incompatible versions or stale session generations are
+rejected with structured protocol errors.
+
+The wire envelope and message names are owned by
+`protocol/editor.schema.json`, independently validated with Draft 2020-12
+fixtures, and shared by `hyge-editor-protocol` and the optional PySide6/QML
+client. `hyge-editor` keeps one in-process session registry with a bounded TTL;
+reconnect resumes metadata without creating a second engine/editor state.
+ECS snapshots, reflected values and editor commands are added by R-082 through
+R-084.
 
 **File layout:**
 ```

@@ -20,4 +20,7 @@ pub enum ProtocolIoError {
     /// Envelope fields do not satisfy the wire contract.
     #[error("invalid protocol envelope: {0}")]
     InvalidEnvelope(&'static str),
+    /// A socket operation exceeded the configured request timeout.
+    #[error("protocol request timed out")]
+    Timeout,
 }

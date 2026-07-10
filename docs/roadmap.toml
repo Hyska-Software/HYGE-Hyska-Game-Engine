@@ -1451,10 +1451,12 @@ title = "Protocol schema, compatibility and session lifecycle"
 phase = "phase_8"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-080"]
 summary = "Make the IPC contract independently validatable, version-negotiated, reconnectable and safe to evolve."
+completed_at = "2026-07-10"
+completion_notes = "Implemented negotiated version-one IPC and reconnectable session lifecycle. The JSON Schema now validates the complete envelope shape, conditional hello/hello_ack payloads, engine_error requirements, correlation IDs, and every declared message type; Python tests validate it with Draft 2020-12. hyge-editor-protocol now separates structural frame parsing from strict current-version parsing, supports compatibility error responses, validates correlation/error invariants, and rejects malformed/oversized frames. hyge-editor negotiates supported versions, rejects invalid tokens and malformed handshakes, enforces unique request IDs, applies socket timeouts, maintains one canonical SessionRegistry with generation replacement and 5-minute TTL, and resumes project/scene metadata without duplicating state. The Python client sends supported versions/client identity, retains session_id, reconnects, and surfaces timeout errors. Evidence: cargo test --workspace, cargo clippy --workspace --all-targets -- --deny warnings, cargo doc --workspace --no-deps, cargo fmt --all -- --check, and python -m pytest -q tools/hyge-editor-python/tests (10 passed). R-082 remains responsible for real project/world loading and process-level lifecycle persistence."
 acceptance = [
   "protocol/editor.schema.json validates every request, response and event envelope",
   "handshake rejects incompatible versions and invalid session tokens",
