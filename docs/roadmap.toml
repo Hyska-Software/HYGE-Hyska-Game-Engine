@@ -1380,10 +1380,12 @@ title = "M5 smoke test: full systems scene with 5 prefabs"
 phase = "phase_7"
 owner = "app"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-071", "R-072", "R-074", "R-076"]
 summary = "M5 Definition of Done: scene with 5 prefab instances, 100 physics bodies, audio, input, Lua all hot-reloadable."
+completed_at = "2026-07-10"
+completion_notes = "Implemented the real M5 smoke path in crates/hyge-app/tests/m5_smoke.rs. The test writes and reloads a .hyge-world and .hyge-prefab, loads five complex prefab roots through WorldLoader, runs 100 dynamic Rapier bodies plus a fixed ground and character controller, forwards real Rapier collision transitions into ECS CollisionEvent, registers 16 headless spatial emitters and a Music bus playback request, translates WASD/mouse/gamepad TOML bindings, executes assets/scripts/player.lua on_update against PhysicsVelocity, and verifies script, input, scene, and asset-path hot-reload behavior. Physics event collection, headless audio telemetry, and ScriptEngine module-hook execution were added to make each assertion observable. Validation: cargo fmt --all, clippy with --deny warnings for hyge-physics/audio/script/app, cargo test -p hyge-app --test m5_smoke, and the final workspace test gate passed."
 acceptance = [
   ".hyge-world with 5 prefab instances of a complex asset",
   "100 dynamic rapier3d rigid bodies, 1 character controller, collision events flow into ECS",

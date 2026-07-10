@@ -4,11 +4,12 @@
 //! boundaries are present so R-071 can add full world synchronization without
 //! changing the public crate layout.
 
-use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::{collections::HashMap, sync::Mutex};
 
 use bevy_ecs::prelude::{Entity, Resource};
 use hyge_core::prelude::Vec3;
+use rapier3d::pipeline::EventHandler;
 use rapier3d::prelude::{
     BroadPhase, CCDSolver, ColliderHandle, ColliderSet, ImpulseJointSet, IntegrationParameters,
     IslandManager, MultibodyJointSet, NarrowPhase, PhysicsPipeline, QueryPipeline,
@@ -49,6 +50,7 @@ pub struct RapierPhysicsWorld {
     handle_entities: HashMap<RigidBodyHandle, Entity>,
     island_builder: RapierIslandBuilder,
     step_generation: u64,
+    collision_events: Vec<crate::CollisionEvent>,
 }
 
 impl Default for RapierPhysicsWorld {
@@ -86,6 +88,7 @@ impl RapierPhysicsWorld {
             handle_entities: HashMap::new(),
             island_builder: RapierIslandBuilder::default(),
             step_generation: 0,
+            collision_events: Vec::new(),
         }
     }
 
@@ -118,7 +121,9 @@ impl RapierPhysicsWorld {
 
         let body_handle = self.bodies.insert(builder.build());
         let collider_handle = self.colliders.insert_with_parent(
-            collider_builder(collider).build(),
+            collider_builder(collider)
+                .active_events(rapier3d::prelude::ActiveEvents::COLLISION_EVENTS)
+                .build(),
             body_handle,
             &mut self.bodies,
         );
@@ -142,6 +147,7 @@ impl RapierPhysicsWorld {
             colliders: self.colliders.len(),
         });
 
+        let collector = RapierEventCollector::default();
         self.pipeline.step(
             &self.gravity,
             &self.integration_parameters,
@@ -155,8 +161,27 @@ impl RapierPhysicsWorld {
             &mut self.ccd_solver,
             Some(&mut self.query_pipeline),
             &(),
-            &(),
+            &collector,
         );
+        for (started, first, second) in collector.drain() {
+            let Some(entity_a) = self.entity_for_collider(first) else {
+                continue;
+            };
+            let Some(entity_b) = self.entity_for_collider(second) else {
+                continue;
+            };
+            self.collision_events.push(crate::CollisionEvent {
+                entity_a,
+                entity_b,
+                started,
+                contact: None,
+            });
+        }
+    }
+
+    /// Drains collision transitions emitted by the latest Rapier step.
+    pub fn drain_collision_events(&mut self) -> Vec<crate::CollisionEvent> {
+        self.collision_events.drain(..).collect()
     }
 
     /// Returns the world-space position for an entity body.
@@ -192,6 +217,51 @@ impl RapierPhysicsWorld {
             .iter()
             .filter(|(_, body)| body.body_type() == rigid_body_type(RigidBodyKind::Dynamic))
             .count()
+    }
+
+    fn entity_for_collider(&self, collider: ColliderHandle) -> Option<Entity> {
+        self.collider_handles
+            .iter()
+            .find_map(|(entity, handle)| (*handle == collider).then_some(*entity))
+    }
+}
+
+#[derive(Default)]
+struct RapierEventCollector {
+    collisions: Mutex<Vec<(bool, ColliderHandle, ColliderHandle)>>,
+}
+
+impl EventHandler for RapierEventCollector {
+    fn handle_collision_event(
+        &self,
+        _bodies: &RigidBodySet,
+        _colliders: &ColliderSet,
+        event: rapier3d::prelude::CollisionEvent,
+        _contact_pair: Option<&rapier3d::prelude::ContactPair>,
+    ) {
+        let started = event.started();
+        if let Ok(mut collisions) = self.collisions.lock() {
+            collisions.push((started, event.collider1(), event.collider2()));
+        }
+    }
+
+    fn handle_contact_force_event(
+        &self,
+        _dt: f32,
+        _bodies: &RigidBodySet,
+        _colliders: &ColliderSet,
+        _contact_pair: &rapier3d::prelude::ContactPair,
+        _total_force_magnitude: f32,
+    ) {
+    }
+}
+
+impl RapierEventCollector {
+    fn drain(&self) -> Vec<(bool, ColliderHandle, ColliderHandle)> {
+        self.collisions
+            .lock()
+            .map(|mut collisions| collisions.drain(..).collect())
+            .unwrap_or_default()
     }
 }
 

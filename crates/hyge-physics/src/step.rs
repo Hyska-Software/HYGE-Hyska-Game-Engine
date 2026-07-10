@@ -37,13 +37,17 @@ pub fn accumulate_fixed_steps(
 pub fn physics_step_system(
     config: bevy_ecs::prelude::Res<PhysicsConfig>,
     mut world: bevy_ecs::prelude::ResMut<RapierPhysicsWorld>,
+    mut events: bevy_ecs::prelude::EventWriter<crate::CollisionEvent>,
 ) {
     world.as_mut().step(&config);
+    for event in world.as_mut().drain_collision_events() {
+        events.send(event);
+    }
 }
 
 /// No-op physics step used when the Rapier backend feature is disabled.
 #[cfg(not(feature = "physics-rapier"))]
-pub fn physics_step_system() {}
+pub fn physics_step_system(mut _events: bevy_ecs::prelude::EventWriter<crate::CollisionEvent>) {}
 
 #[cfg(test)]
 mod tests {

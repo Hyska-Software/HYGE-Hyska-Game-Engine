@@ -82,10 +82,13 @@ pub fn spatial_emitter_sync_system(
 
 /// Processes play/stop events.
 pub fn audio_event_system(
-    mut _play_events: EventReader<PlaySound>,
+    mut play_events: EventReader<PlaySound>,
     mut _stop_events: EventReader<StopSound>,
+    mut server: ResMut<AudioServer>,
 ) {
-    // R-079+ wires actual Kira track playback.
+    for event in play_events.read() {
+        server.record_play_request(event.source);
+    }
 }
 
 #[cfg(test)]

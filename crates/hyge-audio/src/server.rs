@@ -3,7 +3,7 @@
 //! Wires real Kira listener and spatial sub tracks. The server can operate in
 //! mock mode (no device) for CI/headless or in full mode with `AudioManager`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy_ecs::prelude::{Entity, Resource};
 use hyge_core::prelude::{HygeError, HygeResult, Vec3};
@@ -32,6 +32,8 @@ pub struct AudioServer {
     buses: AudioBuses,
     listener_handle: Option<ListenerHandle>,
     spatial_emitters: HashMap<Entity, SpatialEmitterHandle>,
+    mock_spatial_emitters: HashSet<Entity>,
+    play_requests: Vec<Entity>,
 }
 
 impl AudioServer {
@@ -48,6 +50,8 @@ impl AudioServer {
             buses: AudioBuses::default(),
             listener_handle: None,
             spatial_emitters: HashMap::new(),
+            mock_spatial_emitters: HashSet::new(),
+            play_requests: Vec::new(),
         })
     }
 
@@ -60,6 +64,8 @@ impl AudioServer {
             buses: AudioBuses::default(),
             listener_handle: None,
             spatial_emitters: HashMap::new(),
+            mock_spatial_emitters: HashSet::new(),
+            play_requests: Vec::new(),
         }
     }
 
@@ -117,6 +123,7 @@ impl AudioServer {
     ) {
         let lid = listener_id.or(self.listener_id());
         let Some(manager) = self.manager.as_mut() else {
+            self.mock_spatial_emitters.insert(entity);
             return;
         };
         let Some(lid) = lid else {
@@ -150,6 +157,24 @@ impl AudioServer {
     /// Removes a spatial emitter.
     pub fn remove_spatial_emitter(&mut self, entity: Entity) {
         self.spatial_emitters.remove(&entity);
+        self.mock_spatial_emitters.remove(&entity);
+    }
+
+    /// Returns the number of spatial emitters currently registered.
+    #[must_use]
+    pub fn spatial_emitter_count(&self) -> usize {
+        self.spatial_emitters.len() + self.mock_spatial_emitters.len()
+    }
+
+    /// Records a playback request for headless integration and diagnostics.
+    pub fn record_play_request(&mut self, source: Entity) {
+        self.play_requests.push(source);
+    }
+
+    /// Returns the number of playback requests recorded since construction.
+    #[must_use]
+    pub fn play_request_count(&self) -> usize {
+        self.play_requests.len()
     }
 
     /// Returns the Kira listener id, if one is active.

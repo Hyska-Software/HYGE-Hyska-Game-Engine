@@ -1543,6 +1543,9 @@ version = "0.1.0"
 dependencies = [
  "bevy_app",
  "bevy_ecs",
+ "bevy_reflect",
+ "blake3",
+ "hyge-asset",
  "hyge-audio",
  "hyge-core",
  "hyge-ecs",

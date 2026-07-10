@@ -360,6 +360,30 @@ The checklist for M2, fully satisfied:
 The next milestone is **M3 (Clustered Forward PBR)**, tracked
 by `docs/roadmap.toml` `phase_4` (R-040..R-049).
 
+#### 5.2.3 M5 (Full Systems Smoke Scene) — ✅ COMPLETE (2026-07-10)
+
+M5's full-systems smoke gate is implemented by
+`crates/hyge-app/tests/m5_smoke.rs` and exercises the production APIs in a
+headless application:
+
+- [x] A serialized `.hyge-world` loads five instances of a serialized complex
+  prefab through `WorldLoader`.
+- [x] 100 dynamic Rapier bodies, a fixed ground, one character controller,
+  and real Rapier collision transitions flow into ECS `CollisionEvent`.
+- [x] 16 spatial audio emitters and a Music-bus playback request are observed
+  through the headless `AudioServer` telemetry.
+- [x] WASD, mouse-look, and gamepad bindings are parsed and translated from
+  TOML; binding changes are hot-reloadable.
+- [x] `assets/scripts/player.lua` exposes `on_update(entity, dt)`, reads the
+  move action, and writes `PhysicsVelocity` through the reflected Lua API.
+- [x] Script, input, scene, and asset-path changes are exercised without an
+  engine restart.
+- [x] `cargo test --workspace` and the relevant `clippy --deny warnings`
+  gates pass.
+
+The next milestone is **M6 (Full Visual Editor)**, tracked by
+`docs/roadmap.toml` `phase_8` (R-080..R-089).
+
 ### 5.3 Per release (v0.1.0)
 
 - [ ] All M0–M7 DoDs satisfied.

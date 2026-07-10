@@ -2,7 +2,7 @@
 
 use bevy_ecs::world::World;
 use hyge_core::prelude::{HygeError, HygeResult};
-use mlua::{Lua, Value};
+use mlua::{Lua, Table, Value};
 
 use crate::{api, sandbox};
 
@@ -58,6 +58,27 @@ impl ScriptEngine {
                 self.lua.load(source).eval()
             })
             .map_err(|error| HygeError::parse(format!("Lua execution: {error}")))
+    }
+
+    /// Evaluates a returned script module and invokes its `on_update` hook.
+    pub fn execute_module_update(
+        &self,
+        world: &mut World,
+        source: &str,
+        entity: u64,
+        delta: f32,
+    ) -> HygeResult<()> {
+        self.lua
+            .scope(|scope| {
+                let hyge = api::install(&self.lua, scope, world, delta)?;
+                self.lua.globals().set("hyge", hyge)?;
+                let module: Table = self.lua.load(source).eval()?;
+                if let Some(on_update) = module.get::<Option<mlua::Function>>("on_update")? {
+                    on_update.call::<()>((entity, delta))?;
+                }
+                Ok(())
+            })
+            .map_err(|error| HygeError::parse(format!("Lua module update: {error}")))
     }
 }
 

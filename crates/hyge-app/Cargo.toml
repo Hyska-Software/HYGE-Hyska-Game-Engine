@@ -9,16 +9,19 @@ description = "App builder, AppConfig, default_plugins. The only crate that wire
 
 [dependencies]
 bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
 bevy_app = { workspace = true }
 winit = { workspace = true }
 wgpu = { workspace = true }
 tracing = { workspace = true }
+blake3 = { workspace = true }
 hyge-core = { workspace = true }
+hyge-asset = { workspace = true }
 hyge-ecs = { workspace = true }
 hyge-window = { workspace = true }
 hyge-render = { workspace = true }
 hyge-scene = { workspace = true }
-hyge-physics = { workspace = true }
+hyge-physics = { workspace = true, features = ["physics-rapier"] }
 hyge-audio = { workspace = true }
 hyge-input = { workspace = true }
 hyge-script = { workspace = true }
