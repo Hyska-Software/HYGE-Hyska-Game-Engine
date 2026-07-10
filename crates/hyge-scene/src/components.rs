@@ -545,36 +545,9 @@ pub struct AudioBus {
 // R-061 — Scripting
 // =============================================================================
 
-/// Reference to a Lua script asset.
-#[derive(Component, Reflect, Clone, Debug, PartialEq, Default)]
-#[reflect(Component)]
-pub struct ScriptRef {
-    /// Asset path (`.lua`).
-    pub path: String,
-    /// Optional named table / module within the script.
-    pub table: Option<String>,
-    /// Whether the script is currently executed.
-    pub enabled: bool,
-}
-
-impl ScriptRef {
-    /// Builds an enabled script reference.
-    #[must_use]
-    pub fn new(path: impl Into<String>) -> Self {
-        Self {
-            path: path.into(),
-            table: None,
-            enabled: true,
-        }
-    }
-
-    /// Sets the optional table/module name.
-    #[must_use]
-    pub fn table(mut self, table: impl Into<String>) -> Self {
-        self.table = Some(table.into());
-        self
-    }
-}
+/// Compatibility re-export; the canonical component is owned by
+/// [`hyge_script::components::ScriptRef`].
+pub use hyge_script::components::ScriptRef;
 
 // =============================================================================
 // R-061 — Physics stubs (delegated to hyge-physics in phase 7)

@@ -11,6 +11,7 @@ description = "glTF import, .hyge-world / .hyge-prefab formats, hierarchical pre
 hyge-core = { workspace = true }
 hyge-ecs = { workspace = true }
 hyge-asset = { workspace = true }
+hyge-script = { workspace = true }
 gltf = { workspace = true }
 meshopt = { workspace = true }
 serde = { workspace = true }

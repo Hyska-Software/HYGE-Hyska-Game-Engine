@@ -5,7 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Lua via mlua, sandbox, bevy_reflect-driven bindings, hot-reload. Implementation deferred to M7 (see roadmap R-076..R-077)."
+description = "Sandboxed Lua runtime with bevy_reflect ECS bindings and engine APIs."
 
 [dependencies]
 hyge-core = { workspace = true }
+hyge-ecs = { workspace = true }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+mlua = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

@@ -146,7 +146,7 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 # Scripting
-mlua = { version = "0.10", features = ["lua54", "vendored", "send"] }
+mlua = { version = "0.10", features = ["lua54", "vendored", "send", "serialize"] }
 
 # Editor
 egui = "0.30"

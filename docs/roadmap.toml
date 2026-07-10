@@ -1339,10 +1339,12 @@ title = "hyge-script crate skeleton (mlua, sandbox, bevy_reflect)"
 phase = "phase_7"
 owner = "script"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-061"]
 summary = "Create hyge-script with mlua engine, sandbox, bevy_reflect bindings, hot-reload."
+completed_at = "2026-07-09"
+completion_notes = "Implemented hyge-script with sandboxed mlua 0.10 runtime, explicit removal of os/io/debug/package/require, scoped hyge.log/world.entity/world.get/set/event.send/input.action/audio.play/time.delta APIs, ReflectSerializer/ReflectDeserializer component access through AppTypeRegistry, ScriptRef canonical component with hyge-scene compatibility re-export, ScriptError event, ScriptPlugin/ScriptRuntime integration in hyge-app, and deterministic tests. R-077 remains responsible for notify-based script hot-reload and on_reload state migration."
 acceptance = [
   "crates/hyge-script/Cargo.toml declares deps on mlua, bevy_reflect, hyge-ecs, hyge-core",
   "ScriptEngine wraps mlua::Lua",

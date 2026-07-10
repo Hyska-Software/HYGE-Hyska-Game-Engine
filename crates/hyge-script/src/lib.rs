@@ -1,11 +1,19 @@
-//! Hyge script: a Lua runtime via `mlua` integrated with the ECS through
-//! `bevy_reflect`.
+//! Sandboxed Lua scripting for Hyge.
 //!
-//! Provides a sandbox (strips `os`, `io`, `debug`, `package`, raw `require`),
-//! a typed `hyge.*` API surface generated from `Reflect` metadata, and
-//! hot-reload with an `on_reload(old_state)` hook for state preservation.
-//!
-//! WASM via `wasmtime` is deferred to v0.2 (see `docs/architecture.md` §17).
-//!
-//! See `docs/architecture.md` §6.11 for the planned public surface.
-//! Implementation is tracked in `docs/roadmap.toml` under R-076..R-077.
+//! Scripts execute through [`ScriptEngine`] and interact with the ECS through
+//! the `hyge.*` API. Component serialization and mutation are driven by the
+//! same `bevy_reflect` registry used by scene and editor code.
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
+pub mod api;
+pub mod components;
+pub mod engine;
+pub mod events;
+pub mod plugin;
+pub mod prelude;
+pub mod reflect_bind;
+pub mod sandbox;
+
+pub use engine::ScriptEngine;
