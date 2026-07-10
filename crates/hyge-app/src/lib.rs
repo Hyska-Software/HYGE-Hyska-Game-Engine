@@ -22,6 +22,7 @@ pub mod prelude;
 
 use hyge_audio::prelude::AudioPlugin;
 use hyge_ecs::prelude::*;
+use hyge_input::prelude::{InputConfig as RuntimeInputConfig, InputPlugin};
 use hyge_physics::prelude::{accumulate_fixed_steps, PhysicsPlugin};
 use hyge_render::prelude::*;
 use hyge_scene::prelude::*;
@@ -29,7 +30,9 @@ use hyge_window::prelude::*;
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
+use winit::event::{DeviceEvent as WinitDeviceEvent, ElementState, MouseScrollDelta, RawKeyEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::PhysicalKey;
 
 /// The Hyge application. Owns the bevy `App`, the `winit` event loop
 /// driver state, the `Window` once it is created, and the
@@ -226,6 +229,11 @@ impl ApplicationHandler for App {
             match Window::new(event_loop, self.config.window.clone()) {
                 Ok(window) => {
                     let handle = window.handle();
+                    if self.config.window.raw_input {
+                        if let Err(error) = register_raw_input_devices(&handle) {
+                            tracing::warn!(%error, "raw input registration unavailable; using winit fallback");
+                        }
+                    }
                     // Store the `Arc<winit::Window>` in the `WindowState`
                     // resource so other systems (renderer, input) can
                     // read it.
@@ -300,6 +308,25 @@ impl ApplicationHandler for App {
             }
         }
 
+        if let WindowEvent::Focused(focused) = &event {
+            self.inner
+                .world_mut()
+                .send_event(hyge_window::events::DeviceEvent {
+                    event: hyge_window::events::DeviceEventKind::WindowFocus { focused: *focused },
+                });
+        }
+
+        if let WindowEvent::MouseInput { state, button, .. } = &event {
+            self.inner
+                .world_mut()
+                .send_event(hyge_window::events::DeviceEvent {
+                    event: hyge_window::events::DeviceEventKind::MouseButton {
+                        button: mouse_button_id(*button),
+                        pressed: *state == ElementState::Pressed,
+                    },
+                });
+        }
+
         // Handle the user closing the window: exit the event loop.
         if matches!(event, WindowEvent::CloseRequested) {
             event_loop.exit();
@@ -318,6 +345,18 @@ impl ApplicationHandler for App {
                 renderer.resize(width, height);
             }
         }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: WinitDeviceEvent,
+    ) {
+        let Some(device_event) = translate_device_event(event) else {
+            return;
+        };
+        self.inner.world_mut().send_event(device_event);
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
@@ -379,7 +418,79 @@ pub fn default_plugins(config: &AppConfig) -> Vec<Box<dyn HygePlugin>> {
         Box::new(ScenePlugin),
         Box::new(PhysicsPlugin::new((&config.physics).into())),
         Box::new(AudioPlugin),
+        Box::new(InputPlugin::new(RuntimeInputConfig {
+            binding_file: Some(
+                config
+                    .input
+                    .binding_file
+                    .clone()
+                    .unwrap_or_else(|| "assets/input.bind.toml".into()),
+            ),
+            enable_hot_reload: true,
+        })),
     ]
+}
+
+fn translate_device_event(event: WinitDeviceEvent) -> Option<hyge_window::events::DeviceEvent> {
+    use hyge_window::events::{DeviceEvent, DeviceEventKind};
+    let event = match event {
+        WinitDeviceEvent::MouseMotion { delta } => DeviceEventKind::MouseMotion {
+            dx: delta.0 as f32,
+            dy: delta.1 as f32,
+        },
+        WinitDeviceEvent::MouseWheel { delta } => match delta {
+            MouseScrollDelta::LineDelta(x, y) => DeviceEventKind::MouseWheel { dx: x, dy: y },
+            MouseScrollDelta::PixelDelta(value) => DeviceEventKind::MouseWheel {
+                dx: value.x as f32,
+                dy: value.y as f32,
+            },
+        },
+        WinitDeviceEvent::Key(RawKeyEvent {
+            physical_key,
+            state,
+        }) => DeviceEventKind::Key {
+            scancode: 0,
+            key: physical_key_name(physical_key),
+            pressed: state == ElementState::Pressed,
+        },
+        WinitDeviceEvent::Button { button, state } => DeviceEventKind::MouseButton {
+            button,
+            pressed: state == ElementState::Pressed,
+        },
+        WinitDeviceEvent::Motion { axis, value } => DeviceEventKind::MouseWheel {
+            dx: if axis == 0 { value as f32 } else { 0.0 },
+            dy: if axis == 1 { value as f32 } else { 0.0 },
+        },
+        WinitDeviceEvent::Added | WinitDeviceEvent::Removed => return None,
+    };
+    Some(DeviceEvent { event })
+}
+
+fn physical_key_name(key: PhysicalKey) -> String {
+    let name = format!("{key:?}").to_ascii_lowercase();
+    let name = name
+        .strip_prefix("code(")
+        .and_then(|value| value.strip_suffix(')'))
+        .unwrap_or(&name)
+        .replace("key", "");
+    match name.as_str() {
+        "controlleft" | "controlright" => "control".into(),
+        "shiftleft" | "shiftright" => "shift".into(),
+        "altleft" | "altright" => "alt".into(),
+        "superleft" | "superright" => "super".into(),
+        _ => name,
+    }
+}
+
+fn mouse_button_id(button: winit::event::MouseButton) -> u32 {
+    match button {
+        winit::event::MouseButton::Left => 0,
+        winit::event::MouseButton::Right => 1,
+        winit::event::MouseButton::Middle => 2,
+        winit::event::MouseButton::Back => 3,
+        winit::event::MouseButton::Forward => 4,
+        winit::event::MouseButton::Other(value) => u32::from(value),
+    }
 }
 
 #[cfg(test)]

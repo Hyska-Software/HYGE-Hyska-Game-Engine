@@ -5,7 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Action<T> abstraction, TOML binding parser, hot-reload, edge detection, gamepad via gilrs. Implementation deferred to M7 (see roadmap R-074..R-075)."
+description = "Action<T> abstraction, TOML bindings, hot-reload, raw input, and gamepad support."
 
 [dependencies]
 hyge-core = { workspace = true }
+hyge-ecs = { workspace = true }
+hyge-window = { workspace = true }
+bevy_app = { workspace = true }
+bevy_ecs = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+notify = { workspace = true }
+gilrs = { workspace = true }

@@ -66,8 +66,38 @@ pub enum DeviceEventKind {
     Key {
         /// Platform-specific scan code.
         scancode: u32,
+        /// Normalized logical key name when available.
+        key: String,
         /// `true` for key-down, `false` for key-up.
         pressed: bool,
+    },
+
+    /// Mouse button state.
+    MouseButton {
+        /// Platform-independent button number.
+        button: u32,
+        /// `true` for press, `false` for release.
+        pressed: bool,
+    },
+
+    /// Gamepad button state.
+    GamepadButton {
+        /// Platform-specific gamepad id.
+        id: u32,
+        /// Platform-independent button number.
+        button: u32,
+        /// `true` for press, `false` for release.
+        pressed: bool,
+    },
+
+    /// Gamepad axis value.
+    GamepadAxis {
+        /// Platform-specific gamepad id.
+        id: u32,
+        /// Platform-independent axis number.
+        axis: u32,
+        /// Current normalized axis value.
+        value: f32,
     },
 
     /// A gamepad was connected. `id` is the platform-specific device id;
@@ -83,6 +113,12 @@ pub enum DeviceEventKind {
     GamepadDisconnected {
         /// Platform-specific gamepad id.
         id: u32,
+    },
+
+    /// Window focus changed. Losing focus causes input state to reset.
+    WindowFocus {
+        /// Whether the window is focused.
+        focused: bool,
     },
 }
 

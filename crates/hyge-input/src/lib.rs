@@ -1,8 +1,14 @@
-//! Hyge input: `Action<T>` abstraction (Button, Axis, Vec2) with TOML-defined
-//! bindings and hot-reload via `notify`.
+//! Hyge's device-independent action input layer.
 //!
-//! Reads `DeviceEvent` from `hyge-window` and gamepad events from `gilrs`,
-//! aggregates per binding, and exposes the resulting `ActionMap` to game code.
-//!
-//! See `docs/architecture.md` §6.10 for the planned public surface.
-//! Implementation is tracked in `docs/roadmap.toml` under R-074..R-075.
+//! The crate owns TOML bindings, action state, edge detection, hot reload,
+//! and conversion of `hyge-window` device events into gameplay actions.
+
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
+pub mod action;
+pub mod binding;
+pub mod hot_reload;
+pub mod plugin;
+pub mod prelude;
+pub mod translate;

@@ -1297,10 +1297,12 @@ title = "hyge-input crate skeleton (Action<T>, TOML, raw input)"
 phase = "phase_7"
 owner = "input"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "low"
 dependencies = ["R-012", "R-061"]
 summary = "Create hyge-input with Action<T>, TOML bindings, hot-reload, raw input."
+completed_at = "2026-07-09"
+completion_notes = "Implemented hyge-input with ActionMap, Button/Axis/Vec2 actions, validated TOML bindings, keyboard/mouse/gamepad translation, edge detection, scaled aggregation, focus reset, notify hot-reload with atomic replacement, InputPlugin scheduling, and default hyge-app integration. Validation: cargo test -p hyge-input (5 passed), cargo clippy -p hyge-input --all-targets --all-features -- --deny warnings, cargo test -p hyge-window, cargo test -p hyge-app, workspace clippy, and workspace docs passed."
 acceptance = [
   "crates/hyge-input/Cargo.toml declares deps on toml, serde, notify, hyge-ecs, hyge-window, hyge-core",
   "ActionMap with actions + bindings",
@@ -1318,10 +1320,12 @@ title = "Raw input (Windows) and gilrs (gamepad)"
 phase = "phase_7"
 owner = "input"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-074"]
 summary = "Raw input via RegisterRawInputDevices on Windows, gilrs for gamepad on all platforms."
+completed_at = "2026-07-09"
+completion_notes = "Integrated RegisterRawInputDevices during hyge-app window creation when raw_input is enabled, added winit device_event translation for keyboard/mouse motion/wheel/buttons, added focus reset, and added gilrs polling for gamepad connection, buttons, and axes with deterministic IDs. Non-Windows uses the same winit event fallback API."
 acceptance = [
   "Windows: RegisterRawInputDevices integrated into winit event loop",
   "Linux/macOS: evdev direct (or winit fallback) behind same RawInput trait",
