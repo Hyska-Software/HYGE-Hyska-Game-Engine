@@ -441,6 +441,13 @@ fn handle_authenticated(
         MessageType::SetEditorCamera => viewport_set_camera(envelope, runtime),
         MessageType::SetViewportSize => viewport_set_size(envelope, runtime),
         MessageType::ViewportInput => viewport_input(envelope, runtime),
+        MessageType::OpenViewportTransport => viewport_open_transport(envelope, sessions, binding),
+        MessageType::CloseViewportTransport => {
+            viewport_close_transport(envelope, sessions, binding)
+        }
+        MessageType::ViewportTransportReset => {
+            viewport_reset_transport(envelope, sessions, binding)
+        }
         MessageType::EditComponent
         | MessageType::AddComponent
         | MessageType::RemoveComponent
@@ -471,6 +478,85 @@ fn handle_authenticated(
                 "editor command is reserved for a later editor milestone",
             )]
         }
+    }
+}
+
+fn viewport_open_transport(
+    envelope: &Envelope,
+    sessions: &Arc<Mutex<SessionRegistry>>,
+    binding: &crate::state::SessionBinding,
+) -> Vec<Envelope> {
+    match sessions
+        .lock()
+        .ok()
+        .and_then(|mut registry| registry.open_transport(binding).ok())
+    {
+        Some((name, generation)) => vec![Envelope::new(
+            &envelope.message_id,
+            MessageType::ViewportTransportReady,
+            serde_json::json!({"mapping_name":name,"generation":generation,"width":640,"height":360,"pixel_format":"rgba8_srgb","ring_slots":3}),
+        )],
+        None => vec![Envelope::error(
+            &envelope.message_id,
+            "viewport_transport_unavailable",
+            "could not open session viewport mapping",
+        )],
+    }
+}
+
+fn viewport_close_transport(
+    envelope: &Envelope,
+    sessions: &Arc<Mutex<SessionRegistry>>,
+    binding: &crate::state::SessionBinding,
+) -> Vec<Envelope> {
+    match sessions
+        .lock()
+        .ok()
+        .and_then(|mut registry| registry.close_transport(binding).ok())
+    {
+        Some(()) => vec![Envelope::new(
+            &envelope.message_id,
+            MessageType::CommandCompleted,
+            serde_json::json!({"command":"close_viewport_transport","released":true}),
+        )],
+        None => vec![Envelope::error(
+            &envelope.message_id,
+            "viewport_transport_unavailable",
+            "could not close session viewport mapping",
+        )],
+    }
+}
+
+fn viewport_reset_transport(
+    envelope: &Envelope,
+    sessions: &Arc<Mutex<SessionRegistry>>,
+    binding: &crate::state::SessionBinding,
+) -> Vec<Envelope> {
+    let width = envelope
+        .payload
+        .get("width")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(640) as u32;
+    let height = envelope
+        .payload
+        .get("height")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(360) as u32;
+    match sessions
+        .lock()
+        .ok()
+        .and_then(|mut registry| registry.reset_transport(binding, width, height).ok())
+    {
+        Some((name, generation)) => vec![Envelope::new(
+            &envelope.message_id,
+            MessageType::ViewportTransportReset,
+            serde_json::json!({"mapping_name":name,"generation":generation,"width":width,"height":height}),
+        )],
+        None => vec![Envelope::error(
+            &envelope.message_id,
+            "viewport_transport_unavailable",
+            "could not reset session viewport mapping",
+        )],
     }
 }
 

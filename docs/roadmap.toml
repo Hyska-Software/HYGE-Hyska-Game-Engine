@@ -1588,10 +1588,12 @@ title = "Viewport frame transport and input bridge"
 phase = "phase_10"
 owner = "editor"
 priority = "P1"
-status = "in_progress"
+status = "complete"
 risk = "high"
 dependencies = ["R-087", "R-080"]
 summary = "Deliver viewport frames and editor input through a shared-memory ring plus versioned control messages."
+completed_at = "2026-07-11"
+completion_notes = "Implemented the Windows named shared-memory transport and revisioned input bridge. hyge-editor-shm owns the isolated Win32 mapping FFI; SessionRegistry owns one mapping per authenticated session and replaces it on reconnect. R-088 handlers open, close and reset transport generations, while the ring publishes RGBA8 frame headers/payloads with commit sequences and the Python consumer validates stable copies and counts dropped frames. Input batches enforce consecutive revisions, generation identity, bounded event count and 120 batches/s. Evidence: r088_viewport_transport stress/lifecycle tests, hyge-editor unit tests, protocol tests, Python IPC tests, workspace clippy and workspace documentation gates pass."
 acceptance = [
   "ring buffer publishes frame id, dimensions, pixel format and synchronization state",
   "consumer detects dropped frames and reconnects without corrupting memory",

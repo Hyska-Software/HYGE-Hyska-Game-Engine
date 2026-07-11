@@ -17,6 +17,8 @@ pub const RING_SLOT_COUNT: usize = 3;
 pub const PIXEL_FORMAT_RGBA8_SRGB: u32 = 1;
 /// Largest supported transport dimension.
 pub const MAX_VIEWPORT_DIMENSION: u32 = 4096;
+const GLOBAL_HEADER_BYTES: usize = 64;
+const SLOT_HEADER_BYTES: usize = 64;
 
 /// State published in the shared-memory header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -168,6 +170,47 @@ impl SharedViewportTransport {
     pub const fn is_mapped(&self) -> bool {
         self.mapping.is_some()
     }
+
+    /// Publishes a frame into both the verifier and the named mapping.
+    pub fn publish(
+        &mut self,
+        width: u32,
+        height: u32,
+        scene_revision: u64,
+        camera_revision: u64,
+        pixels: &[u8],
+    ) -> Result<FrameHeader, String> {
+        let header = self
+            .ring
+            .publish(width, height, scene_revision, camera_revision, pixels)?;
+        if let Some(mapping) = &mut self.mapping {
+            let stride = SLOT_HEADER_BYTES + pixels.len();
+            let offset = GLOBAL_HEADER_BYTES + header.slot as usize * stride;
+            if offset + stride > mapping.len() {
+                return Err("shared-memory mapping is too small for viewport frame".into());
+            }
+            mapping.with_bytes_mut(|bytes| {
+                bytes[..8].copy_from_slice(&RING_MAGIC);
+                bytes[8..12].copy_from_slice(&RING_ABI_VERSION.to_le_bytes());
+                bytes[12..16].copy_from_slice(&(RING_SLOT_COUNT as u32).to_le_bytes());
+                bytes[16..24].copy_from_slice(&header.generation.to_le_bytes());
+                bytes[offset..offset + SLOT_HEADER_BYTES].fill(0);
+                bytes[offset..offset + 8].copy_from_slice(&header.frame_id.to_le_bytes());
+                bytes[offset + 8..offset + 12].copy_from_slice(&header.width.to_le_bytes());
+                bytes[offset + 12..offset + 16].copy_from_slice(&header.height.to_le_bytes());
+                bytes[offset + 16..offset + 20].copy_from_slice(&header.pixel_format.to_le_bytes());
+                bytes[offset + 20..offset + 24].copy_from_slice(&header.byte_len.to_le_bytes());
+                bytes[offset + 24..offset + 32]
+                    .copy_from_slice(&header.scene_revision.to_le_bytes());
+                bytes[offset + 32..offset + 40]
+                    .copy_from_slice(&header.camera_revision.to_le_bytes());
+                bytes[offset + 40..offset + 48].copy_from_slice(&header.sequence.to_le_bytes());
+                bytes[offset + SLOT_HEADER_BYTES..offset + stride].copy_from_slice(pixels);
+                bytes[offset + 48..offset + 56].copy_from_slice(&header.sequence.to_le_bytes());
+            });
+        }
+        Ok(header)
+    }
 }
 
 /// Normalized editor input accepted by the viewport.
@@ -211,17 +254,10 @@ pub struct ViewportInputBatch {
 }
 
 /// Applies ordered input batches and rate-limits the control path.
+#[derive(Default)]
 pub struct InputBridge {
     revision: u64,
     recent: VecDeque<Instant>,
-}
-impl Default for InputBridge {
-    fn default() -> Self {
-        Self {
-            revision: 0,
-            recent: VecDeque::new(),
-        }
-    }
 }
 impl InputBridge {
     /// Returns the latest accepted input revision.

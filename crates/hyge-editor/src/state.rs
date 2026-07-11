@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::lifecycle::{EditorSessionRuntime, RuntimeHandle};
+use crate::transport::{SharedViewportTransport, MAX_VIEWPORT_DIMENSION};
 
 /// Mutable metadata owned by one editor session.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -40,6 +41,7 @@ struct SessionRecord {
     last_seen: Instant,
     generation: u64,
     connected: bool,
+    transport: Option<SharedViewportTransport>,
 }
 
 /// In-process source of truth for reconnectable editor sessions.
@@ -80,10 +82,12 @@ impl SessionRegistry {
                 last_seen: now,
                 generation,
                 connected: false,
+                transport: None,
             });
         record.last_seen = now;
         record.generation = generation;
         record.connected = true;
+        record.transport = None;
         Ok((
             SessionBinding {
                 session_id,
@@ -169,6 +173,58 @@ impl SessionRegistry {
         Ok(record.runtime.clone())
     }
 
+    pub(crate) fn open_transport(
+        &mut self,
+        binding: &SessionBinding,
+    ) -> Result<(String, u64), SessionError> {
+        let record = self
+            .sessions
+            .get_mut(&binding.session_id)
+            .ok_or(SessionError::NotFound)?;
+        if record.generation != binding.generation || !record.connected {
+            return Err(SessionError::Replaced);
+        }
+        let name = format!(
+            "Local\\hyge-editor-{}-{}",
+            binding.session_id, binding.generation
+        );
+        let bytes = 64 + 3 * (64 + 640 * 360 * 4);
+        record.transport = Some(
+            SharedViewportTransport::create(name.clone(), binding.generation, bytes)
+                .map_err(|_| SessionError::NotFound)?,
+        );
+        Ok((name, binding.generation))
+    }
+
+    pub(crate) fn close_transport(&mut self, binding: &SessionBinding) -> Result<(), SessionError> {
+        let record = self
+            .sessions
+            .get_mut(&binding.session_id)
+            .ok_or(SessionError::NotFound)?;
+        if record.generation != binding.generation || !record.connected {
+            return Err(SessionError::Replaced);
+        }
+        record.transport = None;
+        Ok(())
+    }
+
+    pub(crate) fn reset_transport(
+        &mut self,
+        binding: &SessionBinding,
+        width: u32,
+        height: u32,
+    ) -> Result<(String, u64), SessionError> {
+        if width == 0
+            || height == 0
+            || width > MAX_VIEWPORT_DIMENSION
+            || height > MAX_VIEWPORT_DIMENSION
+        {
+            return Err(SessionError::NotFound);
+        }
+        self.close_transport(binding)?;
+        self.open_transport(binding)
+    }
+
     pub(crate) fn expire(&mut self, ttl: Duration) {
         let now = Instant::now();
         self.sessions
@@ -233,5 +289,22 @@ mod tests {
             registry.bind(Some("missing"), Duration::from_secs(1)),
             Err(SessionError::NotFound)
         );
+    }
+
+    #[test]
+    fn viewport_transport_is_session_owned_and_replaced_on_reconnect() {
+        let mut registry = SessionRegistry::default();
+        let (first, _) = registry.bind(None, Duration::from_secs(300)).expect("bind");
+        let (name, generation) = registry.open_transport(&first).expect("open transport");
+        assert!(name.contains(&first.session_id));
+        assert_eq!(generation, first.generation);
+        let (second, resumed) = registry
+            .bind(Some(&first.session_id), Duration::from_secs(300))
+            .expect("reconnect");
+        assert!(resumed);
+        assert_eq!(registry.open_transport(&first), Err(SessionError::Replaced));
+        let (_, next_generation) = registry.open_transport(&second).expect("reopen transport");
+        assert_ne!(generation, next_generation);
+        registry.close_transport(&second).expect("close transport");
     }
 }

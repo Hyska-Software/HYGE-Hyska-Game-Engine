@@ -69,7 +69,7 @@ mod tests {
         let mut envelope = Envelope::new("1", MessageType::Hello, serde_json::json!({}));
         envelope.protocol_version = PROTOCOL_VERSION + 1;
         let error = write_envelope(&mut Vec::new(), &envelope).expect_err("version must fail");
-        assert!(matches!(error, ProtocolIoError::UnsupportedVersion(2)));
+        assert!(matches!(error, ProtocolIoError::UnsupportedVersion(3)));
     }
 
     #[test]
@@ -127,7 +127,7 @@ mod tests {
         write_frame(&mut strict_bytes, &decoded).expect("structural frame must write");
         assert!(matches!(
             read_envelope(&mut Cursor::new(strict_bytes)),
-            Err(ProtocolIoError::UnsupportedVersion(2))
+            Err(ProtocolIoError::UnsupportedVersion(3))
         ));
     }
 }

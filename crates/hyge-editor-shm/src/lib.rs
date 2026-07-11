@@ -43,6 +43,12 @@ pub struct SharedMapping {
     len: usize,
 }
 
+// A mapping handle is an OS-owned resource. Higher layers serialize access
+// through the session mutex; moving the owner between those guarded threads
+// does not duplicate or alias the view.
+#[cfg(windows)]
+unsafe impl Send for SharedMapping {}
+
 impl SharedMapping {
     /// Creates a pagefile-backed named mapping of exactly `len` bytes.
     pub fn create(name: &str, len: usize) -> Result<Self, SharedMemoryError> {
@@ -58,6 +64,12 @@ impl SharedMapping {
     #[must_use]
     pub const fn len(&self) -> usize {
         self.len
+    }
+
+    /// Returns whether the mapping has no bytes.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Reads mapping bytes while keeping raw pointer access internal.
