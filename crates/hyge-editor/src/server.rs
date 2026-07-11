@@ -17,6 +17,7 @@ use hyge_editor_protocol::{
 
 use crate::{
     auth::ConnectionAuth,
+    commands::EditorCommand,
     lifecycle::{LifecycleSnapshot, LifecycleState},
     state::{SessionError, SessionRegistry, SessionSnapshot},
 };
@@ -421,13 +422,22 @@ fn handle_authenticated(
             }
         }
     };
-    match envelope.message_type {
+    match envelope.message_type.clone() {
         MessageType::OpenProject => lifecycle_open_project(envelope, sessions, binding, runtime),
         MessageType::OpenScene => lifecycle_open_scene(envelope, sessions, binding, runtime),
         MessageType::SaveScene => lifecycle_save_scene(envelope, runtime, &binding.session_id),
         MessageType::SelectEntities => {
             lifecycle_select_entities(envelope, runtime, &binding.session_id)
         }
+        MessageType::EditComponent
+        | MessageType::AddComponent
+        | MessageType::RemoveComponent
+        | MessageType::ReparentEntity
+        | MessageType::DuplicateEntity
+        | MessageType::DestroyEntity
+        | MessageType::InstantiatePrefab
+        | MessageType::Undo
+        | MessageType::Redo => editor_command(envelope, runtime),
         MessageType::ServerShutdown => {
             shutdown.store(true, Ordering::Release);
             vec![Envelope::new(
@@ -445,6 +455,104 @@ fn handle_authenticated(
             )]
         }
     }
+}
+
+fn editor_command(envelope: &Envelope, runtime: crate::lifecycle::RuntimeHandle) -> Vec<Envelope> {
+    let expected_revision = match envelope
+        .payload
+        .get("expected_revision")
+        .and_then(serde_json::Value::as_u64)
+    {
+        Some(revision) => revision,
+        None => {
+            return vec![Envelope::error(
+                &envelope.message_id,
+                "invalid_request",
+                "mutating editor requests require expected_revision",
+            )]
+        }
+    };
+    let result = runtime
+        .lock()
+        .map_err(|_| {
+            crate::commands::CommandFailure::new("command_failed", "runtime lock poisoned")
+        })
+        .and_then(|mut runtime| match envelope.message_type {
+            MessageType::Undo => runtime.undo_command(expected_revision),
+            MessageType::Redo => runtime.redo_command(expected_revision),
+            _ => {
+                let command = decode_editor_command(envelope)?;
+                runtime.apply_command(expected_revision, command)
+            }
+        });
+    match result {
+        Ok((effect, snapshot)) => {
+            let command = command_name(envelope.message_type.clone());
+            vec![
+                world_snapshot(envelope, &snapshot),
+                selection_changed(envelope, &snapshot),
+                command_completed_editor(envelope, command, &effect, &snapshot),
+            ]
+        }
+        Err(error) => vec![command_error(envelope, error)],
+    }
+}
+
+fn command_name(message_type: MessageType) -> &'static str {
+    match message_type {
+        MessageType::EditComponent => "edit_component",
+        MessageType::AddComponent => "add_component",
+        MessageType::RemoveComponent => "remove_component",
+        MessageType::ReparentEntity => "reparent_entity",
+        MessageType::DuplicateEntity => "duplicate_entity",
+        MessageType::DestroyEntity => "destroy_entity",
+        MessageType::InstantiatePrefab => "instantiate_prefab",
+        MessageType::Undo => "undo",
+        MessageType::Redo => "redo",
+        _ => "editor_command",
+    }
+}
+
+fn decode_editor_command(
+    envelope: &Envelope,
+) -> Result<EditorCommand, crate::commands::CommandFailure> {
+    let payload = envelope.payload.clone();
+    fn decode<T: serde::de::DeserializeOwned>(
+        value: serde_json::Value,
+    ) -> Result<T, crate::commands::CommandFailure> {
+        serde_json::from_value(value).map_err(|error| {
+            crate::commands::CommandFailure::new("invalid_request", error.to_string())
+        })
+    }
+    match envelope.message_type.clone() {
+        MessageType::EditComponent => decode::<crate::commands::EditComponentCommand>(payload)
+            .map(EditorCommand::EditComponent),
+        MessageType::AddComponent => {
+            decode::<crate::commands::AddComponentCommand>(payload).map(EditorCommand::AddComponent)
+        }
+        MessageType::RemoveComponent => decode::<crate::commands::RemoveComponentCommand>(payload)
+            .map(EditorCommand::RemoveComponent),
+        MessageType::ReparentEntity => {
+            decode::<crate::commands::ReparentCommand>(payload).map(EditorCommand::Reparent)
+        }
+        MessageType::DuplicateEntity => {
+            decode::<crate::commands::DuplicateCommand>(payload).map(EditorCommand::Duplicate)
+        }
+        MessageType::DestroyEntity => {
+            decode::<crate::commands::DestroyCommand>(payload).map(EditorCommand::Destroy)
+        }
+        MessageType::InstantiatePrefab => {
+            decode::<crate::commands::InstantiateCommand>(payload).map(EditorCommand::Instantiate)
+        }
+        _ => Err(crate::commands::CommandFailure::new(
+            "invalid_request",
+            "message is not an editor command",
+        )),
+    }
+}
+
+fn command_error(envelope: &Envelope, error: crate::commands::CommandFailure) -> Envelope {
+    Envelope::error(&envelope.message_id, &error.code, &error.message)
 }
 
 fn lifecycle_open_project(
@@ -725,6 +833,29 @@ fn command_completed_snapshot(
             "session_id": session_id,
             "revision": snapshot.revision,
             "scene_revision": snapshot.scene_revision,
+        }),
+    );
+    response.correlation_id = Some(envelope.message_id.clone());
+    response
+}
+
+fn command_completed_editor(
+    envelope: &Envelope,
+    command: &str,
+    effect: &crate::commands::CommandEffect,
+    snapshot: &crate::snapshots::EditorSnapshot,
+) -> Envelope {
+    let mut response = Envelope::new(
+        &envelope.message_id,
+        MessageType::CommandCompleted,
+        serde_json::json!({
+            "command": command,
+            "operation": if matches!(envelope.message_type.clone(), MessageType::Undo) { "undo" } else if matches!(envelope.message_type.clone(), MessageType::Redo) { "redo" } else { "apply" },
+            "revision": snapshot.revision,
+            "scene_revision": snapshot.scene_revision,
+            "affected_entities": effect.affected_entities,
+            "entity_remappings": effect.entity_remappings,
+            "selection": snapshot.selection,
         }),
     );
     response.correlation_id = Some(envelope.message_id.clone());

@@ -10,6 +10,8 @@ use hyge_core::result::{HygeError, HygeResult};
 use hyge_ecs::plugin::HygePlugin;
 use hyge_scene::{load_world_document_from_path, LoadedSceneState, ScenePlugin};
 
+use crate::commands::{CommandEffect, CommandFailure, EditorCommand};
+use crate::history::CommandHistory;
 use crate::project::Project;
 use crate::snapshots::{build_snapshot, EditorSnapshot, EntityId};
 
@@ -62,6 +64,7 @@ pub struct EditorSessionRuntime {
     revision: u64,
     snapshot_revision: u64,
     selection: Vec<EntityId>,
+    history: CommandHistory,
     snapshot: LifecycleSnapshot,
 }
 
@@ -77,6 +80,7 @@ impl EditorSessionRuntime {
             revision: 0,
             snapshot_revision: 0,
             selection: Vec::new(),
+            history: CommandHistory::default(),
             snapshot: LifecycleSnapshot {
                 state: LifecycleState::Failed,
                 project: None,
@@ -108,6 +112,7 @@ impl EditorSessionRuntime {
         self.revision = 0;
         self.snapshot_revision = 1;
         self.selection.clear();
+        self.history.clear();
         self.snapshot = self.make_snapshot(
             if diagnostics.is_empty() {
                 LifecycleState::Ready
@@ -149,6 +154,7 @@ impl EditorSessionRuntime {
         self.revision = read_revision(self.project_root()?)?;
         self.snapshot_revision = self.snapshot_revision.saturating_add(1).max(1);
         self.selection.clear();
+        self.history.clear();
         self.snapshot = self.make_snapshot(LifecycleState::Ready, Vec::new());
         Ok(self.snapshot.clone())
     }
@@ -220,6 +226,61 @@ impl EditorSessionRuntime {
         self.editor_snapshot()
     }
 
+    /// Applies a command after validating its optimistic snapshot revision.
+    pub fn apply_command(
+        &mut self,
+        expected_revision: u64,
+        command: EditorCommand,
+    ) -> Result<(CommandEffect, EditorSnapshot), CommandFailure> {
+        self.check_revision(expected_revision)?;
+        let effect = self.history.apply(command, &mut self.world)?;
+        self.bump_snapshot_revision();
+        let snapshot = self
+            .editor_snapshot()
+            .map_err(|error| CommandFailure::new("command_failed", error.to_string()))?;
+        Ok((effect, snapshot))
+    }
+
+    /// Undoes the latest command after validating the snapshot revision.
+    pub fn undo_command(
+        &mut self,
+        expected_revision: u64,
+    ) -> Result<(CommandEffect, EditorSnapshot), CommandFailure> {
+        self.check_revision(expected_revision)?;
+        let effect = self.history.undo(&mut self.world)?;
+        self.bump_snapshot_revision();
+        let snapshot = self
+            .editor_snapshot()
+            .map_err(|error| CommandFailure::new("command_failed", error.to_string()))?;
+        Ok((effect, snapshot))
+    }
+
+    /// Redoes the latest reverted command after validating the snapshot revision.
+    pub fn redo_command(
+        &mut self,
+        expected_revision: u64,
+    ) -> Result<(CommandEffect, EditorSnapshot), CommandFailure> {
+        self.check_revision(expected_revision)?;
+        let effect = self.history.redo(&mut self.world)?;
+        self.bump_snapshot_revision();
+        let snapshot = self
+            .editor_snapshot()
+            .map_err(|error| CommandFailure::new("command_failed", error.to_string()))?;
+        Ok((effect, snapshot))
+    }
+
+    /// Returns whether undo is available.
+    #[must_use]
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    /// Returns whether redo is available.
+    #[must_use]
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
     /// Records a failed operation without replacing the active runtime.
     pub fn fail(&mut self, message: impl Into<String>) {
         self.snapshot = self.make_snapshot(LifecycleState::Failed, vec![message.into()]);
@@ -230,6 +291,23 @@ impl EditorSessionRuntime {
             .as_ref()
             .map(|project| project.root.as_path())
             .ok_or_else(|| HygeError::invalid_argument("project is not open"))
+    }
+
+    fn check_revision(&self, expected_revision: u64) -> Result<(), CommandFailure> {
+        if expected_revision != self.snapshot_revision {
+            return Err(CommandFailure::new(
+                "stale_revision",
+                format!(
+                    "expected snapshot revision {}, current revision {}",
+                    expected_revision, self.snapshot_revision
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    fn bump_snapshot_revision(&mut self) {
+        self.snapshot_revision = self.snapshot_revision.saturating_add(1).max(1);
     }
 
     fn make_snapshot(&self, state: LifecycleState, diagnostics: Vec<String>) -> LifecycleSnapshot {

@@ -1510,7 +1510,7 @@ title = "Rust editor command model and transactional history"
 phase = "phase_9"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "high"
 dependencies = ["R-082", "R-083"]
 summary = "Implement engine-owned selection, commands and undo/redo with stale-revision protection."
@@ -1521,6 +1521,8 @@ acceptance = [
   "undo/redo clears redo after a new edit and survives scene save",
   "test: mixed command sequence with undo five and redo three reaches expected ECS state"
 ]
+completed_at = "2026-07-11"
+completion_notes = "Implemented engine-owned EditorCommand and CommandHistory in hyge-editor. All seven command families have apply/revert behavior with structured failures; reflected component edits use TypeRegistry, hierarchy links are captured separately, prefab instantiate/duplicate/destroy restore subtrees and entity mappings, and stale expected_revision requests are rejected before mutation. EditorServer now dispatches command IPC and emits world_snapshot, selection_changed and command_completed metadata. protocol/editor.schema.json validates command payloads. Evidence: cargo test -p hyge-editor -- --test-threads=1, cargo test -p hyge-editor-protocol, python -m pytest -q tools/hyge-editor-python/tests (10 passed), cargo fmt --all -- --check, cargo clippy --workspace --all-targets -- --deny warnings, cargo doc --workspace --no-deps, and cargo test --workspace -- --test-threads=1 all passed. Mixed R-084 integration test applies seven commands, undoes five, redoes three, saves, and verifies history remains usable."
 
 [[items]]
 id = "R-085"

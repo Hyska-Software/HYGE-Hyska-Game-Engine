@@ -119,8 +119,47 @@ def test_schema_validates_every_declared_message_type():
                 "state": "ready",
                 "details": {},
             }
+        elif message_type == "selection_changed":
+            envelope["payload"] = {"revision": 1, "scene_revision": 0, "entities": []}
+        elif message_type == "select_entities":
+            envelope["payload"] = {"entities": []}
+        elif message_type == "world_snapshot":
+            envelope["payload"] = {
+                "revision": 1,
+                "scene_revision": 0,
+                "hierarchy": [],
+                "entities": [],
+                "component_catalog": [],
+                "selection": [],
+                "diagnostics": [],
+            }
         elif message_type == "engine_error":
             envelope["error"] = {"code": "test", "message": "test"}
+        elif message_type in {"undo", "redo"}:
+            envelope["payload"] = {"expected_revision": 1}
+        elif message_type in {"duplicate_entity", "destroy_entity"}:
+            envelope["payload"] = {"expected_revision": 1, "entity": 1}
+        elif message_type == "reparent_entity":
+            envelope["payload"] = {"expected_revision": 1, "entity": 1, "new_parent": None}
+        elif message_type in {"add_component", "edit_component"}:
+            envelope["payload"] = {
+                "expected_revision": 1,
+                "entity": 1,
+                "type_path": "hyge_scene::components::Name",
+                "value": {},
+            }
+        elif message_type == "remove_component":
+            envelope["payload"] = {
+                "expected_revision": 1,
+                "entity": 1,
+                "type_path": "hyge_scene::components::Name",
+            }
+        elif message_type == "instantiate_prefab":
+            envelope["payload"] = {
+                "expected_revision": 1,
+                "prefab": {},
+                "transform": {},
+            }
         assert list(validator.iter_errors(envelope)) == [], message_type
 
 

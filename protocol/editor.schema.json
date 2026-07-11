@@ -27,6 +27,38 @@
   },
   "allOf": [
     {
+      "if": { "properties": { "message_type": { "const": "edit_component" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/edit_component_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "add_component" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/add_component_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "remove_component" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/remove_component_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "reparent_entity" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/reparent_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "duplicate_entity" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/entity_command_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "destroy_entity" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/entity_command_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "instantiate_prefab" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/instantiate_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "enum": ["undo", "redo"] } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/history_payload" } } }
+    },
+    {
       "if": { "properties": { "message_type": { "const": "hello" } } },
       "then": {
         "properties": {
@@ -172,6 +204,64 @@
         "selection": { "type": "array" },
         "diagnostics": { "type": "array" }
       }
+    },
+    "revision_payload": {
+      "type": "object",
+      "required": ["expected_revision"],
+      "additionalProperties": true,
+      "properties": { "expected_revision": { "type": "integer", "minimum": 1 } }
+    },
+    "entity_command_payload": {
+      "allOf": [
+        { "$ref": "#/$defs/revision_payload" },
+        { "required": ["entity"], "properties": { "entity": { "type": "integer", "minimum": 0 } } }
+      ]
+    },
+    "edit_component_payload": {
+      "allOf": [
+        { "$ref": "#/$defs/revision_payload" },
+        { "required": ["entity", "type_path", "value"], "properties": {
+          "entity": { "type": "integer", "minimum": 0 },
+          "type_path": { "type": "string", "minLength": 1 },
+          "field_path": { "type": ["string", "null"] },
+          "value": {}
+        } }
+      ]
+    },
+    "add_component_payload": {
+      "allOf": [
+        { "$ref": "#/$defs/revision_payload" },
+        { "required": ["entity", "type_path", "value"], "properties": {
+          "entity": { "type": "integer", "minimum": 0 }, "type_path": { "type": "string", "minLength": 1 }, "value": {}
+        } }
+      ]
+    },
+    "remove_component_payload": {
+      "allOf": [
+        { "$ref": "#/$defs/revision_payload" },
+        { "required": ["entity", "type_path"], "properties": {
+          "entity": { "type": "integer", "minimum": 0 }, "type_path": { "type": "string", "minLength": 1 }
+        } }
+      ]
+    },
+    "reparent_payload": {
+      "allOf": [
+        { "$ref": "#/$defs/revision_payload" },
+        { "required": ["entity"], "properties": {
+          "entity": { "type": "integer", "minimum": 0 }, "new_parent": { "type": ["integer", "null"], "minimum": 0 }
+        } }
+      ]
+    },
+    "instantiate_payload": {
+      "allOf": [
+        { "$ref": "#/$defs/revision_payload" },
+        { "required": ["prefab", "transform"], "properties": {
+          "prefab": { "type": "object" }, "transform": { "type": "object" }, "parent": { "type": ["integer", "null"], "minimum": 0 }
+        } }
+      ]
+    },
+    "history_payload": {
+      "allOf": [ { "$ref": "#/$defs/revision_payload" } ]
     }
   },
   "x-hyge-message-directions": {

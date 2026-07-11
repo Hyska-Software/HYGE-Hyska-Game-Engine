@@ -8,6 +8,8 @@
 #![warn(missing_docs)]
 
 mod auth;
+mod commands;
+mod history;
 mod lifecycle;
 mod lock;
 mod project;
@@ -15,6 +17,12 @@ mod server;
 mod snapshots;
 mod state;
 
+pub use commands::{
+    AddComponentCommand, Command, CommandEffect, CommandFailure, DestroyCommand, DuplicateCommand,
+    EditComponentCommand, EditorCommand, InstantiateCommand, RemoveComponentCommand,
+    ReparentCommand,
+};
+pub use history::CommandHistory;
 pub use lifecycle::{EditorSessionRuntime, LifecycleSnapshot, LifecycleState};
 pub use server::{EditorServer, EditorServerConfig};
 pub use snapshots::{
@@ -26,8 +34,10 @@ pub use state::{EditorState, SessionSnapshot};
 /// Common editor exports.
 pub mod prelude {
     pub use crate::{
-        ComponentDescriptor, EditorServer, EditorServerConfig, EditorSnapshot, EditorState,
-        EntityId, EntitySnapshot, FieldDescriptor, HierarchyNode, ReflectedComponent,
-        SnapshotDiagnostic,
+        AddComponentCommand, Command, CommandEffect, CommandFailure, CommandHistory,
+        ComponentDescriptor, DestroyCommand, DuplicateCommand, EditComponentCommand, EditorCommand,
+        EditorServer, EditorServerConfig, EditorSnapshot, EditorState, EntityId, EntitySnapshot,
+        FieldDescriptor, HierarchyNode, ReflectedComponent, RemoveComponentCommand,
+        ReparentCommand, SnapshotDiagnostic,
     };
 }

@@ -870,7 +870,12 @@ fixtures, and shared by `hyge-editor-protocol` and the optional PySide6/QML
 client. `hyge-editor` keeps one in-process session registry with a bounded TTL;
 reconnect resumes metadata without creating a second engine/editor state.
 ECS snapshots, reflected values and editor commands are added by R-082 through
-R-084.
+R-084. `EditorSessionRuntime` owns the mutable ECS world, optimistic snapshot
+revision, and transactional `CommandHistory`; the command model covers
+component edits, hierarchy changes, prefab instantiation, duplication and
+destruction. Every mutation carries the snapshot revision and stale requests
+are rejected before world or history mutation. Save updates the persisted
+scene revision without clearing undo/redo history.
 
 **File layout:**
 ```
