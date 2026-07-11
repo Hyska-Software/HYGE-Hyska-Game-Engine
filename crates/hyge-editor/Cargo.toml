@@ -9,8 +9,15 @@ description = "Rust editor service for the PySide6/Qt frontend: protocol, comman
 
 [dependencies]
 hyge-core = { workspace = true }
+hyge-asset = { workspace = true }
+hyge-ecs = { workspace = true }
+hyge-scene = { workspace = true }
 hyge-editor-protocol = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_app = { workspace = true }
 blake3 = { workspace = true }
+fs2 = { workspace = true }
+atomicwrites = { workspace = true }
 getrandom = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

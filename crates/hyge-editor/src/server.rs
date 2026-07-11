@@ -2,6 +2,7 @@
 
 use std::io;
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -9,12 +10,14 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
+use hyge_core::result::HygeError;
 use hyge_editor_protocol::{
     read_frame, write_frame, Envelope, MessageType, ProtocolIoError, PROTOCOL_VERSION,
 };
 
 use crate::{
     auth::ConnectionAuth,
+    lifecycle::{LifecycleSnapshot, LifecycleState},
     state::{SessionError, SessionRegistry, SessionSnapshot},
 };
 
@@ -48,6 +51,7 @@ pub struct EditorServer {
     config: EditorServerConfig,
     sessions: Arc<Mutex<SessionRegistry>>,
     shutdown: Arc<AtomicBool>,
+    frontend: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 impl EditorServer {
@@ -89,7 +93,17 @@ impl EditorServer {
             config,
             sessions: Arc::new(Mutex::new(SessionRegistry::default())),
             shutdown: Arc::new(AtomicBool::new(false)),
+            frontend: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Transfers ownership of an optional frontend child to the server.
+    pub fn attach_frontend(&self, child: std::process::Child) -> io::Result<()> {
+        self.frontend
+            .lock()
+            .map_err(|_| io::Error::other("frontend ownership lock poisoned"))?
+            .replace(child);
+        Ok(())
     }
 
     /// Returns the actual bound address, useful when port zero was requested.
@@ -114,7 +128,10 @@ impl EditorServer {
     /// Returns an I/O error for an accept failure other than the temporary
     /// non-blocking state.
     pub fn run(&self) -> io::Result<()> {
-        while !self.shutdown.load(Ordering::Acquire) {
+        let result = loop {
+            if self.shutdown.load(Ordering::Acquire) {
+                break Ok(());
+            }
             if let Ok(mut sessions) = self.sessions.lock() {
                 sessions.expire(self.config.session_ttl);
             }
@@ -135,10 +152,22 @@ impl EditorServer {
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(5));
                 }
-                Err(error) => return Err(error),
+                Err(error) => break Err(error),
             }
+        };
+        self.cleanup_frontend();
+        result
+    }
+
+    fn cleanup_frontend(&self) {
+        let child = self.frontend.lock().ok().and_then(|mut child| child.take());
+        let Some(mut child) = child else {
+            return;
+        };
+        if child.try_wait().ok().flatten().is_none() {
+            let _ = child.kill();
         }
-        Ok(())
+        let _ = child.wait();
     }
 
     /// Handles one envelope as an unauthenticated connection.
@@ -155,6 +184,13 @@ impl EditorServer {
             "unauthorized",
             "editor handshake is required before requests",
         )
+    }
+}
+
+impl Drop for EditorServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Release);
+        self.cleanup_frontend();
     }
 }
 
@@ -205,9 +241,14 @@ fn handle_connection(
             write_frame(&mut stream, &response)?;
             continue;
         }
-        let response = handle_authenticated(&request, config, &sessions, &shutdown, &auth);
-        write_frame(&mut stream, &response)?;
-        if response.message_type == MessageType::ServerShutdown || shutdown.load(Ordering::Acquire)
+        let responses = handle_authenticated(&request, config, &sessions, &shutdown, &auth);
+        for response in &responses {
+            write_frame(&mut stream, response)?;
+        }
+        if responses
+            .iter()
+            .any(|response| response.message_type == MessageType::ServerShutdown)
+            || shutdown.load(Ordering::Acquire)
         {
             disconnect_auth(&sessions, &auth);
             return Ok(());
@@ -346,109 +387,276 @@ fn handle_authenticated(
     sessions: &Arc<Mutex<SessionRegistry>>,
     shutdown: &Arc<AtomicBool>,
     auth: &ConnectionAuth,
-) -> Envelope {
+) -> Vec<Envelope> {
     let Some(binding) = auth.binding.as_ref() else {
-        return Envelope::error(
+        return vec![Envelope::error(
             &envelope.message_id,
             "unauthorized",
             "editor handshake is required before requests",
-        );
+        )];
     };
-    let Ok(mut registry) = sessions.lock() else {
-        return Envelope::error(
+    let runtime = {
+        let Ok(mut registry) = sessions.lock() else {
+            return vec![Envelope::error(
+                &envelope.message_id,
+                "session_unavailable",
+                "session registry is unavailable",
+            )];
+        };
+        if let Err(error) = registry.touch(binding) {
+            return vec![Envelope::error(
+                &envelope.message_id,
+                session_error_code(error),
+                session_error_message(error),
+            )];
+        }
+        match registry.runtime(binding) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                return vec![Envelope::error(
+                    &envelope.message_id,
+                    session_error_code(error),
+                    session_error_message(error),
+                )]
+            }
+        }
+    };
+    match envelope.message_type {
+        MessageType::OpenProject => lifecycle_open_project(envelope, sessions, binding, runtime),
+        MessageType::OpenScene => lifecycle_open_scene(envelope, sessions, binding, runtime),
+        MessageType::SaveScene => lifecycle_save_scene(envelope, runtime, &binding.session_id),
+        MessageType::ServerShutdown => {
+            shutdown.store(true, Ordering::Release);
+            vec![Envelope::new(
+                &envelope.message_id,
+                MessageType::ServerShutdown,
+                serde_json::json!({"session_id": binding.session_id, "released": true}),
+            )]
+        }
+        _ => {
+            let _ = config;
+            vec![Envelope::error(
+                &envelope.message_id,
+                "unsupported_request",
+                "editor command is reserved for a later editor milestone",
+            )]
+        }
+    }
+}
+
+fn lifecycle_open_project(
+    envelope: &Envelope,
+    sessions: &Arc<Mutex<SessionRegistry>>,
+    binding: &crate::state::SessionBinding,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let Some(path) = envelope
+        .payload
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "open_project requires path",
+        )];
+    };
+    let mut responses = vec![lifecycle_status(
+        &envelope.message_id,
+        &binding.session_id,
+        LifecycleState::Loading,
+        None,
+    )];
+    let result = runtime
+        .lock()
+        .map_err(|_| HygeError::invalid_argument("runtime lock poisoned"))
+        .and_then(|mut runtime| runtime.open_project(Path::new(path)));
+    match result {
+        Ok(snapshot) => {
+            if let Ok(mut registry) = sessions.lock() {
+                if let Some(canonical) = snapshot.project.as_ref() {
+                    let _ = registry.update_project(binding, canonical.display().to_string());
+                }
+            }
+            responses.push(lifecycle_status(
+                &envelope.message_id,
+                &binding.session_id,
+                snapshot.state.clone(),
+                Some(&snapshot),
+            ));
+            responses.push(command_completed(envelope, "open_project", &snapshot));
+        }
+        Err(error) => {
+            if let Ok(mut runtime) = runtime.lock() {
+                runtime.fail(error.to_string());
+            }
+            responses.push(lifecycle_status(
+                &envelope.message_id,
+                &binding.session_id,
+                LifecycleState::Failed,
+                None,
+            ));
+            responses.push(Envelope::error(
+                &envelope.message_id,
+                "project_open_failed",
+                error.to_string(),
+            ));
+        }
+    }
+    responses
+}
+
+fn lifecycle_open_scene(
+    envelope: &Envelope,
+    sessions: &Arc<Mutex<SessionRegistry>>,
+    binding: &crate::state::SessionBinding,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let Some(path) = envelope
+        .payload
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "open_scene requires path",
+        )];
+    };
+    let mut responses = vec![lifecycle_status(
+        &envelope.message_id,
+        &binding.session_id,
+        LifecycleState::Loading,
+        None,
+    )];
+    let result = runtime
+        .lock()
+        .map_err(|_| HygeError::invalid_argument("runtime lock poisoned"))
+        .and_then(|mut runtime| runtime.open_scene(Path::new(path)));
+    match result {
+        Ok(snapshot) => {
+            if let Ok(mut registry) = sessions.lock() {
+                if let Some(canonical) = snapshot.scene.as_ref() {
+                    let _ = registry.update_scene(binding, canonical.display().to_string());
+                }
+            }
+            responses.push(lifecycle_status(
+                &envelope.message_id,
+                &binding.session_id,
+                snapshot.state.clone(),
+                Some(&snapshot),
+            ));
+            responses.push(command_completed(envelope, "open_scene", &snapshot));
+        }
+        Err(error) => {
+            if let Ok(mut runtime) = runtime.lock() {
+                runtime.fail(error.to_string());
+            }
+            responses.push(lifecycle_status(
+                &envelope.message_id,
+                &binding.session_id,
+                LifecycleState::Failed,
+                None,
+            ));
+            responses.push(Envelope::error(
+                &envelope.message_id,
+                "scene_open_failed",
+                error.to_string(),
+            ));
+        }
+    }
+    responses
+}
+
+fn lifecycle_save_scene(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+    session_id: &str,
+) -> Vec<Envelope> {
+    let result = runtime
+        .lock()
+        .map_err(|_| HygeError::invalid_argument("runtime lock poisoned"))
+        .and_then(|mut runtime| runtime.save_scene());
+    match result {
+        Ok(snapshot) => vec![
+            lifecycle_status(
+                &envelope.message_id,
+                session_id,
+                snapshot.state.clone(),
+                Some(&snapshot),
+            ),
+            command_completed(envelope, "save_scene", &snapshot),
+        ],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "scene_save_failed",
+            error.to_string(),
+        )],
+    }
+}
+
+fn lifecycle_status(
+    message_id: &str,
+    session_id: &str,
+    state: LifecycleState,
+    snapshot: Option<&LifecycleSnapshot>,
+) -> Envelope {
+    let snapshot = snapshot
+        .map(|snapshot| {
+            serde_json::json!({
+                "project_path": snapshot.project.as_ref().map(|path| path.display().to_string()),
+                "scene_path": snapshot.scene.as_ref().map(|path| path.display().to_string()),
+                "revision": snapshot.revision,
+                "diagnostics": snapshot.diagnostics,
+            })
+        })
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut envelope = Envelope::new(
+        message_id,
+        MessageType::LifecycleStatus,
+        serde_json::json!({
+            "session_id": session_id,
+            "state": state.as_str(),
+            "details": snapshot,
+        }),
+    );
+    envelope.correlation_id = Some(message_id.to_owned());
+    envelope
+}
+
+fn command_completed(envelope: &Envelope, command: &str, snapshot: &LifecycleSnapshot) -> Envelope {
+    let mut response = Envelope::new(
+        &envelope.message_id,
+        MessageType::CommandCompleted,
+        serde_json::json!({
+            "command": command,
+            "state": snapshot.state.as_str(),
+            "project_path": snapshot.project.as_ref().map(|path| path.display().to_string()),
+            "scene_path": snapshot.scene.as_ref().map(|path| path.display().to_string()),
+            "revision": snapshot.revision,
+            "diagnostics": snapshot.diagnostics,
+        }),
+    );
+    response.correlation_id = Some(envelope.message_id.clone());
+    response
+}
+
+/*
+fn old_handler_placeholder(
+    envelope: &Envelope,
+    config: &EditorServerConfig,
+    sessions: &Arc<Mutex<SessionRegistry>>,
+    shutdown: &Arc<AtomicBool>,
+    auth: &ConnectionAuth,
+) -> Envelope {
+    let _ = (envelope, config, sessions, shutdown, auth);
+    Envelope::error(
             &envelope.message_id,
             "session_unavailable",
             "session registry is unavailable",
         );
-    };
-    if let Err(error) = registry.touch(binding) {
-        return Envelope::error(
-            &envelope.message_id,
-            session_error_code(error),
-            session_error_message(error),
-        );
-    }
-    match envelope.message_type {
-        MessageType::OpenProject => update_project(envelope, &mut registry, binding),
-        MessageType::OpenScene => update_scene(envelope, &mut registry, binding),
-        MessageType::ServerShutdown => {
-            shutdown.store(true, Ordering::Release);
-            Envelope::new(
-                &envelope.message_id,
-                MessageType::ServerShutdown,
-                serde_json::json!({}),
-            )
-        }
-        _ => {
-            let _ = config;
-            Envelope::error(
-                &envelope.message_id,
-                "unsupported_request",
-                "editor command is reserved for a later editor milestone",
-            )
-        }
-    }
 }
-
-fn update_project(
-    envelope: &Envelope,
-    registry: &mut SessionRegistry,
-    binding: &crate::state::SessionBinding,
-) -> Envelope {
-    let Some(path) = envelope
-        .payload
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-    else {
-        return Envelope::error(
-            &envelope.message_id,
-            "invalid_request",
-            "open_project requires path",
-        );
-    };
-    match registry.update_project(binding, path.to_owned()) {
-        Ok(()) => Envelope::new(
-            &envelope.message_id,
-            MessageType::CommandCompleted,
-            serde_json::json!({"command": "open_project", "recorded": true}),
-        ),
-        Err(error) => Envelope::error(
-            &envelope.message_id,
-            session_error_code(error),
-            session_error_message(error),
-        ),
-    }
-}
-
-fn update_scene(
-    envelope: &Envelope,
-    registry: &mut SessionRegistry,
-    binding: &crate::state::SessionBinding,
-) -> Envelope {
-    let Some(path) = envelope
-        .payload
-        .get("path")
-        .and_then(serde_json::Value::as_str)
-    else {
-        return Envelope::error(
-            &envelope.message_id,
-            "invalid_request",
-            "open_scene requires path",
-        );
-    };
-    match registry.update_scene(binding, path.to_owned()) {
-        Ok(()) => Envelope::new(
-            &envelope.message_id,
-            MessageType::CommandCompleted,
-            serde_json::json!({"command": "open_scene", "recorded": true}),
-        ),
-        Err(error) => Envelope::error(
-            &envelope.message_id,
-            session_error_code(error),
-            session_error_message(error),
-        ),
-    }
-}
+*/
 
 fn session_error_code(error: SessionError) -> &'static str {
     match error {

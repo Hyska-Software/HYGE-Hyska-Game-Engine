@@ -31,7 +31,10 @@ class EditorBridge(QObject):
     def open_project(self) -> None:
         project = os.environ.get("HYGE_PROJECT", ".")
         response = self._client.request("open_project", {"path": project})
-        self._status = "Project connected" if response.error is None else response.error["message"]
+        if response.error is None:
+            self._status = response.payload.get("state", "Project connected")
+        else:
+            self._status = response.error["message"]
         self.statusChanged.emit()
 
 

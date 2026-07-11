@@ -1471,10 +1471,12 @@ title = "Editor project and session lifecycle"
 phase = "phase_8"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-080", "R-081"]
 summary = "Open projects/scenes through the engine, own session state, report readiness and shut down cleanly."
+completed_at = "2026-07-10"
+completion_notes = "Implemented the real editor project/session lifecycle. hyge-editor now owns a thread-safe headless ECS world built with the canonical ScenePlugin, discovers and loads .hyge-prefab assets from the canonical project root, routes open_scene through load_world_document_from_path/WorldLoader, reports loading/ready/degraded/failed lifecycle_status events, preserves the prior scene on failed replacement, and persists scenes through atomicwrites with a monotonic .hyge/editor.revision sidecar. Added an OS-exclusive .hyge/editor.lock with RAII release, reconnectable runtime handles tied to SessionRegistry generations, and EditorServer-owned frontend Child teardown on shutdown/drop. The v1 schema/protocol and Python client now understand lifecycle_status and consume intermediate events. Evidence: cargo test -p hyge-editor --test r082_lifecycle -- --test-threads=1 (3 passed, including real prefab/world load, invalid-scene preservation, lock contention/release, open/save/reconnect/close TCP lifecycle, and Windows frontend-child termination), python -m pytest -q tools/hyge-editor-python/tests (10 passed), cargo fmt --all -- --check, cargo clippy --workspace --all-targets -- --deny warnings, cargo test --workspace -- --test-threads=1, and cargo doc --workspace --no-deps all passed."
 acceptance = [
   "open_project and open_scene use the real project and world loaders",
   "service reports loading, ready, degraded and failed states",

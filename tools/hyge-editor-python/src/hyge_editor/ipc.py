@@ -17,7 +17,7 @@ MESSAGE_TYPES = {
     "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview",
     "world_snapshot", "selection_changed", "component_changed", "asset_changed",
     "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available",
-    "command_completed", "engine_error", "server_shutdown",
+    "command_completed", "engine_error", "server_shutdown", "lifecycle_status",
 }
 
 
@@ -110,6 +110,7 @@ class EditorClient:
         self._supported_protocol_versions = supported_protocol_versions
         self._session_id: str | None = None
         self._socket: socket.socket | None = None
+        self.lifecycle_statuses: list[Envelope] = []
 
     def connect(self) -> Envelope:
         """Connect and complete the authenticated handshake."""
@@ -147,7 +148,7 @@ class EditorClient:
         return self._session_id
 
     def request(self, message_type: str, payload: dict[str, Any] | None = None) -> Envelope:
-        """Send a request and read exactly one response."""
+        """Send a request and read through lifecycle events to its response."""
         if self._socket is None:
             raise RuntimeError("editor client is not connected")
         envelope = Envelope(str(uuid.uuid4()), message_type, payload or {})
@@ -157,7 +158,11 @@ class EditorClient:
         if length == 0 or length > MAX_MESSAGE_BYTES:
             raise ValueError("editor protocol response is too large")
         try:
-            return Envelope.from_bytes(self._read_exact(length))
+            response = Envelope.from_bytes(self._read_exact(length))
+            if response.message_type == "lifecycle_status":
+                self.lifecycle_statuses.append(response)
+                return self._read_response()
+            return response
         except socket.timeout as error:
             raise TimeoutError("editor protocol response timed out") from error
 
@@ -181,3 +186,15 @@ class EditorClient:
             chunks.append(chunk)
             remaining -= len(chunk)
         return b"".join(chunks)
+
+    def _read_response(self) -> Envelope:
+        """Read the next terminal response, retaining lifecycle events."""
+        header = self._read_exact(4)
+        length = int.from_bytes(header, "big")
+        if length == 0 or length > MAX_MESSAGE_BYTES:
+            raise ValueError("editor protocol response is too large")
+        response = Envelope.from_bytes(self._read_exact(length))
+        if response.message_type == "lifecycle_status":
+            self.lifecycle_statuses.append(response)
+            return self._read_response()
+        return response

@@ -113,6 +113,12 @@ def test_schema_validates_every_declared_message_type():
                 "server": "hyge-editor",
                 "request_timeout_ms": 5000,
             }
+        elif message_type == "lifecycle_status":
+            envelope["payload"] = {
+                "session_id": "session",
+                "state": "ready",
+                "details": {},
+            }
         elif message_type == "engine_error":
             envelope["error"] = {"code": "test", "message": "test"}
         assert list(validator.iter_errors(envelope)) == [], message_type

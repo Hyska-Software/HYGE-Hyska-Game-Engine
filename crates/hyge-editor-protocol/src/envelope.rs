@@ -85,6 +85,8 @@ pub enum MessageType {
     EngineError,
     /// Announces service shutdown.
     ServerShutdown,
+    /// Announces a project/session lifecycle transition.
+    LifecycleStatus,
 }
 
 /// Structured protocol error.

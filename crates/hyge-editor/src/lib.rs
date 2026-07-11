@@ -8,9 +8,13 @@
 #![warn(missing_docs)]
 
 mod auth;
+mod lifecycle;
+mod lock;
+mod project;
 mod server;
 mod state;
 
+pub use lifecycle::{EditorSessionRuntime, LifecycleSnapshot, LifecycleState};
 pub use server::{EditorServer, EditorServerConfig};
 pub use state::{EditorState, SessionSnapshot};
 

@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::lifecycle::{EditorSessionRuntime, RuntimeHandle};
+
 /// Mutable metadata owned by one editor session.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EditorState {
@@ -31,16 +33,16 @@ pub struct SessionSnapshot {
     pub state: EditorState,
 }
 
-#[derive(Debug)]
 struct SessionRecord {
     state: EditorState,
+    runtime: RuntimeHandle,
     last_seen: Instant,
     generation: u64,
     connected: bool,
 }
 
 /// In-process source of truth for reconnectable editor sessions.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) struct SessionRegistry {
     sessions: HashMap<String, SessionRecord>,
     next_generation: u64,
@@ -73,6 +75,7 @@ impl SessionRegistry {
             .entry(session_id.clone())
             .or_insert_with(|| SessionRecord {
                 state: EditorState::default(),
+                runtime: std::sync::Arc::new(std::sync::Mutex::new(EditorSessionRuntime::new())),
                 last_seen: now,
                 generation,
                 connected: false,
@@ -145,6 +148,17 @@ impl SessionRegistry {
             connected: record.connected,
             state: record.state.clone(),
         })
+    }
+
+    pub(crate) fn runtime(&self, binding: &SessionBinding) -> Result<RuntimeHandle, SessionError> {
+        let record = self
+            .sessions
+            .get(&binding.session_id)
+            .ok_or(SessionError::NotFound)?;
+        if record.generation != binding.generation || !record.connected {
+            return Err(SessionError::Replaced);
+        }
+        Ok(record.runtime.clone())
     }
 
     pub(crate) fn expire(&mut self, ttl: Duration) {

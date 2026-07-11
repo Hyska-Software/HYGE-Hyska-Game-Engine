@@ -19,7 +19,7 @@
         "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview",
         "world_snapshot", "selection_changed", "component_changed", "asset_changed",
         "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available",
-        "command_completed", "engine_error", "server_shutdown"
+        "command_completed", "engine_error", "server_shutdown", "lifecycle_status"
       ]
     },
     "payload": { "type": "object" },
@@ -39,6 +39,14 @@
       "then": {
         "properties": {
           "payload": { "$ref": "#/$defs/hello_ack_payload" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "lifecycle_status" } } },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/lifecycle_status_payload" }
         }
       }
     },
@@ -90,11 +98,21 @@
         "server": { "const": "hyge-editor" },
         "request_timeout_ms": { "type": "integer", "minimum": 1 }
       }
+    },
+    "lifecycle_status_payload": {
+      "type": "object",
+      "required": ["session_id", "state", "details"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": { "type": "string" },
+        "state": { "enum": ["loading", "ready", "degraded", "failed"] },
+        "details": { "type": "object" }
+      }
     }
   },
   "x-hyge-message-directions": {
     "requests": ["hello", "open_project", "open_scene", "save_scene", "select_entities", "edit_component", "add_component", "remove_component", "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab", "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview", "server_shutdown"],
     "responses": ["hello_ack", "command_completed", "engine_error"],
-    "events": ["world_snapshot", "selection_changed", "component_changed", "asset_changed", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available"]
+    "events": ["lifecycle_status", "world_snapshot", "selection_changed", "component_changed", "asset_changed", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available"]
   }
 }

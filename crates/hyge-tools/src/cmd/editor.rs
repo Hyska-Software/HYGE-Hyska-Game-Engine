@@ -21,15 +21,13 @@ pub fn run(project: &Path, port: u16, frontend: Option<&Path>) -> HygeResult<()>
     tracing::info!(%address, project = %project.display(), "hyge editor service listening");
     println!("HYGE_EDITOR_ADDRESS={address}");
 
-    let mut child = frontend
+    let child = frontend
         .map(|path| spawn_frontend(path, &project, &address.to_string(), &token))
         .transpose()?;
-    let result = server.run().map_err(hyge_core::result::HygeError::from);
-    if let Some(child) = child.as_mut() {
-        let _ = child.kill();
-        let _ = child.wait();
+    if let Some(child) = child {
+        server.attach_frontend(child)?;
     }
-    result
+    server.run().map_err(hyge_core::result::HygeError::from)
 }
 
 fn validate_project(project: &Path) -> HygeResult<PathBuf> {
