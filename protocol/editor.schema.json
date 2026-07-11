@@ -54,6 +54,30 @@
       "if": { "properties": { "message_type": { "const": "engine_error" } } },
       "then": { "required": ["error"] },
       "else": { "not": { "required": ["error"] } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "select_entities" } } },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/select_entities_payload" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "selection_changed" } } },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/selection_changed_payload" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "world_snapshot" } } },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/world_snapshot_payload" }
+        }
+      }
     }
   ],
   "$defs": {
@@ -107,6 +131,46 @@
         "session_id": { "type": "string" },
         "state": { "enum": ["loading", "ready", "degraded", "failed"] },
         "details": { "type": "object" }
+      }
+    },
+    "select_entities_payload": {
+      "type": "object",
+      "required": ["entities"],
+      "additionalProperties": false,
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "selection_changed_payload": {
+      "type": "object",
+      "required": ["revision", "scene_revision", "entities"],
+      "additionalProperties": false,
+      "properties": {
+        "revision": { "type": "integer", "minimum": 1 },
+        "scene_revision": { "type": "integer", "minimum": 0 },
+        "entities": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "world_snapshot_payload": {
+      "type": "object",
+      "required": ["revision", "scene_revision", "hierarchy", "entities", "component_catalog", "selection", "diagnostics"],
+      "additionalProperties": true,
+      "properties": {
+        "revision": { "type": "integer", "minimum": 1 },
+        "scene_revision": { "type": "integer", "minimum": 0 },
+        "hierarchy": { "type": "array" },
+        "entities": { "type": "array" },
+        "component_catalog": { "type": "array" },
+        "selection": { "type": "array" },
+        "diagnostics": { "type": "array" }
       }
     }
   },

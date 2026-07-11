@@ -15,6 +15,7 @@ hyge-scene = { workspace = true }
 hyge-editor-protocol = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_app = { workspace = true }
+bevy_reflect = { workspace = true }
 blake3 = { workspace = true }
 fs2 = { workspace = true }
 atomicwrites = { workspace = true }

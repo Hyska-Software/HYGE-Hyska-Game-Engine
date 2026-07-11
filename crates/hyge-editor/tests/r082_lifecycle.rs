@@ -159,13 +159,39 @@ fn tcp_open_save_reconnect_and_shutdown_reports_lifecycle() {
             .message_type,
         MessageType::LifecycleStatus
     );
+    let world_snapshot = read_envelope(&mut stream).expect("world snapshot");
+    assert_eq!(world_snapshot.message_type, MessageType::WorldSnapshot);
+    assert!(world_snapshot.payload["revision"].as_u64().unwrap_or(0) > 0);
+    assert_eq!(
+        read_envelope(&mut stream)
+            .expect("selection changed")
+            .message_type,
+        MessageType::SelectionChanged
+    );
     assert_eq!(
         read_envelope(&mut stream)
             .expect("scene completed")
             .message_type,
         MessageType::CommandCompleted
     );
-
+    let entity = world_snapshot.payload["hierarchy"][0]["entity"]
+        .as_u64()
+        .expect("snapshot entity id");
+    let select = Envelope::new(
+        "select",
+        MessageType::SelectEntities,
+        serde_json::json!({"entities": [entity]}),
+    );
+    write_envelope(&mut stream, &select).expect("select");
+    let selected = read_envelope(&mut stream).expect("selection changed");
+    assert_eq!(selected.message_type, MessageType::SelectionChanged);
+    assert_eq!(selected.payload["entities"][0], entity);
+    assert_eq!(
+        read_envelope(&mut stream)
+            .expect("selection completed")
+            .message_type,
+        MessageType::CommandCompleted
+    );
     let save = Envelope::new("save", MessageType::SaveScene, serde_json::json!({}));
     write_envelope(&mut stream, &save).expect("save");
     assert_eq!(

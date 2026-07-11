@@ -1658,6 +1658,7 @@ dependencies = [
  "atomicwrites",
  "bevy_app",
  "bevy_ecs",
+ "bevy_reflect",
  "blake3",
  "fs2",
  "getrandom 0.2.17",

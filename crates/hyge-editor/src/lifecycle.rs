@@ -11,6 +11,7 @@ use hyge_ecs::plugin::HygePlugin;
 use hyge_scene::{load_world_document_from_path, LoadedSceneState, ScenePlugin};
 
 use crate::project::Project;
+use crate::snapshots::{build_snapshot, EditorSnapshot, EntityId};
 
 /// Lifecycle state visible to the frontend.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,6 +60,8 @@ pub struct EditorSessionRuntime {
     project: Option<Project>,
     scene: Option<PathBuf>,
     revision: u64,
+    snapshot_revision: u64,
+    selection: Vec<EntityId>,
     snapshot: LifecycleSnapshot,
 }
 
@@ -72,6 +75,8 @@ impl EditorSessionRuntime {
             project: None,
             scene: None,
             revision: 0,
+            snapshot_revision: 0,
+            selection: Vec::new(),
             snapshot: LifecycleSnapshot {
                 state: LifecycleState::Failed,
                 project: None,
@@ -101,6 +106,8 @@ impl EditorSessionRuntime {
         self.project = Some(project);
         self.scene = None;
         self.revision = 0;
+        self.snapshot_revision = 1;
+        self.selection.clear();
         self.snapshot = self.make_snapshot(
             if diagnostics.is_empty() {
                 LifecycleState::Ready
@@ -140,6 +147,8 @@ impl EditorSessionRuntime {
         self.world = candidate;
         self.scene = Some(scene);
         self.revision = read_revision(self.project_root()?)?;
+        self.snapshot_revision = self.snapshot_revision.saturating_add(1).max(1);
+        self.selection.clear();
         self.snapshot = self.make_snapshot(LifecycleState::Ready, Vec::new());
         Ok(self.snapshot.clone())
     }
@@ -174,6 +183,7 @@ impl EditorSessionRuntime {
             })
             .map_err(|error| HygeError::invalid_argument(format!("save revision: {error}")))?;
         self.revision = next_revision;
+        self.snapshot_revision = self.snapshot_revision.saturating_add(1).max(1);
         self.snapshot = self.make_snapshot(LifecycleState::Ready, Vec::new());
         Ok(self.snapshot.clone())
     }
@@ -182,6 +192,32 @@ impl EditorSessionRuntime {
     #[must_use]
     pub fn snapshot(&self) -> LifecycleSnapshot {
         self.snapshot.clone()
+    }
+
+    /// Returns the immutable ECS/editor snapshot for the current session.
+    pub fn editor_snapshot(&self) -> HygeResult<EditorSnapshot> {
+        build_snapshot(
+            &self.world,
+            self.snapshot_revision,
+            self.revision,
+            &self.selection,
+        )
+    }
+
+    /// Replaces the engine-owned selection and returns its new snapshot.
+    pub fn select_entities(&mut self, entities: Vec<EntityId>) -> HygeResult<EditorSnapshot> {
+        let mut selection = entities;
+        selection.sort_unstable();
+        selection.dedup();
+        selection.retain(|entity| {
+            let Ok(entity) = bevy_ecs::entity::Entity::try_from_bits(*entity) else {
+                return false;
+            };
+            self.world.get_entity(entity).is_some()
+        });
+        self.selection = selection;
+        self.snapshot_revision = self.snapshot_revision.saturating_add(1).max(1);
+        self.editor_snapshot()
     }
 
     /// Records a failed operation without replacing the active runtime.

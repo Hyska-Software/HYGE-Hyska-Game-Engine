@@ -1491,7 +1491,7 @@ title = "Engine snapshots and reflection catalog"
 phase = "phase_8"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "high"
 dependencies = ["R-080", "R-061"]
 summary = "Expose real ECS hierarchy, selection and TypeRegistry metadata as immutable editor snapshots."
@@ -1502,6 +1502,7 @@ acceptance = [
   "snapshot revisions allow the frontend to detect stale edits",
   "test: snapshot contains a loaded scene entity and registered reflected fields"
 ]
+completion_notes = "Implemented immutable ECS/editor snapshots, TypeRegistry-derived catalog, BLAKE3 type/field IDs, reflected JSON values, stale-safe selection revisions, cycle/orphan diagnostics, WorldSnapshot and SelectionChanged IPC events. Evidence: cargo test -p hyge-editor --tests, cargo test --workspace, cargo clippy --workspace --all-targets -- --deny warnings, cargo fmt --all -- --check, cargo doc --workspace --no-deps."
 
 [[items]]
 id = "R-084"

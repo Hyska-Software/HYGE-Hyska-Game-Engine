@@ -12,13 +12,22 @@ mod lifecycle;
 mod lock;
 mod project;
 mod server;
+mod snapshots;
 mod state;
 
 pub use lifecycle::{EditorSessionRuntime, LifecycleSnapshot, LifecycleState};
 pub use server::{EditorServer, EditorServerConfig};
+pub use snapshots::{
+    build_snapshot, ComponentDescriptor, EditorSnapshot, EntityId, EntitySnapshot, FieldDescriptor,
+    HierarchyNode, ReflectedComponent, SnapshotDiagnostic,
+};
 pub use state::{EditorState, SessionSnapshot};
 
 /// Common editor exports.
 pub mod prelude {
-    pub use crate::{EditorServer, EditorServerConfig, EditorState};
+    pub use crate::{
+        ComponentDescriptor, EditorServer, EditorServerConfig, EditorSnapshot, EditorState,
+        EntityId, EntitySnapshot, FieldDescriptor, HierarchyNode, ReflectedComponent,
+        SnapshotDiagnostic,
+    };
 }

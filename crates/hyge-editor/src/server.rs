@@ -425,6 +425,9 @@ fn handle_authenticated(
         MessageType::OpenProject => lifecycle_open_project(envelope, sessions, binding, runtime),
         MessageType::OpenScene => lifecycle_open_scene(envelope, sessions, binding, runtime),
         MessageType::SaveScene => lifecycle_save_scene(envelope, runtime, &binding.session_id),
+        MessageType::SelectEntities => {
+            lifecycle_select_entities(envelope, runtime, &binding.session_id)
+        }
         MessageType::ServerShutdown => {
             shutdown.store(true, Ordering::Release);
             vec![Envelope::new(
@@ -546,6 +549,12 @@ fn lifecycle_open_scene(
                 snapshot.state.clone(),
                 Some(&snapshot),
             ));
+            if let Ok(runtime) = runtime.lock() {
+                if let Ok(editor_snapshot) = runtime.editor_snapshot() {
+                    responses.push(world_snapshot(envelope, &editor_snapshot));
+                    responses.push(selection_changed(envelope, &editor_snapshot));
+                }
+            }
             responses.push(command_completed(envelope, "open_scene", &snapshot));
         }
         Err(error) => {
@@ -566,6 +575,43 @@ fn lifecycle_open_scene(
         }
     }
     responses
+}
+
+fn lifecycle_select_entities(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+    session_id: &str,
+) -> Vec<Envelope> {
+    let Some(values) = envelope
+        .payload
+        .get("entities")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "select_entities requires an entities array",
+        )];
+    };
+    let entities = values
+        .iter()
+        .filter_map(serde_json::Value::as_u64)
+        .collect();
+    let result = runtime
+        .lock()
+        .map_err(|_| HygeError::invalid_argument("runtime lock poisoned"))
+        .and_then(|mut runtime| runtime.select_entities(entities));
+    match result {
+        Ok(snapshot) => vec![
+            selection_changed(envelope, &snapshot),
+            command_completed_snapshot(envelope, "select_entities", session_id, &snapshot),
+        ],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "selection_failed",
+            error.to_string(),
+        )],
+    }
 }
 
 fn lifecycle_save_scene(
@@ -635,6 +681,50 @@ fn command_completed(envelope: &Envelope, command: &str, snapshot: &LifecycleSna
             "scene_path": snapshot.scene.as_ref().map(|path| path.display().to_string()),
             "revision": snapshot.revision,
             "diagnostics": snapshot.diagnostics,
+        }),
+    );
+    response.correlation_id = Some(envelope.message_id.clone());
+    response
+}
+
+fn world_snapshot(envelope: &Envelope, snapshot: &crate::snapshots::EditorSnapshot) -> Envelope {
+    let mut response = Envelope::new(
+        &envelope.message_id,
+        MessageType::WorldSnapshot,
+        serde_json::to_value(snapshot).unwrap_or_else(|_| serde_json::json!({})),
+    );
+    response.correlation_id = Some(envelope.message_id.clone());
+    response
+}
+
+fn selection_changed(envelope: &Envelope, snapshot: &crate::snapshots::EditorSnapshot) -> Envelope {
+    let mut response = Envelope::new(
+        &envelope.message_id,
+        MessageType::SelectionChanged,
+        serde_json::json!({
+            "revision": snapshot.revision,
+            "scene_revision": snapshot.scene_revision,
+            "entities": snapshot.selection,
+        }),
+    );
+    response.correlation_id = Some(envelope.message_id.clone());
+    response
+}
+
+fn command_completed_snapshot(
+    envelope: &Envelope,
+    command: &str,
+    session_id: &str,
+    snapshot: &crate::snapshots::EditorSnapshot,
+) -> Envelope {
+    let mut response = Envelope::new(
+        &envelope.message_id,
+        MessageType::CommandCompleted,
+        serde_json::json!({
+            "command": command,
+            "session_id": session_id,
+            "revision": snapshot.revision,
+            "scene_revision": snapshot.scene_revision,
         }),
     );
     response.correlation_id = Some(envelope.message_id.clone());
