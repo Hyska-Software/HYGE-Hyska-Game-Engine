@@ -163,22 +163,22 @@ not_started → in_progress → (blocked?) → complete
 ### 4.1 Pick up an item
 
 1. Open `docs/roadmap.toml` and locate the next `status = "not_started"` item in priority order (`P0` first).
-2. Confirm `dependencies = [...]` items are all `complete` (or you have written justification for an exception in the PR).
-3. Update the item to `status = "in_progress"`. **Commit this change as the first commit of your branch.**
-4. Create a feature branch: `git checkout -b R-XXX-short-name` (e.g. `R-001-adr-foundation`).
+2. Confirm `dependencies = [...]` items are all `complete` (or you have written justification for an exception).
+3. Update the item to `status = "in_progress"`. **Commit this change directly on `main`.**
+4. All work happens on `main` — no feature branches.
 
 ### 4.2 Implement
 
 - Follow the spec in `docs/architecture.md` §6 for the crate you are touching.
 - Add `#[cfg(test)]` unit tests for non-trivial logic (every crate has a *Tests required* list in §6).
 - Add rustdoc to every public item; if a public function has a non-obvious invariant, add a `# Errors` and/or `# Panics` section.
-- If you discover a deviation from `architecture.md`, write an ADR (`docs/adr/NNNN-title.md`) and reference it in your PR. Do not silently change the design.
+- If you discover a deviation from `architecture.md`, write an ADR (`docs/adr/NNNN-title.md`) and reference it in your commit. Do not silently change the design.
 
 ### 4.3 Self-verify against acceptance criteria
 
 Every R-XXX item has an `acceptance = [ ... ]` list. **You must check every bullet before marking complete.** If a bullet is not met, do not mark complete; either finish the work or split the item.
 
-### 4.4 Local pre-merge checklist
+### 4.4 Local checklist
 
 ```bash
 cargo fmt --all
@@ -188,31 +188,28 @@ cargo test --workspace --doc
 cargo doc --no-deps -- -D warnings
 ```
 
-All five must succeed. If any fails, fix it before pushing.
+All five must succeed. If any fails, fix it before committing.
 
-### 4.5 Open a PR
+### 4.5 Commit directly on `main`
 
-PR title: `R-XXX: <item title>` (e.g. `R-001: ADR Foundation`).
+Commit message: `R-XXX: <item title>` (e.g. `R-001: ADR Foundation`), following Conventional Commits (see §6.1).
 
-PR body must include:
+Commit body must include:
 - A one-line summary.
 - The `acceptance` checklist with each box ticked or explicitly marked N/A with reason.
 - "Architecture impact" section: any change to public API, data layout, or schedule ordering; reference the ADR if applicable.
 - "Test evidence" section: paste the relevant test output snippets (not just "tests pass").
 - "Risks" section: any unresolved concerns, future work, or known limitations.
 
-### 4.6 Mark complete, review, and merge
+### 4.6 Mark complete
 
 An item may be marked `status = "complete"` after its local Definition
-of Done is satisfied, even if the work has not yet gone through PR
-review or merge. In that case, record the local validation evidence in
-`completion_notes` and leave PR/merge review as an integration step,
-not as a prerequisite for roadmap completion.
+of Done is satisfied. Record the local validation evidence in
+`completion_notes`.
 
-- At least one approving review from the item's `owner` group (or its delegate).
-- All CI checks green.
-- Squash-merge to `main` with a Conventional Commit message (see §6).
-- If the item was not already marked complete, update `docs/roadmap.toml` to `status = "complete"` after local verification or after merge.
+- All CI checks green (if CI is configured).
+- Commit directly to `main` with a Conventional Commit message (see §6).
+- Update `docs/roadmap.toml` to `status = "complete"` after local verification.
 
 ### 4.7 Tag the milestone
 
@@ -237,7 +234,7 @@ Update `CHANGELOG.md` via `git-cliff` first.
 - [ ] rustdoc on every new public item.
 - [ ] No `unwrap()` in library code; `expect()` only with a comment explaining the invariant.
 - [ ] No new `unsafe` outside `hyge-render` and `hyge-render-graph`; if added there, `// SAFETY:` comment present.
-- [ ] PR merged with reviewer approval when the work is being integrated through a PR; local roadmap completion may happen before this when all other DoD items pass.
+- [ ] Committed directly on `main` with local validation; all other DoD items pass.
 
 ### 5.2 Per milestone (M0–M7)
 
@@ -276,8 +273,7 @@ The checklist for M0, fully satisfied:
   pipeline runs `cargo fmt --check`, `cargo clippy --workspace
   --all-targets -- --deny warnings`, `cargo test --workspace`, `cargo
   build --workspace --release`, `cargo doc --workspace --no-deps`. The
-  "green on Windows and Linux" criterion is verified on every push
-  and PR to `main`.
+  "green on Windows and Linux" criterion is verified on every push to `main`.
 - [x] `git tag v0.1.0-m0` exists (created by the maintainer at the
   end of R-014 with the message `M0: Foundation`).
 - [x] `CHANGELOG.md` is updated with a `v0.1.0-m0` section listing all
@@ -395,7 +391,7 @@ The next milestone is **M6 (Full Visual Editor)**, tracked by
 
 ---
 
-## 6. Commit, Branch, and PR Conventions
+## 6. Commit Conventions
 
 ### 6.1 Commit messages (Conventional Commits)
 
@@ -420,20 +416,15 @@ breaking(hyge-script)!: rename ScriptState to ScriptContext
 
 Subject ≤ 50 chars, imperative mood, no trailing period. Body explains *why*; the diff explains *what*.
 
-### 6.2 Branches
+### 6.2 Branch
 
-- `main` — stable, always green.
-- `next` — v0.2 integration.
-- `feature/R-XXX-short-name` — single-item work.
-- `release/v0.1.0-m<N>` — release prep (cut by maintainer, not by agents).
+All development happens directly on `main`. No feature branches, no `next` branch.
 
-### 6.3 PR rules
+### 6.3 Commit rules
 
-- One R-XXX item per PR (or one logical sub-step of a multi-step item).
-- Title matches the R-XXX item title.
-- All §5.1 DoD bullets are addressed in the PR body.
-- Squash-merge only. No merge commits, no rebase-merge.
-- Reviewer must be the item owner or a delegate.
+- One R-XXX item per commit (or one logical sub-step of a multi-step item).
+- Commit message matches the R-XXX item title.
+- All §5.1 DoD bullets must be addressed before committing.
 
 ---
 
@@ -571,15 +562,15 @@ Tests that touch `AssetDb` (SQLite) use `#[serial_test::serial]` to avoid file-l
 | Reading `World` from the render thread | Borrow conflict | Use `FrameSnapshot` instead; renderer is read-only on the world. |
 | Asset DB in parallel tests | "database is locked" | `#[serial_test::serial]` on the test, or `cargo test -- --test-threads=1`. |
 | Skipping `miri` review on `unsafe` | Future bug | Add a one-line `// MIRI:` comment explaining why this `unsafe` is sound. |
-| Changing a phase DoD without an ADR | Drift from `architecture.md` | Write `docs/adr/NNNN-<title>.md` first; reference in PR. |
-| Forgetting to update `roadmap.toml` after merge | Roadmap stale | Either include the status change in the same PR, or follow up immediately. |
+| Changing a phase DoD without an ADR | Drift from `architecture.md` | Write `docs/adr/NNNN-<title>.md` first; reference in the commit. |
+| Forgetting to update `roadmap.toml` after commit | Roadmap stale | Update `roadmap.toml` in the same commit, or follow up immediately. |
 
 ---
 
 ## 11. Communication Norms
 
-- **Status updates:** in the PR description, in `roadmap.toml` `blocker = "..."` lines, and in the milestone tracking issue.
-- **Architectural questions:** propose as an ADR PR (`docs/adr/NNNN-title.md`); do not change `architecture.md` directly without an accepted ADR.
+- **Status updates:** in the commit message body, in `roadmap.toml` `blocker = "..."` lines, and in the milestone tracking issue.
+- **Architectural questions:** propose as an ADR (`docs/adr/NNNN-title.md`); do not change `architecture.md` directly without an accepted ADR.
 - **Blockers:** if you cannot complete an item in the planned time, mark it `blocked` in `roadmap.toml` and add a `blocker = "..."` line. Open an issue if the blocker is structural.
 - **Regressions:** if a previously-complete item regresses, mark it `in_progress` with `regression_note = "..."` and link the issue.
 
