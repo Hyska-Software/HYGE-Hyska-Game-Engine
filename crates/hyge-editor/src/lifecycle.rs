@@ -20,6 +20,7 @@ use crate::data::{
 use crate::history::CommandHistory;
 use crate::project::Project;
 use crate::snapshots::{build_snapshot, EditorSnapshot, EntityId};
+use crate::transport::{InputBridge, ViewportInputBatch};
 use crate::viewport::{EditorCameraState, ViewportState};
 
 /// Lifecycle state visible to the frontend.
@@ -76,6 +77,7 @@ pub struct EditorSessionRuntime {
     data: EditorDataServices,
     editor_camera: EditorCameraState,
     viewport: ViewportState,
+    input: InputBridge,
 }
 
 impl EditorSessionRuntime {
@@ -101,6 +103,7 @@ impl EditorSessionRuntime {
             data: EditorDataServices::default(),
             editor_camera: EditorCameraState::default(),
             viewport: ViewportState::default(),
+            input: InputBridge::default(),
         }
     }
 
@@ -306,6 +309,18 @@ impl EditorSessionRuntime {
     pub fn set_viewport_size(&mut self, width: u32, height: u32) -> ViewportState {
         self.viewport.resize(width, height);
         self.viewport.clone()
+    }
+
+    /// Applies one ordered, rate-limited input batch for a transport generation.
+    pub fn apply_viewport_input(
+        &mut self,
+        batch: &ViewportInputBatch,
+        generation: u64,
+    ) -> Result<u64, &'static str> {
+        self.input.accept(batch, generation)?;
+        self.viewport.camera_revision = self.viewport.camera_revision.saturating_add(1);
+        self.viewport.last_frame_revision = None;
+        Ok(self.input.revision())
     }
 
     /// Replaces the engine-owned selection and returns its new snapshot.

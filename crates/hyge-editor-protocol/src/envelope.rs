@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{error::ProtocolIoError, PROTOCOL_VERSION};
+use crate::{error::ProtocolIoError, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS};
 
 /// Message direction-independent envelope.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -61,6 +61,12 @@ pub enum MessageType {
     SetEditorCamera,
     /// Changes viewport dimensions.
     SetViewportSize,
+    /// Opens a shared-memory viewport transport.
+    OpenViewportTransport,
+    /// Closes a shared-memory viewport transport.
+    CloseViewportTransport,
+    /// Submits revisioned viewport input.
+    ViewportInput,
     /// Requests an asset preview.
     RequestAssetPreview,
     /// Requests the current asset tree and dependency graph.
@@ -97,6 +103,10 @@ pub enum MessageType {
     ProfilerSample,
     /// Announces a new viewport frame in shared memory.
     ViewportFrameAvailable,
+    /// Returns shared-memory transport metadata.
+    ViewportTransportReady,
+    /// Announces a new shared-memory generation.
+    ViewportTransportReset,
     /// Completes a command.
     CommandCompleted,
     /// Publishes a service error.
@@ -192,7 +202,7 @@ impl Envelope {
 
     pub(crate) fn validate(&self) -> Result<(), ProtocolIoError> {
         self.validate_structure()?;
-        if self.protocol_version != PROTOCOL_VERSION {
+        if !SUPPORTED_PROTOCOL_VERSIONS.contains(&self.protocol_version) {
             return Err(ProtocolIoError::UnsupportedVersion(self.protocol_version));
         }
         Ok(())

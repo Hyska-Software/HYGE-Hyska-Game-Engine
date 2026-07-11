@@ -17,6 +17,7 @@ mod project;
 mod server;
 mod snapshots;
 mod state;
+mod transport;
 mod viewport;
 
 pub use commands::{
@@ -37,6 +38,10 @@ pub use snapshots::{
     HierarchyNode, ReflectedComponent, SnapshotDiagnostic,
 };
 pub use state::{EditorState, SessionSnapshot};
+pub use transport::{
+    CameraCommand, FrameHeader, InputBridge, SharedViewportTransport, TransportState,
+    ViewportInput, ViewportInputBatch, ViewportRing,
+};
 pub use viewport::{EditorCameraState, EditorRenderBridge, ViewportRenderState, ViewportState};
 
 /// Common editor exports.

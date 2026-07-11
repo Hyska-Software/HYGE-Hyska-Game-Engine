@@ -440,6 +440,7 @@ fn handle_authenticated(
         }
         MessageType::SetEditorCamera => viewport_set_camera(envelope, runtime),
         MessageType::SetViewportSize => viewport_set_size(envelope, runtime),
+        MessageType::ViewportInput => viewport_input(envelope, runtime),
         MessageType::EditComponent
         | MessageType::AddComponent
         | MessageType::RemoveComponent
@@ -470,6 +471,37 @@ fn handle_authenticated(
                 "editor command is reserved for a later editor milestone",
             )]
         }
+    }
+}
+
+fn viewport_input(envelope: &Envelope, runtime: crate::lifecycle::RuntimeHandle) -> Vec<Envelope> {
+    let generation = envelope
+        .payload
+        .get("generation")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let batch = serde_json::from_value::<crate::ViewportInputBatch>(envelope.payload.clone());
+    match batch.and_then(|batch| {
+        runtime
+            .lock()
+            .map_err(|_| serde_json::Error::io(std::io::Error::other("runtime lock poisoned")))
+            .and_then(|mut runtime| {
+                runtime
+                    .apply_viewport_input(&batch, generation)
+                    .map_err(|error| serde_json::Error::io(std::io::Error::other(error)))
+                    .map(|revision| (batch, revision))
+            })
+    }) {
+        Ok((_batch, revision)) => vec![Envelope::new(
+            &envelope.message_id,
+            MessageType::CommandCompleted,
+            serde_json::json!({"command":"viewport_input","input_revision":revision}),
+        )],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_viewport_input",
+            error.to_string(),
+        )],
     }
 }
 

@@ -142,6 +142,8 @@ gilrs = "0.10"
 # Windows-specific (raw input for hyge-window)
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Memory",
     "Win32_UI_Input",
     "Win32_UI_WindowsAndMessaging",
 ] }
@@ -181,6 +183,7 @@ pollster = "0.4"
 hyge-core = { path = "crates/hyge-core", version = "0.1.0" }
 hyge-ecs = { path = "crates/hyge-ecs", version = "0.1.0" }
 hyge-editor-protocol = { path = "crates/hyge-editor-protocol", version = "0.1.0" }
+hyge-editor-shm = { path = "crates/hyge-editor-shm", version = "0.1.0" }
 hyge-render-graph = { path = "crates/hyge-render-graph", version = "0.1.0" }
 hyge-render = { path = "crates/hyge-render", version = "0.1.0" }
 hyge-asset = { path = "crates/hyge-asset", version = "0.1.0" }
