@@ -438,6 +438,8 @@ fn handle_authenticated(
         MessageType::SelectEntities => {
             lifecycle_select_entities(envelope, runtime, &binding.session_id)
         }
+        MessageType::SetEditorCamera => viewport_set_camera(envelope, runtime),
+        MessageType::SetViewportSize => viewport_set_size(envelope, runtime),
         MessageType::EditComponent
         | MessageType::AddComponent
         | MessageType::RemoveComponent
@@ -727,6 +729,101 @@ fn decode_editor_command(
 
 fn command_error(envelope: &Envelope, error: crate::commands::CommandFailure) -> Envelope {
     Envelope::error(&envelope.message_id, &error.code, &error.message)
+}
+
+fn viewport_set_camera(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let camera = match serde_json::from_value::<crate::EditorCameraState>(envelope.payload.clone())
+    {
+        Ok(camera) => camera,
+        Err(error) => {
+            return vec![Envelope::error(
+                &envelope.message_id,
+                "invalid_request",
+                error.to_string(),
+            )]
+        }
+    };
+    let result = runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_owned())
+        .and_then(|mut runtime| {
+            runtime
+                .set_editor_camera(camera)
+                .map(|_| runtime.viewport_state())
+        });
+    match result {
+        Ok(viewport) => vec![viewport_completed(envelope, "set_editor_camera", &viewport)],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            error,
+        )],
+    }
+}
+
+fn viewport_set_size(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let width = envelope
+        .payload
+        .get("width")
+        .and_then(serde_json::Value::as_u64);
+    let height = envelope
+        .payload
+        .get("height")
+        .and_then(serde_json::Value::as_u64);
+    let (Some(width), Some(height)) = (width, height) else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "viewport size requires numeric width and height",
+        )];
+    };
+    if width == 0 || height == 0 || width > 16_384 || height > 16_384 {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "viewport dimensions must be between 1 and 16384",
+        )];
+    }
+    let result = runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_owned())
+        .map(|mut runtime| runtime.set_viewport_size(width as u32, height as u32));
+    match result {
+        Ok(viewport) => vec![viewport_completed(envelope, "set_viewport_size", &viewport)],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "viewport_unavailable",
+            error,
+        )],
+    }
+}
+
+fn viewport_completed(
+    envelope: &Envelope,
+    command: &str,
+    viewport: &crate::ViewportState,
+) -> Envelope {
+    let mut response = Envelope::new(
+        &envelope.message_id,
+        MessageType::CommandCompleted,
+        serde_json::json!({
+            "command": command,
+            "width": viewport.width,
+            "height": viewport.height,
+            "camera_revision": viewport.camera_revision,
+            "scene_revision": viewport.scene_revision,
+            "last_frame_revision": viewport.last_frame_revision,
+            "state": format!("{:?}", viewport.state).to_lowercase(),
+        }),
+    );
+    response.correlation_id = Some(envelope.message_id.clone());
+    response
 }
 
 fn lifecycle_open_project(

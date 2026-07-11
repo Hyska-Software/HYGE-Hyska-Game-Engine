@@ -60,6 +60,7 @@ use crate::ibl::EnvironmentBake;
 use crate::ibl_gpu::{self, IblResources};
 use crate::profiler::{FrameStats, GpuProfiler};
 use crate::triangle::TrianglePass;
+use crate::viewport::{OffscreenTarget, ViewportFrame};
 
 /// The runtime renderer.
 pub struct Renderer {
@@ -121,6 +122,8 @@ pub struct Renderer {
     /// [`Renderer::render_frame`]. `None` until the first
     /// `render_frame` call; reused on subsequent frames.
     clustered: Option<ClusteredForwardPass>,
+    /// Persistent editor/offscreen target, owned by the renderer.
+    offscreen: Option<OffscreenTarget>,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -257,6 +260,7 @@ impl Renderer {
             config,
             graph: RenderGraph::new(),
             clustered: None,
+            offscreen: None,
         })
     }
 
@@ -330,6 +334,7 @@ impl Renderer {
             config: config.clone(),
             graph: RenderGraph::new(),
             clustered: None,
+            offscreen: None,
         })
     }
 
@@ -635,27 +640,89 @@ impl Renderer {
             );
         }
 
+        let mut pass = self
+            .clustered
+            .take()
+            .ok_or_else(|| HygeError::gpu("clustered-forward pass was not initialized"))?;
+        let mut graph = RenderGraph::new();
+        let color_target = graph.add_resource(
+            ResourceKind::Texture(TextureDesc::new_2d(
+                target.width(),
+                target.height(),
+                target_format,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            )),
+            ResourceLifetime::Persistent,
+        );
+        pass.set_graph_color_target(color_target);
+        graph.add_pass(pass);
+        let mut compiled = graph.compile(&self.device)?;
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("hyge-render/frame"),
+                label: Some("hyge-render/frame-graph"),
             });
-
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
         let mut frame_ctx = FrameContext::new(view, target_format);
-        {
-            if let Some(pass) = self.clustered.as_mut() {
-                let mut pass_ctx = PassContext::for_frame(&mut frame_ctx, &mut encoder);
-                pass.record(&mut pass_ctx);
-            }
-        }
-
-        self.profiler.resolve(&mut encoder, 1);
+        let pass_names = compiled
+            .passes()
+            .iter()
+            .map(|pass| pass.name().to_owned())
+            .collect::<Vec<_>>();
+        compiled.execute_with_hooks(
+            &mut encoder,
+            Some(&mut frame_ctx),
+            |_, pass_index, encoder| self.profiler.write_pass_start(encoder, pass_index),
+            |_, pass_index, encoder| self.profiler.write_pass_end(encoder, pass_index),
+        );
+        self.profiler.resolve(&mut encoder, pass_names.len() as u32);
         self.queue.submit(std::iter::once(encoder.finish()));
         self.device.poll(wgpu::Maintain::Wait);
-        self.profiler
-            .finish_frame(&self.device, &[String::from("render_frame")], 1, 1);
+        self.profiler.finish_frame(&self.device, &pass_names, 1, 1);
         Ok(())
+    }
+
+    /// Renders the shared frame graph to a renderer-owned RGBA8 offscreen
+    /// target and performs readback on the renderer worker thread.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "render submission is intrinsically many-arg"
+    )]
+    pub fn render_viewport_frame(
+        &mut self,
+        width: u32,
+        height: u32,
+        revision: u64,
+        frame_data: &crate::clustered_forward::FrameData,
+        instances: &[crate::bindless::Instance],
+        draw_commands: &[crate::bindless::DrawCommand],
+        lights: &[crate::bindless::Light],
+    ) -> HygeResult<ViewportFrame> {
+        let mut target = self
+            .offscreen
+            .take()
+            .unwrap_or_else(|| OffscreenTarget::new(&self.device, width, height));
+        if target.width != width.max(1) || target.height != height.max(1) {
+            target.resize(&self.device, width, height);
+        }
+        let render_result = self.render_frame(
+            target.texture(),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::Color {
+                r: 0.04,
+                g: 0.04,
+                b: 0.05,
+                a: 1.0,
+            },
+            frame_data,
+            instances,
+            draw_commands,
+            lights,
+        );
+        let frame_result =
+            render_result.and_then(|()| target.readback(&self.device, &self.queue, revision));
+        self.offscreen = Some(target);
+        frame_result
     }
 
     /// Resizes the surface to the given width and height. A no-op

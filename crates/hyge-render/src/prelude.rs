@@ -42,3 +42,5 @@ pub use crate::skinning::{
     skin_vertex, skin_vertices, SkeletalAnimation, SkinnedVertex, SkinnedVertexOutput,
 };
 pub use crate::triangle::{TrianglePass, Vertex, SHADER_SOURCE, VERTICES};
+pub use crate::view::{RenderView, RenderViewMode};
+pub use crate::viewport::ViewportFrame;

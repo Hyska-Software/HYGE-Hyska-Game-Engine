@@ -168,6 +168,9 @@ pub struct ClusteredForwardPass {
     draw_commands: Vec<DrawCommand>,
     /// Cached batches used for indirect draws.
     batches: Vec<Batch>,
+    /// Graph resource written by this pass when it is executed through the
+    /// shared frame graph. The concrete view remains in `FrameContext`.
+    graph_color_target: Option<ResourceHandle>,
 }
 
 impl std::fmt::Debug for ClusteredForwardPass {
@@ -177,6 +180,7 @@ impl std::fmt::Debug for ClusteredForwardPass {
             .field("instances", &self.instances.len())
             .field("draw_commands", &self.draw_commands.len())
             .field("batches", &self.batches.len())
+            .field("graph_color_target", &self.graph_color_target)
             .field("bindless", &"<BindlessTable>")
             .finish_non_exhaustive()
     }
@@ -347,7 +351,14 @@ impl ClusteredForwardPass {
             instances: Vec::new(),
             draw_commands: Vec::new(),
             batches: Vec::new(),
+            graph_color_target: None,
         }
+    }
+
+    /// Associates this pass with the graph resource representing its color
+    /// output.
+    pub fn set_graph_color_target(&mut self, target: ResourceHandle) {
+        self.graph_color_target = Some(target);
     }
 
     fn build_frame_bind_group(
@@ -600,7 +611,19 @@ impl Pass for ClusteredForwardPass {
     }
 
     fn writes(&self) -> Vec<ResourceHandle> {
-        Vec::new()
+        self.graph_color_target.into_iter().collect()
+    }
+
+    fn texture_usages(&self) -> Vec<(ResourceHandle, wgpu::TextureUsages)> {
+        self.graph_color_target
+            .into_iter()
+            .map(|handle| {
+                (
+                    handle,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                )
+            })
+            .collect()
     }
 
     fn record(&mut self, ctx: &mut PassContext<'_>) {

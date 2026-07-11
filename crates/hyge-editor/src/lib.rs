@@ -17,6 +17,7 @@ mod project;
 mod server;
 mod snapshots;
 mod state;
+mod viewport;
 
 pub use commands::{
     AddComponentCommand, Command, CommandEffect, CommandFailure, DestroyCommand, DuplicateCommand,
@@ -36,14 +37,16 @@ pub use snapshots::{
     HierarchyNode, ReflectedComponent, SnapshotDiagnostic,
 };
 pub use state::{EditorState, SessionSnapshot};
+pub use viewport::{EditorCameraState, EditorRenderBridge, ViewportRenderState, ViewportState};
 
 /// Common editor exports.
 pub mod prelude {
     pub use crate::{
         AddComponentCommand, Command, CommandEffect, CommandFailure, CommandHistory,
-        ComponentDescriptor, DestroyCommand, DuplicateCommand, EditComponentCommand, EditorCommand,
-        EditorServer, EditorServerConfig, EditorSnapshot, EditorState, EntityId, EntitySnapshot,
-        FieldDescriptor, HierarchyNode, ReflectedComponent, RemoveComponentCommand,
-        ReparentCommand, SnapshotDiagnostic,
+        ComponentDescriptor, DestroyCommand, DuplicateCommand, EditComponentCommand,
+        EditorCameraState, EditorCommand, EditorRenderBridge, EditorServer, EditorServerConfig,
+        EditorSnapshot, EditorState, EntityId, EntitySnapshot, FieldDescriptor, HierarchyNode,
+        ReflectedComponent, RemoveComponentCommand, ReparentCommand, SnapshotDiagnostic,
+        ViewportRenderState, ViewportState,
     };
 }

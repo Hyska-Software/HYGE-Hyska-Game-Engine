@@ -77,6 +77,14 @@
       }
     },
     {
+      "if": { "properties": { "message_type": { "const": "set_editor_camera" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/editor_camera_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "set_viewport_size" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/viewport_size_payload" } } }
+    },
+    {
       "if": { "properties": { "message_type": { "const": "lifecycle_status" } } },
       "then": {
         "properties": {
@@ -183,6 +191,27 @@
         "resumed": { "type": "boolean" },
         "server": { "const": "hyge-editor" },
         "request_timeout_ms": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "editor_camera_payload": {
+      "type": "object",
+      "required": ["position", "rotation", "fov_degrees", "near", "far"],
+      "additionalProperties": false,
+      "properties": {
+        "position": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number" } },
+        "rotation": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "number" } },
+        "fov_degrees": { "type": "number", "exclusiveMinimum": 0.1, "exclusiveMaximum": 179.0 },
+        "near": { "type": "number", "exclusiveMinimum": 0 },
+        "far": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "viewport_size_payload": {
+      "type": "object",
+      "required": ["width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 1, "maximum": 16384 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 16384 }
       }
     },
     "lifecycle_status_payload": {

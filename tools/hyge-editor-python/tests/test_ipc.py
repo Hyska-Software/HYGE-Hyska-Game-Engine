@@ -164,6 +164,16 @@ def test_schema_validates_every_declared_message_type():
                 "prefab": {},
                 "transform": {},
             }
+        elif message_type == "set_editor_camera":
+            envelope["payload"] = {
+                "position": [0.0, 0.0, 5.0],
+                "rotation": [0.0, 0.0, 0.0, 1.0],
+                "fov_degrees": 60.0,
+                "near": 0.1,
+                "far": 1000.0,
+            }
+        elif message_type == "set_viewport_size":
+            envelope["payload"] = {"width": 640, "height": 360}
         elif message_type == "request_asset_preview":
             envelope["payload"] = {"asset_id": "0" * 64}
         elif message_type == "cancel_asset_preview":

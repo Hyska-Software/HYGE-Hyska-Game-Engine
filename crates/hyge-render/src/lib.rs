@@ -84,6 +84,8 @@ pub mod renderer;
 pub mod shadow;
 pub mod skinning;
 pub mod triangle;
+pub mod view;
+pub mod viewport;
 
 /// The renderer prelude.
 pub mod prelude;

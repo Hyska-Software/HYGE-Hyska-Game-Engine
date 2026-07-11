@@ -20,6 +20,7 @@ use crate::data::{
 use crate::history::CommandHistory;
 use crate::project::Project;
 use crate::snapshots::{build_snapshot, EditorSnapshot, EntityId};
+use crate::viewport::{EditorCameraState, ViewportState};
 
 /// Lifecycle state visible to the frontend.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +74,8 @@ pub struct EditorSessionRuntime {
     history: CommandHistory,
     snapshot: LifecycleSnapshot,
     data: EditorDataServices,
+    editor_camera: EditorCameraState,
+    viewport: ViewportState,
 }
 
 impl EditorSessionRuntime {
@@ -96,6 +99,8 @@ impl EditorSessionRuntime {
                 diagnostics: Vec::new(),
             },
             data: EditorDataServices::default(),
+            editor_camera: EditorCameraState::default(),
+            viewport: ViewportState::default(),
         }
     }
 
@@ -122,6 +127,9 @@ impl EditorSessionRuntime {
         self.scene = None;
         self.revision = 0;
         self.snapshot_revision = 1;
+        self.viewport.scene_revision = self.snapshot_revision;
+        self.viewport.last_frame_revision = None;
+        self.viewport.state = crate::viewport::ViewportRenderState::Ready;
         self.selection.clear();
         self.history.clear();
         self.snapshot = self.make_snapshot(
@@ -164,6 +172,9 @@ impl EditorSessionRuntime {
         self.scene = Some(scene);
         self.revision = read_revision(self.project_root()?)?;
         self.snapshot_revision = self.snapshot_revision.saturating_add(1).max(1);
+        self.viewport.scene_revision = self.snapshot_revision;
+        self.viewport.last_frame_revision = None;
+        self.viewport.state = crate::viewport::ViewportRenderState::Ready;
         self.selection.clear();
         self.history.clear();
         self.snapshot = self.make_snapshot(LifecycleState::Ready, Vec::new());
@@ -205,6 +216,8 @@ impl EditorSessionRuntime {
             state.document = Some(document);
         }
         self.snapshot_revision = self.snapshot_revision.saturating_add(1).max(1);
+        self.viewport.scene_revision = self.snapshot_revision;
+        self.viewport.last_frame_revision = None;
         self.snapshot = self.make_snapshot(LifecycleState::Ready, Vec::new());
         Ok(self.snapshot.clone())
     }
@@ -263,6 +276,36 @@ impl EditorSessionRuntime {
             self.revision,
             &self.selection,
         )
+    }
+
+    /// Returns the session-owned editor camera.
+    #[must_use]
+    pub fn editor_camera(&self) -> EditorCameraState {
+        self.editor_camera
+    }
+
+    /// Returns the session-owned viewport state.
+    #[must_use]
+    pub fn viewport_state(&self) -> ViewportState {
+        self.viewport.clone()
+    }
+
+    /// Updates the editor camera without touching any game-camera component.
+    pub fn set_editor_camera(
+        &mut self,
+        camera: EditorCameraState,
+    ) -> Result<EditorCameraState, String> {
+        let camera = camera.validate()?;
+        self.editor_camera = camera;
+        self.viewport.camera_revision = self.viewport.camera_revision.saturating_add(1).max(1);
+        self.viewport.last_frame_revision = None;
+        Ok(camera)
+    }
+
+    /// Resizes the editor viewport and invalidates its current frame.
+    pub fn set_viewport_size(&mut self, width: u32, height: u32) -> ViewportState {
+        self.viewport.resize(width, height);
+        self.viewport.clone()
     }
 
     /// Replaces the engine-owned selection and returns its new snapshot.
@@ -401,6 +444,8 @@ impl EditorSessionRuntime {
 
     fn bump_snapshot_revision(&mut self) {
         self.snapshot_revision = self.snapshot_revision.saturating_add(1).max(1);
+        self.viewport.scene_revision = self.snapshot_revision;
+        self.viewport.last_frame_revision = None;
     }
 
     fn update_selection_after_command(&mut self, command: &EditorCommand, effect: &CommandEffect) {

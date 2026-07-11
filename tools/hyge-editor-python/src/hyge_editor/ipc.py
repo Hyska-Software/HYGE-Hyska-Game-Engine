@@ -214,6 +214,27 @@ class EditorClient:
         """Request the bounded profiler history."""
         return self.request("request_profiler_snapshot")
 
+    def set_editor_camera(
+        self,
+        position: tuple[float, float, float],
+        rotation: tuple[float, float, float, float],
+        fov_degrees: float = 60.0,
+        near: float = 0.1,
+        far: float = 1000.0,
+    ) -> Envelope:
+        """Update the session-owned editor camera."""
+        return self.request("set_editor_camera", {
+            "position": list(position),
+            "rotation": list(rotation),
+            "fov_degrees": fov_degrees,
+            "near": near,
+            "far": far,
+        })
+
+    def set_viewport_size(self, width: int, height: int) -> Envelope:
+        """Resize the session-owned editor viewport target."""
+        return self.request("set_viewport_size", {"width": width, "height": height})
+
     def request_asset_preview(self, asset_id: str, job_id: str | None = None) -> Envelope:
         """Request a deterministic asset preview."""
         payload: dict[str, Any] = {"asset_id": asset_id}
