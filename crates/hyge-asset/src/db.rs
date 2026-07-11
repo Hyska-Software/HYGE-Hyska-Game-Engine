@@ -9,6 +9,24 @@ use crate::asset::AssetId;
 
 const CURRENT_SCHEMA_VERSION: i64 = 1;
 
+/// One content-addressed asset row exposed to editor tooling.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AssetRecord {
+    /// BLAKE3 identity.
+    pub asset_id: AssetId,
+    /// Path stored by the importer.
+    pub path: PathBuf,
+}
+
+/// One directed dependency edge in the asset graph.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DependencyEdge {
+    /// Asset that owns the reference.
+    pub parent: AssetId,
+    /// Referenced asset.
+    pub child: AssetId,
+}
+
 /// Content-addressed asset database.
 ///
 /// The database maps BLAKE3 asset ids to cache paths and records dependency
@@ -66,6 +84,56 @@ impl AssetDb {
             .ok()
             .flatten()
             .map(PathBuf::from)
+    }
+
+    /// Returns every asset row in deterministic BLAKE3 order.
+    pub fn list_assets(&self) -> Vec<AssetRecord> {
+        let mut statement = match self
+            .db
+            .prepare("SELECT hash, path FROM assets ORDER BY hash")
+        {
+            Ok(statement) => statement,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match statement.query_map([], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, String>(1)?))
+        }) {
+            Ok(rows) => rows,
+            Err(_) => return Vec::new(),
+        };
+        rows.filter_map(Result::ok)
+            .filter_map(|(bytes, path)| {
+                Some(AssetRecord {
+                    asset_id: asset_id_from_blob(&bytes)?,
+                    path: PathBuf::from(path),
+                })
+            })
+            .collect()
+    }
+
+    /// Returns every dependency edge in deterministic parent/child order.
+    pub fn dependency_edges(&self) -> Vec<DependencyEdge> {
+        let mut statement = match self.db.prepare(
+            "SELECT parent_hash, child_hash FROM dependency_edges \
+             ORDER BY parent_hash, child_hash",
+        ) {
+            Ok(statement) => statement,
+            Err(_) => return Vec::new(),
+        };
+        let rows = match statement.query_map([], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
+        }) {
+            Ok(rows) => rows,
+            Err(_) => return Vec::new(),
+        };
+        rows.filter_map(Result::ok)
+            .filter_map(|(parent, child)| {
+                Some(DependencyEdge {
+                    parent: asset_id_from_blob(&parent)?,
+                    child: asset_id_from_blob(&child)?,
+                })
+            })
+            .collect()
     }
 
     /// Inserts or replaces a content-addressed asset path.

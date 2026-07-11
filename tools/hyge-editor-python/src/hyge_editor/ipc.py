@@ -15,8 +15,10 @@ MESSAGE_TYPES = {
     "select_entities", "edit_component", "add_component", "remove_component",
     "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab",
     "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview",
-    "world_snapshot", "selection_changed", "component_changed", "asset_changed",
-    "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available",
+    "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot",
+    "cancel_asset_preview", "world_snapshot", "selection_changed", "component_changed",
+    "asset_changed", "asset_snapshot", "console_snapshot", "profiler_snapshot",
+    "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available",
     "command_completed", "engine_error", "server_shutdown", "lifecycle_status",
 }
 
@@ -198,3 +200,27 @@ class EditorClient:
             self.lifecycle_statuses.append(response)
             return self._read_response()
         return response
+
+    def request_asset_snapshot(self) -> Envelope:
+        """Request the bounded asset tree and dependency graph."""
+        return self.request("request_asset_snapshot")
+
+    def request_console_snapshot(self, min_level: str | None = None, target_prefix: str | None = None) -> Envelope:
+        """Request retained console lines with optional filters."""
+        payload = {key: value for key, value in (("min_level", min_level), ("target_prefix", target_prefix)) if value is not None}
+        return self.request("request_console_snapshot", payload)
+
+    def request_profiler_snapshot(self) -> Envelope:
+        """Request the bounded profiler history."""
+        return self.request("request_profiler_snapshot")
+
+    def request_asset_preview(self, asset_id: str, job_id: str | None = None) -> Envelope:
+        """Request a deterministic asset preview."""
+        payload: dict[str, Any] = {"asset_id": asset_id}
+        if job_id is not None:
+            payload["job_id"] = job_id
+        return self.request("request_asset_preview", payload)
+
+    def cancel_asset_preview(self, job_id: str) -> Envelope:
+        """Cancel an asset preview job."""
+        return self.request("cancel_asset_preview", {"job_id": job_id})

@@ -1549,10 +1549,12 @@ title = "Asset, console and profiler data services"
 phase = "phase_9"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-031", "R-025", "R-084"]
 summary = "Expose assets, dependency graph, tracing lines and frame telemetry through bounded snapshots."
+completed_at = "2026-07-11"
+completion_notes = "Implemented AssetDb bulk asset/dependency queries, bounded session-owned asset snapshots, deterministic PNG preview output with cancellation tokens and atomic paths, ConsoleBuffer/ConsoleLayer with 1000-line level/target filtering, 240-sample profiler history with frame/GPU/draw/instance/cache metrics and optional process memory, additive v1 IPC messages/schema/Python helpers, and authenticated TCP round-trip tests. Evidence: cargo test -p hyge-editor --tests -- --test-threads=1, cargo test -p hyge-asset -- --test-threads=1, python -m pytest -q tools/hyge-editor-python/tests, cargo fmt --all -- --check, cargo clippy --workspace --all-targets -- --deny warnings, cargo test --workspace -- --test-threads=1, cargo doc --workspace --no-deps."
 acceptance = [
   "asset tree and BLAKE3 dependency graph are sourced from AssetDb",
   "preview jobs have cancellation, bounded memory and deterministic output paths",
