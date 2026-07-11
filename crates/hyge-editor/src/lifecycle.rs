@@ -13,6 +13,10 @@ use hyge_scene::{
 };
 
 use crate::commands::{CommandEffect, CommandFailure, EditorCommand};
+use crate::data::{
+    AssetSnapshot, ConsoleFilter, ConsoleSnapshot, EditorDataServices, PreviewResult,
+    ProfilerSnapshot,
+};
 use crate::history::CommandHistory;
 use crate::project::Project;
 use crate::snapshots::{build_snapshot, EditorSnapshot, EntityId};
@@ -68,6 +72,7 @@ pub struct EditorSessionRuntime {
     selection: Vec<EntityId>,
     history: CommandHistory,
     snapshot: LifecycleSnapshot,
+    data: EditorDataServices,
 }
 
 impl EditorSessionRuntime {
@@ -90,6 +95,7 @@ impl EditorSessionRuntime {
                 revision: 0,
                 diagnostics: Vec::new(),
             },
+            data: EditorDataServices::default(),
         }
     }
 
@@ -110,6 +116,9 @@ impl EditorSessionRuntime {
         }
         self.world = candidate;
         self.project = Some(project);
+        self.data
+            .previews
+            .set_project(self.project.as_ref().map(|project| project.root.as_path()));
         self.scene = None;
         self.revision = 0;
         self.snapshot_revision = 1;
@@ -204,6 +213,46 @@ impl EditorSessionRuntime {
     #[must_use]
     pub fn snapshot(&self) -> LifecycleSnapshot {
         self.snapshot.clone()
+    }
+
+    /// Returns the session-owned data services.
+    #[must_use]
+    pub fn data_services(&self) -> EditorDataServices {
+        self.data.clone()
+    }
+
+    /// Returns the project asset snapshot.
+    pub fn asset_snapshot(&self) -> Result<AssetSnapshot, String> {
+        self.project
+            .as_ref()
+            .ok_or_else(|| "project is not open".to_owned())
+            .and_then(|project| self.data.asset_snapshot(&project.root))
+    }
+
+    /// Returns filtered retained console lines.
+    #[must_use]
+    pub fn console_snapshot(&self, filter: ConsoleFilter) -> ConsoleSnapshot {
+        self.data.console.snapshot(filter)
+    }
+
+    /// Returns retained profiler samples.
+    #[must_use]
+    pub fn profiler_snapshot(&self) -> ProfilerSnapshot {
+        self.data.profiler.snapshot()
+    }
+
+    /// Requests a deterministic preview for an asset.
+    pub fn request_asset_preview(
+        &self,
+        asset_id: &str,
+        job_id: &str,
+    ) -> Result<PreviewResult, String> {
+        self.data.previews.request(asset_id, job_id)
+    }
+
+    /// Cancels a preview job.
+    pub fn cancel_asset_preview(&self, job_id: &str) -> bool {
+        self.data.previews.cancel(job_id)
     }
 
     /// Returns the immutable ECS/editor snapshot for the current session.

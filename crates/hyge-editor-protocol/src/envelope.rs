@@ -63,6 +63,14 @@ pub enum MessageType {
     SetViewportSize,
     /// Requests an asset preview.
     RequestAssetPreview,
+    /// Requests the current asset tree and dependency graph.
+    RequestAssetSnapshot,
+    /// Requests retained console lines.
+    RequestConsoleSnapshot,
+    /// Requests retained profiler samples.
+    RequestProfilerSnapshot,
+    /// Cancels an asset preview job.
+    CancelAssetPreview,
     /// Publishes the current world hierarchy.
     WorldSnapshot,
     /// Publishes the current selection.
@@ -71,6 +79,16 @@ pub enum MessageType {
     ComponentChanged,
     /// Publishes an asset change.
     AssetChanged,
+    /// Returns an asset tree snapshot.
+    AssetSnapshot,
+    /// Returns retained console lines.
+    ConsoleSnapshot,
+    /// Returns retained profiler samples.
+    ProfilerSnapshot,
+    /// Announces a completed preview.
+    AssetPreviewReady,
+    /// Announces a cancelled preview.
+    AssetPreviewCancelled,
     /// Publishes a scene reload.
     SceneReloaded,
     /// Publishes a console line.

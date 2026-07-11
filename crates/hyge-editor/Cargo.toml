@@ -12,6 +12,7 @@ hyge-core = { workspace = true }
 hyge-asset = { workspace = true }
 hyge-ecs = { workspace = true }
 hyge-scene = { workspace = true }
+hyge-render = { workspace = true }
 hyge-editor-protocol = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_app = { workspace = true }
@@ -24,3 +25,5 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+image = { workspace = true, features = ["png"] }

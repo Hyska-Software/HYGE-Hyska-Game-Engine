@@ -122,6 +122,15 @@ impl EditorServer {
         self.sessions.lock().ok()?.snapshot(session_id)
     }
 
+    /// Returns the data services for a retained session, for runtime sinks.
+    pub fn session_data_services(
+        &self,
+        session_id: &str,
+    ) -> Option<crate::data::EditorDataServices> {
+        let runtime = self.sessions.lock().ok()?.runtime_handle(session_id)?;
+        runtime.lock().ok().map(|runtime| runtime.data_services())
+    }
+
     /// Serves connections until shutdown is requested.
     ///
     /// # Errors
@@ -438,6 +447,11 @@ fn handle_authenticated(
         | MessageType::InstantiatePrefab
         | MessageType::Undo
         | MessageType::Redo => editor_command(envelope, runtime),
+        MessageType::RequestAssetSnapshot => data_asset_snapshot(envelope, runtime),
+        MessageType::RequestConsoleSnapshot => data_console_snapshot(envelope, runtime),
+        MessageType::RequestProfilerSnapshot => data_profiler_snapshot(envelope, runtime),
+        MessageType::RequestAssetPreview => data_asset_preview(envelope, runtime),
+        MessageType::CancelAssetPreview => data_cancel_preview(envelope, runtime),
         MessageType::ServerShutdown => {
             shutdown.store(true, Ordering::Release);
             vec![Envelope::new(
@@ -455,6 +469,166 @@ fn handle_authenticated(
             )]
         }
     }
+}
+
+fn data_asset_snapshot(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let result = runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_owned())
+        .and_then(|runtime| runtime.asset_snapshot());
+    match result {
+        Ok(snapshot) => vec![data_envelope(
+            envelope,
+            MessageType::AssetSnapshot,
+            serde_json::to_value(snapshot).unwrap_or_else(|_| serde_json::json!({})),
+        )],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "asset_db_unavailable",
+            error,
+        )],
+    }
+}
+
+fn data_console_snapshot(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let filter = crate::data::ConsoleFilter {
+        min_level: envelope
+            .payload
+            .get("min_level")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+        target_prefix: envelope
+            .payload
+            .get("target_prefix")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+    };
+    let result = runtime
+        .lock()
+        .map(|runtime| runtime.console_snapshot(filter))
+        .map_err(|_| "runtime lock poisoned");
+    match result {
+        Ok(snapshot) => vec![data_envelope(
+            envelope,
+            MessageType::ConsoleSnapshot,
+            serde_json::to_value(snapshot).unwrap_or_else(|_| serde_json::json!({})),
+        )],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "console_unavailable",
+            error,
+        )],
+    }
+}
+
+fn data_profiler_snapshot(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let result = runtime
+        .lock()
+        .map(|runtime| runtime.profiler_snapshot())
+        .map_err(|_| "runtime lock poisoned");
+    match result {
+        Ok(snapshot) => vec![data_envelope(
+            envelope,
+            MessageType::ProfilerSnapshot,
+            serde_json::to_value(snapshot).unwrap_or_else(|_| serde_json::json!({})),
+        )],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "profiler_unavailable",
+            error,
+        )],
+    }
+}
+
+fn data_asset_preview(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let Some(asset_id) = envelope
+        .payload
+        .get("asset_id")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "request_asset_preview requires asset_id",
+        )];
+    };
+    let job_id = envelope
+        .payload
+        .get("job_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(&envelope.message_id);
+    let result = runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_owned())
+        .and_then(|runtime| runtime.request_asset_preview(asset_id, job_id));
+    match result {
+        Ok(result) => vec![data_envelope(
+            envelope,
+            MessageType::AssetPreviewReady,
+            serde_json::to_value(result).unwrap_or_else(|_| serde_json::json!({})),
+        )],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "preview_failed",
+            error,
+        )],
+    }
+}
+
+fn data_cancel_preview(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let Some(job_id) = envelope
+        .payload
+        .get("job_id")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "cancel_asset_preview requires job_id",
+        )];
+    };
+    let cancelled = runtime
+        .lock()
+        .map(|runtime| runtime.cancel_asset_preview(job_id))
+        .unwrap_or(false);
+    if cancelled {
+        vec![data_envelope(
+            envelope,
+            MessageType::AssetPreviewCancelled,
+            serde_json::json!({"job_id": job_id, "state": "cancelled"}),
+        )]
+    } else {
+        vec![Envelope::error(
+            &envelope.message_id,
+            "preview_not_found",
+            "preview job was not found",
+        )]
+    }
+}
+
+fn data_envelope(
+    envelope: &Envelope,
+    message_type: MessageType,
+    payload: serde_json::Value,
+) -> Envelope {
+    let mut response = Envelope::new(&envelope.message_id, message_type, payload);
+    response.correlation_id = Some(envelope.message_id.clone());
+    response
 }
 
 fn editor_command(envelope: &Envelope, runtime: crate::lifecycle::RuntimeHandle) -> Vec<Envelope> {

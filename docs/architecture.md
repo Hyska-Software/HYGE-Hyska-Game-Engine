@@ -1333,6 +1333,14 @@ For each `Component` on selected entity:
 - Filter by level (`tracing::Level`), by target (crate).
 - Click a line to navigate to source.
 
+### 12.9.1 Editor data service bounds (R-086)
+
+- `AssetDb` is the sole source for the editor asset tree and BLAKE3 dependency graph. Snapshots are deterministic and capped at 20,000 asset nodes and 40,000 edges.
+- The Rust session owns a 1,000-line `tracing` ring buffer. Lines expose bounded level, target, message and optional source location fields; queries support minimum level and target-prefix filters.
+- Preview jobs are session-owned, cancellable and capped at two concurrent jobs. Output paths are content-derived below `.hyge/previews/` and are committed atomically.
+- Profiler snapshots retain at most 240 samples and 128 render-pass timings per sample. Samples include frame, GPU, draw, instance and optional process-memory metrics plus asset-cache bytes.
+- These services cross the external editor boundary only through the versioned IPC envelope; the Python/QML frontend does not own a duplicate data store.
+
 ### 12.10 Theme
 
 - Dark by default, light toggle.

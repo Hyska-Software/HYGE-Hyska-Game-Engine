@@ -46,7 +46,7 @@ pub use asset_types::{
     TextureAsset, KTX2_MAGIC,
 };
 pub use context::LoadContext;
-pub use db::AssetDb;
+pub use db::{AssetDb, AssetRecord, DependencyEdge};
 pub use gpu_upload::{
     GpuUploadPayload, GpuUploadResult, GpuUploadTask, MaterialUploadData, MeshUploadData,
     TextureUploadData,

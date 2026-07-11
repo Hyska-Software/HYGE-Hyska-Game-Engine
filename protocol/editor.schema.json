@@ -17,8 +17,10 @@
         "select_entities", "edit_component", "add_component", "remove_component",
         "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab",
         "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview",
-        "world_snapshot", "selection_changed", "component_changed", "asset_changed",
-        "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available",
+        "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot",
+        "cancel_asset_preview", "world_snapshot", "selection_changed", "component_changed",
+        "asset_changed", "asset_snapshot", "console_snapshot", "profiler_snapshot",
+        "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available",
         "command_completed", "engine_error", "server_shutdown", "lifecycle_status"
       ]
     },
@@ -110,6 +112,34 @@
           "payload": { "$ref": "#/$defs/world_snapshot_payload" }
         }
       }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "request_asset_preview" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/preview_request_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "cancel_asset_preview" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/preview_cancel_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "request_console_snapshot" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/console_snapshot_request_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "asset_snapshot" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/asset_snapshot_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "console_snapshot" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/console_snapshot_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "profiler_snapshot" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/profiler_snapshot_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "asset_preview_ready" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/preview_result_payload" } } }
     }
   ],
   "$defs": {
@@ -219,6 +249,39 @@
         "diagnostics": { "type": "array" }
       }
     },
+    "preview_request_payload": {
+      "type": "object", "required": ["asset_id"], "additionalProperties": false,
+      "properties": { "asset_id": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }, "job_id": { "type": "string", "minLength": 1 } }
+    },
+    "preview_cancel_payload": {
+      "type": "object", "required": ["job_id"], "additionalProperties": false,
+      "properties": { "job_id": { "type": "string", "minLength": 1 } }
+    },
+    "console_snapshot_request_payload": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "min_level": { "enum": ["trace", "debug", "info", "warn", "error"] }, "target_prefix": { "type": "string", "maxLength": 256 } }
+    },
+    "asset_snapshot_payload": {
+      "type": "object", "required": ["snapshot_revision", "nodes", "edges", "diagnostics"], "additionalProperties": false,
+      "properties": {
+        "snapshot_revision": { "type": "integer", "minimum": 1 },
+        "nodes": { "type": "array", "maxItems": 20000, "items": { "type": "object", "required": ["asset_id", "path"], "additionalProperties": false, "properties": { "asset_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "path": { "type": "string" } } } },
+        "edges": { "type": "array", "maxItems": 40000, "items": { "type": "object", "required": ["parent", "child"], "additionalProperties": false, "properties": { "parent": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "child": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } } },
+        "diagnostics": { "type": "array", "items": { "type": "string", "maxLength": 1024 } }
+      }
+    },
+    "console_snapshot_payload": {
+      "type": "object", "required": ["lines", "filter"], "additionalProperties": false,
+      "properties": { "lines": { "type": "array", "maxItems": 1000 }, "filter": { "type": "object" } }
+    },
+    "profiler_snapshot_payload": {
+      "type": "object", "required": ["samples"], "additionalProperties": false,
+      "properties": { "samples": { "type": "array", "maxItems": 240 } }
+    },
+    "preview_result_payload": {
+      "type": "object", "required": ["job_id", "state"], "additionalProperties": false,
+      "properties": { "job_id": { "type": "string", "minLength": 1 }, "state": { "enum": ["queued", "running", "completed", "cancelled", "failed"] }, "path": { "type": ["string", "null"] }, "width": { "type": ["integer", "null"], "minimum": 1 }, "height": { "type": ["integer", "null"], "minimum": 1 }, "hash": { "type": ["string", "null"] } }
+    },
     "revision_payload": {
       "type": "object",
       "required": ["expected_revision"],
@@ -279,8 +342,8 @@
     }
   },
   "x-hyge-message-directions": {
-    "requests": ["hello", "open_project", "open_scene", "save_scene", "select_entities", "edit_component", "add_component", "remove_component", "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab", "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview", "server_shutdown"],
-    "responses": ["hello_ack", "command_completed", "engine_error"],
+    "requests": ["hello", "open_project", "open_scene", "save_scene", "select_entities", "edit_component", "add_component", "remove_component", "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab", "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview", "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot", "cancel_asset_preview", "server_shutdown"],
+    "responses": ["hello_ack", "command_completed", "engine_error", "asset_snapshot", "console_snapshot", "profiler_snapshot", "asset_preview_ready", "asset_preview_cancelled"],
     "events": ["lifecycle_status", "world_snapshot", "selection_changed", "component_changed", "asset_changed", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available"]
   }
 }

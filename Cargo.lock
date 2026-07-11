@@ -1666,11 +1666,14 @@ dependencies = [
  "hyge-core",
  "hyge-ecs",
  "hyge-editor-protocol",
+ "hyge-render",
  "hyge-scene",
+ "image",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

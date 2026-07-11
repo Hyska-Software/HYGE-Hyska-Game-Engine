@@ -164,6 +164,20 @@ def test_schema_validates_every_declared_message_type():
                 "prefab": {},
                 "transform": {},
             }
+        elif message_type == "request_asset_preview":
+            envelope["payload"] = {"asset_id": "0" * 64}
+        elif message_type == "cancel_asset_preview":
+            envelope["payload"] = {"job_id": "job"}
+        elif message_type == "request_console_snapshot":
+            envelope["payload"] = {}
+        elif message_type == "asset_snapshot":
+            envelope["payload"] = {"snapshot_revision": 1, "nodes": [], "edges": [], "diagnostics": []}
+        elif message_type == "console_snapshot":
+            envelope["payload"] = {"lines": [], "filter": {}}
+        elif message_type == "profiler_snapshot":
+            envelope["payload"] = {"samples": []}
+        elif message_type == "asset_preview_ready":
+            envelope["payload"] = {"job_id": "job", "state": "completed", "path": None, "width": None, "height": None, "hash": None}
         assert list(validator.iter_errors(envelope)) == [], message_type
 
 

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::lifecycle::{EditorSessionRuntime, RuntimeHandle};
@@ -148,6 +149,13 @@ impl SessionRegistry {
             connected: record.connected,
             state: record.state.clone(),
         })
+    }
+
+    /// Returns the runtime handle for an authenticated session.
+    pub fn runtime_handle(&self, session_id: &str) -> Option<crate::lifecycle::RuntimeHandle> {
+        self.sessions
+            .get(session_id)
+            .map(|session| Arc::clone(&session.runtime))
     }
 
     pub(crate) fn runtime(&self, binding: &SessionBinding) -> Result<RuntimeHandle, SessionError> {

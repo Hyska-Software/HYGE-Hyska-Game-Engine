@@ -15,6 +15,6 @@ pub use crate::{
         ImportReport,
     },
     server::{AssetServer, GpuResourceKind, LoadedAssetGpu},
-    Asset, AssetDb, AssetId, AssetPlugin, AssetResolver, FileWatcher, Handle, LoadContext,
-    LoadedAsset, ReloadQueue,
+    Asset, AssetDb, AssetId, AssetPlugin, AssetRecord, AssetResolver, DependencyEdge, FileWatcher,
+    Handle, LoadContext, LoadedAsset, ReloadQueue,
 };

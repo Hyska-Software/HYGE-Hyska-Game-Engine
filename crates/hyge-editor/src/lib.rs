@@ -9,6 +9,7 @@
 
 mod auth;
 mod commands;
+mod data;
 mod history;
 mod lifecycle;
 mod lock;
@@ -21,6 +22,11 @@ pub use commands::{
     AddComponentCommand, Command, CommandEffect, CommandFailure, DestroyCommand, DuplicateCommand,
     EditComponentCommand, EditorCommand, InstantiateCommand, RemoveComponentCommand,
     ReparentCommand,
+};
+pub use data::{
+    AssetDependencyEdge, AssetNode, AssetSnapshot, ConsoleBuffer, ConsoleFilter, ConsoleLayer,
+    ConsoleLine, ConsoleSnapshot, EditorDataServices, PreviewManager, PreviewResult, ProfilerPass,
+    ProfilerSample, ProfilerSnapshot, ProfilerStore,
 };
 pub use history::CommandHistory;
 pub use lifecycle::{EditorSessionRuntime, LifecycleSnapshot, LifecycleState};
