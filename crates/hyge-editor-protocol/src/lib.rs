@@ -16,7 +16,9 @@ pub use error::ProtocolIoError;
 pub use framing::{read_envelope, read_frame, write_envelope, write_frame};
 
 /// Current wire protocol version.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
+/// Protocol versions accepted for compatibility negotiation.
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[u32] = &[1, PROTOCOL_VERSION];
 
 /// Maximum accepted JSON message size (16 MiB).
 pub const MAX_MESSAGE_BYTES: u32 = 16 * 1024 * 1024;

@@ -14,6 +14,7 @@ hyge-ecs = { workspace = true }
 hyge-scene = { workspace = true }
 hyge-render = { workspace = true }
 hyge-editor-protocol = { workspace = true }
+hyge-editor-shm = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_app = { workspace = true }
 bevy_reflect = { workspace = true }

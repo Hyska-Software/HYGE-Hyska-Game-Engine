@@ -1666,6 +1666,7 @@ dependencies = [
  "hyge-core",
  "hyge-ecs",
  "hyge-editor-protocol",
+ "hyge-editor-shm",
  "hyge-render",
  "hyge-scene",
  "image",
@@ -1683,6 +1684,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "hyge-editor-shm"
+version = "0.1.0"
+dependencies = [
+ "thiserror 1.0.69",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

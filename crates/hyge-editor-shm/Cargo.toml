@@ -1,0 +1,12 @@
+[package]
+name = "hyge-editor-shm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Narrow Windows named shared-memory handle for Hyge editor transport."
+
+[dependencies]
+thiserror = { workspace = true }
+windows-sys = { workspace = true }

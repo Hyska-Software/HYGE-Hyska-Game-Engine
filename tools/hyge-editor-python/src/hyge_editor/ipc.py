@@ -8,17 +8,18 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
+SUPPORTED_PROTOCOL_VERSIONS = (1, PROTOCOL_VERSION)
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 MESSAGE_TYPES = {
     "hello", "hello_ack", "open_project", "open_scene", "save_scene",
     "select_entities", "edit_component", "add_component", "remove_component",
     "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab",
-    "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview",
+    "undo", "redo", "set_editor_camera", "set_viewport_size", "open_viewport_transport", "close_viewport_transport", "viewport_input", "request_asset_preview",
     "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot",
     "cancel_asset_preview", "world_snapshot", "selection_changed", "component_changed",
     "asset_changed", "asset_snapshot", "console_snapshot", "profiler_snapshot",
-    "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available",
+    "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available", "viewport_transport_ready", "viewport_transport_reset",
     "command_completed", "engine_error", "server_shutdown", "lifecycle_status",
 }
 
@@ -36,7 +37,7 @@ class Envelope:
 
     def validate(self) -> None:
         """Validate fields shared by every version-one envelope."""
-        if self.protocol_version != PROTOCOL_VERSION:
+        if self.protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
             raise ValueError(f"unsupported protocol version: {self.protocol_version}")
         if not self.message_id:
             raise ValueError("editor protocol message_id must not be empty")
@@ -102,7 +103,7 @@ class EditorClient:
         token: str,
         timeout: float = 5.0,
         client_name: str = "hyge-editor-python",
-        supported_protocol_versions: tuple[int, ...] = (PROTOCOL_VERSION,),
+        supported_protocol_versions: tuple[int, ...] = SUPPORTED_PROTOCOL_VERSIONS,
     ) -> None:
         host, port = address.rsplit(":", 1)
         self._address = (host, int(port))
@@ -131,10 +132,11 @@ class EditorClient:
             return response
         selected = response.payload.get("selected_protocol_version")
         session_id = response.payload.get("session_id")
-        if selected != PROTOCOL_VERSION or not isinstance(session_id, str) or not session_id:
+        if selected not in self._supported_protocol_versions or not isinstance(session_id, str) or not session_id:
             self.close()
             raise ValueError("invalid editor handshake response")
         self._session_id = session_id
+        self._protocol_version = selected
         return response
 
     def reconnect(self) -> Envelope:
@@ -234,6 +236,14 @@ class EditorClient:
     def set_viewport_size(self, width: int, height: int) -> Envelope:
         """Resize the session-owned editor viewport target."""
         return self.request("set_viewport_size", {"width": width, "height": height})
+
+    def open_viewport_transport(self) -> Envelope:
+        """Open the negotiated shared-memory viewport transport."""
+        return self.request("open_viewport_transport")
+
+    def send_viewport_input(self, generation: int, expected_input_revision: int, events: list[dict[str, Any]]) -> Envelope:
+        """Send one coalesced, revisioned viewport input batch."""
+        return self.request("viewport_input", {"generation": generation, "expected_input_revision": expected_input_revision, "input_revision": expected_input_revision + 1, "events": events})
 
     def request_asset_preview(self, asset_id: str, job_id: str | None = None) -> Envelope:
         """Request a deterministic asset preview."""
