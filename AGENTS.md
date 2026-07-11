@@ -377,8 +377,10 @@ headless application:
 - [x] `cargo test --workspace` and the relevant `clippy --deny warnings`
   gates pass.
 
-The next milestone is **M6 (Full Visual Editor)**, tracked by
-`docs/roadmap.toml` `phase_8` (R-080..R-089).
+The external editor foundation and R-089 Qt shell are complete. The remaining
+M6 editor work is tracked by `docs/roadmap.toml` phase_11 items R-098..R-100,
+followed by the recovery, workflow, packaging and integrated evidence gates in
+phase_12 (R-101..R-106).
 
 ### 5.3 Per release (v0.1.0)
 

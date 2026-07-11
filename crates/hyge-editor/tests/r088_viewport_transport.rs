@@ -21,8 +21,24 @@ fn producer_consumer_stress_preserves_headers_and_shutdown_safety() {
 #[test]
 fn revisioned_mouse_keyboard_and_camera_batches_reject_stale_input() {
     let mut bridge = InputBridge::default();
-    let batch = ViewportInputBatch { generation: 3, expected_input_revision: 0, input_revision: 1, events: Vec::new() };
+    let batch = ViewportInputBatch {
+        generation: 3,
+        expected_input_revision: 0,
+        input_revision: 1,
+        events: Vec::new(),
+    };
     assert!(bridge.accept(&batch, 3).is_ok());
     assert_eq!(bridge.accept(&batch, 3), Err("stale_input_revision"));
-    assert_eq!(bridge.accept(&ViewportInputBatch { generation: 4, expected_input_revision: 1, input_revision: 2, events: Vec::new() }, 3), Err("stale_input_revision"));
+    assert_eq!(
+        bridge.accept(
+            &ViewportInputBatch {
+                generation: 4,
+                expected_input_revision: 1,
+                input_revision: 2,
+                events: Vec::new(),
+            },
+            3,
+        ),
+        Err("stale_input_revision")
+    );
 }

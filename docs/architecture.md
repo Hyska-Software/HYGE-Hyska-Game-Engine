@@ -1341,6 +1341,23 @@ For each `Component` on selected entity:
 - Profiler snapshots retain at most 240 samples and 128 render-pass timings per sample. Samples include frame, GPU, draw, instance and optional process-memory metrics plus asset-cache bytes.
 - These services cross the external editor boundary only through the versioned IPC envelope; the Python/QML frontend does not own a duplicate data store.
 
+### 12.9.2 Qt shell ownership and adapters (R-089)
+
+- The PySide6 frontend uses an asynchronous session worker around the existing
+  length-prefixed client; Qt's GUI thread never performs blocking socket or
+  shared-memory reads.
+- `HierarchyModel`, `InspectorModel`, `AssetModel`, `ConsoleModel` and
+  `ProfilerModel` retain only disposable serialized rows from Rust snapshots.
+  ECS ownership, reflection truth, asset identity, console history and profiler
+  history remain in the Rust service.
+- The viewport adapter opens the R-088 mapping only after a negotiated
+  transport event, polls stable slots on a Qt timer, copies RGBA8 pixels into a
+  `QImage`, and reports dropped frames and generation changes without owning
+  renderer state.
+- R-089 provides read-only QML presentation. Property mutation, hierarchy
+  editing, conflict handling, layout persistence and recovery remain owned by
+  later roadmap items R-098 through R-102.
+
 ### 12.10 Theme
 
 - Dark by default, light toggle.

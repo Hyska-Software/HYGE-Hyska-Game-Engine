@@ -6,7 +6,7 @@ import json
 import socket
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 PROTOCOL_VERSION = 2
 SUPPORTED_PROTOCOL_VERSIONS = (1, PROTOCOL_VERSION)
@@ -153,22 +153,59 @@ class EditorClient:
 
     def request(self, message_type: str, payload: dict[str, Any] | None = None) -> Envelope:
         """Send a request and read through lifecycle events to its response."""
+        return self.request_observing(message_type, payload)
+
+    def request_observing(
+        self,
+        message_type: str,
+        payload: dict[str, Any] | None = None,
+        on_event: Callable[[Envelope], None] | None = None,
+    ) -> Envelope:
+        """Send a request while delivering intermediate envelopes to ``on_event``.
+
+        The Rust service may answer one request with lifecycle, snapshot and
+        selection events before the terminal response.  The original
+        ``request`` API remains synchronous, while this hook lets the Qt
+        session retain those envelopes without changing the wire contract.
+        """
         if self._socket is None:
             raise RuntimeError("editor client is not connected")
         envelope = Envelope(str(uuid.uuid4()), message_type, payload or {})
         self._socket.sendall(envelope.to_bytes())
+        try:
+            while True:
+                response = self._read_envelope()
+                if response.message_type == "lifecycle_status":
+                    self.lifecycle_statuses.append(response)
+                if on_event is not None and response.message_type != self._terminal_type(message_type):
+                    on_event(response)
+                if response.message_type == "engine_error" or response.error is not None or response.message_type in {self._terminal_type(message_type), "hello_ack"}:
+                    return response
+        except socket.timeout as error:
+            raise TimeoutError("editor protocol response timed out") from error
+
+    @staticmethod
+    def _terminal_type(request_type: str) -> str:
+        """Return the terminal response type for a request."""
+        return {
+            "hello": "hello_ack",
+            "request_asset_snapshot": "asset_snapshot",
+            "request_console_snapshot": "console_snapshot",
+            "request_profiler_snapshot": "profiler_snapshot",
+            "request_asset_preview": "asset_preview_ready",
+            "cancel_asset_preview": "asset_preview_cancelled",
+            "open_viewport_transport": "viewport_transport_ready",
+            "viewport_transport_reset": "viewport_transport_reset",
+            "server_shutdown": "server_shutdown",
+        }.get(request_type, "command_completed")
+
+    def _read_envelope(self) -> Envelope:
+        """Read one length-prefixed envelope from the connected socket."""
         header = self._read_exact(4)
         length = int.from_bytes(header, "big")
         if length == 0 or length > MAX_MESSAGE_BYTES:
             raise ValueError("editor protocol response is too large")
-        try:
-            response = Envelope.from_bytes(self._read_exact(length))
-            if response.message_type == "lifecycle_status":
-                self.lifecycle_statuses.append(response)
-                return self._read_response()
-            return response
-        except socket.timeout as error:
-            raise TimeoutError("editor protocol response timed out") from error
+        return Envelope.from_bytes(self._read_exact(length))
 
     def close(self) -> None:
         """Close the client socket."""
@@ -193,11 +230,7 @@ class EditorClient:
 
     def _read_response(self) -> Envelope:
         """Read the next terminal response, retaining lifecycle events."""
-        header = self._read_exact(4)
-        length = int.from_bytes(header, "big")
-        if length == 0 or length > MAX_MESSAGE_BYTES:
-            raise ValueError("editor protocol response is too large")
-        response = Envelope.from_bytes(self._read_exact(length))
+        response = self._read_envelope()
         if response.message_type == "lifecycle_status":
             self.lifecycle_statuses.append(response)
             return self._read_response()

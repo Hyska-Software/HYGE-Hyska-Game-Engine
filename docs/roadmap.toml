@@ -1607,10 +1607,12 @@ title = "Qt Quick application shell and model adapters"
 phase = "phase_11"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-083", "R-086", "R-088"]
 summary = "Create the PySide6/QML shell and adapters for hierarchy, inspector, assets, viewport, console and profiler."
+completed_at = "2026-07-11"
+completion_notes = "Implemented the asynchronous PySide6/QML shell and read-only snapshot adapters. EditorSession preserves correlated lifecycle, world, selection, asset, console, profiler and viewport envelopes on a background worker; HierarchyModel, InspectorModel, AssetModel, ConsoleModel and ProfilerModel expose disposable Qt roles without duplicating ECS ownership; ViewportController consumes R-088 stable frames through QImage and reports transport state and dropped frames; Main.qml renders the connected panels and source-checkout shell. Added a deterministic fake protocol server and offscreen software Qt tests covering snapshot replacement, empty diagnostics, fake viewport frames and clean shell startup/shutdown. Evidence: QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software python -m pytest -q tools/hyge-editor-python/tests (14 passed), plus existing protocol coverage retained. R-098/R-099 remain responsible for editable inspector and complete operational panel UX."
 acceptance = [
   "QApplication and QQmlApplicationEngine start against the Rust service",
   "QAbstractItemModel adapters expose snapshots without duplicating ECS ownership",
