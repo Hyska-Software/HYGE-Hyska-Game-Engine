@@ -164,6 +164,28 @@ impl Name {
     }
 }
 
+/// Stable identity assigned to an entity that belongs to a persisted scene.
+///
+/// This is intentionally separate from Bevy's process-local [`Entity`] bits:
+/// scene IDs survive save/reload and may therefore be used by editor clients.
+#[derive(Component, Reflect, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[reflect(Component)]
+pub struct SceneNodeId(pub String);
+
+impl SceneNodeId {
+    /// Creates an ID from its canonical textual representation.
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// Returns the canonical textual representation.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Marker component: the entity survives a scene hot-reload.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[reflect(Component)]

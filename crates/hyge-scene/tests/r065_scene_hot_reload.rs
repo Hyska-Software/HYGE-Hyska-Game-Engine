@@ -81,6 +81,7 @@ fn sample_document(prefab_id: hyge_scene::PrefabId, exposure: f32) -> WorldDocum
             exposure,
             ..PostProcessProfile::default()
         },
+        editor_layer: None,
     }
 }
 

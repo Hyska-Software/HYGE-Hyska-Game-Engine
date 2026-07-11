@@ -100,6 +100,7 @@ fn sample_world(prefab_id: hyge_scene::PrefabId, skybox: AssetId) -> WorldDocume
             bloom_intensity: 0.3,
             ..PostProcessProfile::default()
         },
+        editor_layer: None,
     }
 }
 

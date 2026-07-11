@@ -43,6 +43,7 @@ impl Fixture {
                 Transform::identity(),
             )],
             post_process: PostProcessProfile::default(),
+            editor_layer: None,
         };
         fs::write(
             root.join("main.hyge-world"),

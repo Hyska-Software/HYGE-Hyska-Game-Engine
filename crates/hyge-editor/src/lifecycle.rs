@@ -8,7 +8,9 @@ use bevy_app::App;
 use bevy_ecs::world::World;
 use hyge_core::result::{HygeError, HygeResult};
 use hyge_ecs::plugin::HygePlugin;
-use hyge_scene::{load_world_document_from_path, LoadedSceneState, ScenePlugin};
+use hyge_scene::{
+    load_world_document_from_path, sync_editor_layer_from_world, LoadedSceneState, ScenePlugin,
+};
 
 use crate::commands::{CommandEffect, CommandFailure, EditorCommand};
 use crate::history::CommandHistory;
@@ -166,11 +168,12 @@ impl EditorSessionRuntime {
             .scene
             .clone()
             .ok_or_else(|| HygeError::invalid_argument("scene is not open"))?;
-        let document = self
+        let mut document = self
             .world
             .get_resource::<LoadedSceneState>()
             .and_then(|state| state.document.clone())
             .ok_or_else(|| HygeError::invalid_argument("scene has no loaded document"))?;
+        sync_editor_layer_from_world(&mut self.world, &mut document)?;
         let bytes = document.to_bytes()?;
         AtomicFile::new(&scene, AllowOverwrite)
             .write(|file| {
@@ -189,6 +192,9 @@ impl EditorSessionRuntime {
             })
             .map_err(|error| HygeError::invalid_argument(format!("save revision: {error}")))?;
         self.revision = next_revision;
+        if let Some(mut state) = self.world.get_resource_mut::<LoadedSceneState>() {
+            state.document = Some(document);
+        }
         self.snapshot_revision = self.snapshot_revision.saturating_add(1).max(1);
         self.snapshot = self.make_snapshot(LifecycleState::Ready, Vec::new());
         Ok(self.snapshot.clone())
@@ -212,7 +218,21 @@ impl EditorSessionRuntime {
 
     /// Replaces the engine-owned selection and returns its new snapshot.
     pub fn select_entities(&mut self, entities: Vec<EntityId>) -> HygeResult<EditorSnapshot> {
-        let mut selection = entities;
+        self.select_entities_with_shift(entities, false)
+    }
+
+    /// Replaces or extends the engine-owned selection.
+    pub fn select_entities_with_shift(
+        &mut self,
+        entities: Vec<EntityId>,
+        shift: bool,
+    ) -> HygeResult<EditorSnapshot> {
+        let mut selection = if shift {
+            self.selection.clone()
+        } else {
+            Vec::new()
+        };
+        selection.extend(entities);
         selection.sort_unstable();
         selection.dedup();
         selection.retain(|entity| {
@@ -226,6 +246,26 @@ impl EditorSessionRuntime {
         self.editor_snapshot()
     }
 
+    /// Selects persistent scene identities, resolving them to live ECS entities.
+    pub fn select_scene_ids(
+        &mut self,
+        scene_ids: Vec<String>,
+        shift: bool,
+    ) -> HygeResult<EditorSnapshot> {
+        let mut query = self
+            .world
+            .query::<(bevy_ecs::entity::Entity, &hyge_scene::SceneNodeId)>();
+        let ids: std::collections::HashMap<String, EntityId> = query
+            .iter(&self.world)
+            .map(|(entity, scene_id)| (scene_id.0.clone(), entity.to_bits()))
+            .collect();
+        let entities = scene_ids
+            .into_iter()
+            .filter_map(|scene_id| ids.get(&scene_id).copied())
+            .collect();
+        self.select_entities_with_shift(entities, shift)
+    }
+
     /// Applies a command after validating its optimistic snapshot revision.
     pub fn apply_command(
         &mut self,
@@ -233,7 +273,9 @@ impl EditorSessionRuntime {
         command: EditorCommand,
     ) -> Result<(CommandEffect, EditorSnapshot), CommandFailure> {
         self.check_revision(expected_revision)?;
+        let command_kind = command.clone();
         let effect = self.history.apply(command, &mut self.world)?;
+        self.update_selection_after_command(&command_kind, &effect);
         self.bump_snapshot_revision();
         let snapshot = self
             .editor_snapshot()
@@ -248,6 +290,7 @@ impl EditorSessionRuntime {
     ) -> Result<(CommandEffect, EditorSnapshot), CommandFailure> {
         self.check_revision(expected_revision)?;
         let effect = self.history.undo(&mut self.world)?;
+        self.filter_selection_to_live_entities();
         self.bump_snapshot_revision();
         let snapshot = self
             .editor_snapshot()
@@ -262,6 +305,7 @@ impl EditorSessionRuntime {
     ) -> Result<(CommandEffect, EditorSnapshot), CommandFailure> {
         self.check_revision(expected_revision)?;
         let effect = self.history.redo(&mut self.world)?;
+        self.filter_selection_to_live_entities();
         self.bump_snapshot_revision();
         let snapshot = self
             .editor_snapshot()
@@ -308,6 +352,29 @@ impl EditorSessionRuntime {
 
     fn bump_snapshot_revision(&mut self) {
         self.snapshot_revision = self.snapshot_revision.saturating_add(1).max(1);
+    }
+
+    fn update_selection_after_command(&mut self, command: &EditorCommand, effect: &CommandEffect) {
+        match command {
+            EditorCommand::Duplicate(_) | EditorCommand::Instantiate(_) => {
+                if let Some(root) = effect.affected_entities.first().copied() {
+                    self.selection = vec![root];
+                }
+            }
+            EditorCommand::Destroy(_) => self.filter_selection_to_live_entities(),
+            EditorCommand::Reparent(_)
+            | EditorCommand::EditComponent(_)
+            | EditorCommand::AddComponent(_)
+            | EditorCommand::RemoveComponent(_) => {}
+        }
+    }
+
+    fn filter_selection_to_live_entities(&mut self) {
+        self.selection.retain(|bits| {
+            bevy_ecs::entity::Entity::try_from_bits(*bits)
+                .ok()
+                .is_some_and(|entity| self.world.get_entity(entity).is_some())
+        });
     }
 
     fn make_snapshot(&self, state: LifecycleState, diagnostics: Vec<String>) -> LifecycleSnapshot {

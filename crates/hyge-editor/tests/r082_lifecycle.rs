@@ -32,11 +32,9 @@ impl TempProject {
     }
 
     fn write_fixture(&self) -> PathBuf {
-        let prefab = Prefab::new(
-            "r082-root",
-            PrefabNode::named("root"),
-            PrefabAssets::default(),
-        );
+        let mut prefab_root = PrefabNode::named("root");
+        prefab_root.children.push(PrefabNode::named("child"));
+        let prefab = Prefab::new("r082-root", prefab_root, PrefabAssets::default());
         fs::write(
             self.0.join("root.hyge-prefab"),
             prefab.to_bytes().expect("prefab bytes"),
@@ -49,6 +47,7 @@ impl TempProject {
                 Transform::identity(),
             )],
             post_process: PostProcessProfile::default(),
+            editor_layer: None,
         };
         let scene = self.0.join("main.hyge-world");
         fs::write(&scene, document.to_bytes().expect("scene bytes")).expect("write scene");
@@ -91,6 +90,7 @@ fn runtime_opens_real_scene_saves_revision_and_releases_lock() {
             Transform::identity(),
         )],
         post_process: PostProcessProfile::default(),
+        editor_layer: None,
     };
     fs::write(
         &invalid,
@@ -177,6 +177,13 @@ fn tcp_open_save_reconnect_and_shutdown_reports_lifecycle() {
     let entity = world_snapshot.payload["hierarchy"][0]["entity"]
         .as_u64()
         .expect("snapshot entity id");
+    let other_entity = world_snapshot.payload["hierarchy"]
+        .as_array()
+        .expect("hierarchy")
+        .iter()
+        .filter_map(|node| node["entity"].as_u64())
+        .find(|candidate| *candidate != entity)
+        .expect("second snapshot entity");
     let select = Envelope::new(
         "select",
         MessageType::SelectEntities,
@@ -189,6 +196,27 @@ fn tcp_open_save_reconnect_and_shutdown_reports_lifecycle() {
     assert_eq!(
         read_envelope(&mut stream)
             .expect("selection completed")
+            .message_type,
+        MessageType::CommandCompleted
+    );
+    let shift = Envelope::new(
+        "shift-select",
+        MessageType::SelectEntities,
+        serde_json::json!({"entities": [other_entity], "shift": true}),
+    );
+    write_envelope(&mut stream, &shift).expect("shift select");
+    let shifted = read_envelope(&mut stream).expect("shift selection changed");
+    assert_eq!(shifted.message_type, MessageType::SelectionChanged);
+    assert_eq!(
+        shifted.payload["entities"]
+            .as_array()
+            .expect("selection")
+            .len(),
+        2
+    );
+    assert_eq!(
+        read_envelope(&mut stream)
+            .expect("shift selection completed")
             .message_type,
         MessageType::CommandCompleted
     );

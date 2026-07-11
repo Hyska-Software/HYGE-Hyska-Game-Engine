@@ -104,6 +104,9 @@ pub struct WorldDocument {
     pub root_prefab_instances: Vec<PrefabInstance>,
     /// Default post-process profile applied by the renderer.
     pub post_process: PostProcessProfile,
+    /// Optional materialized editor scene layer.
+    #[serde(default)]
+    pub editor_layer: Option<SceneEditLayer>,
 }
 
 impl WorldDocument {
@@ -114,6 +117,7 @@ impl WorldDocument {
             env: Environment::default(),
             root_prefab_instances: Vec::new(),
             post_process: PostProcessProfile::default(),
+            editor_layer: None,
         }
     }
 
@@ -140,6 +144,36 @@ impl WorldDocument {
         rmp_serde::from_slice(bytes)
             .map_err(|e| HygeError::parse(format!("failed to deserialize world document: {e}")))
     }
+}
+
+/// Version of the materialized editor scene layer.
+pub const EDITOR_SCENE_LAYER_VERSION: u32 = 1;
+
+/// Persisted materialized scene edits owned by the editor backend.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneEditLayer {
+    /// Format version for migrations.
+    pub version: u32,
+    /// Materialized scene nodes in deterministic parent/order traversal order.
+    pub nodes: Vec<SceneNodeRecord>,
+    /// IDs removed by editor operations and retained for migration diagnostics.
+    #[serde(default)]
+    pub tombstones: Vec<String>,
+}
+
+/// One materialized persisted scene entity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneNodeRecord {
+    /// Stable persisted identity.
+    pub id: String,
+    /// Stable parent identity, or `None` for a scene root.
+    pub parent: Option<String>,
+    /// Position among the parent's children.
+    pub order: u32,
+    /// Human-readable name.
+    pub name: String,
+    /// Serialized reflected components, excluding hierarchy bookkeeping.
+    pub components: Vec<crate::prefab::SerializedComponentOverride>,
 }
 
 // =============================================================================
@@ -355,6 +389,7 @@ mod tests {
             env: Environment::empty(),
             root_prefab_instances: vec![instance],
             post_process: PostProcessProfile::default(),
+            editor_layer: None,
         }
     }
 
@@ -425,6 +460,7 @@ mod tests {
             env: Environment::empty(),
             root_prefab_instances: vec![instance],
             post_process: PostProcessProfile::default(),
+            editor_layer: None,
         };
 
         let resolver = move |_id: &PrefabId| Ok(prefab.clone());

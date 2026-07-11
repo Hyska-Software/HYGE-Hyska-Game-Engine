@@ -167,15 +167,24 @@
     },
     "select_entities_payload": {
       "type": "object",
-      "required": ["entities"],
       "additionalProperties": false,
       "properties": {
         "entities": {
           "type": "array",
           "items": { "type": "integer", "minimum": 0 },
           "uniqueItems": true
+        },
+        "shift": { "type": "boolean", "default": false },
+        "scene_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
         }
-      }
+      },
+      "anyOf": [
+        { "required": ["entities"] },
+        { "required": ["scene_ids"] }
+      ]
     },
     "selection_changed_payload": {
       "type": "object",
@@ -187,6 +196,11 @@
         "entities": {
           "type": "array",
           "items": { "type": "integer", "minimum": 0 },
+          "uniqueItems": true
+        },
+        "scene_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
           "uniqueItems": true
         }
       }

@@ -9,7 +9,7 @@ use bevy_reflect::{TypeInfo, TypeRegistry};
 use serde::{Deserialize, Serialize};
 
 use hyge_core::result::{HygeError, HygeResult};
-use hyge_scene::{Children, Name, Parent};
+use hyge_scene::{Children, Name, Parent, SceneNodeId};
 
 /// Opaque, process-stable representation of an ECS entity for IPC.
 pub type EntityId = u64;
@@ -29,6 +29,8 @@ pub struct EditorSnapshot {
     pub component_catalog: Vec<ComponentDescriptor>,
     /// Current engine-owned selection.
     pub selection: Vec<EntityId>,
+    /// Persistent scene identities corresponding to the current selection.
+    pub selection_scene_ids: Vec<String>,
     /// Non-fatal problems encountered while extracting values.
     pub diagnostics: Vec<SnapshotDiagnostic>,
 }
@@ -38,6 +40,8 @@ pub struct EditorSnapshot {
 pub struct HierarchyNode {
     /// Entity identifier.
     pub entity: EntityId,
+    /// Persisted scene identity, when this entity belongs to a loaded scene.
+    pub scene_id: Option<String>,
     /// Display name, falling back to the entity identifier.
     pub name: String,
     /// Parent entity, if present and alive.
@@ -51,6 +55,8 @@ pub struct HierarchyNode {
 pub struct EntitySnapshot {
     /// Entity identifier.
     pub entity: EntityId,
+    /// Persisted scene identity, when available.
+    pub scene_id: Option<String>,
     /// Components present on this entity.
     pub components: Vec<ReflectedComponent>,
 }
@@ -177,6 +183,7 @@ pub fn build_snapshot(
         components.sort_by(|left, right| left.type_path.cmp(&right.type_path));
         entities.push(EntitySnapshot {
             entity: entity_bits,
+            scene_id: world.get::<SceneNodeId>(entity).map(|id| id.0.clone()),
             components,
         });
     }
@@ -187,6 +194,13 @@ pub fn build_snapshot(
         .filter(|entity| alive.contains(entity))
         .collect();
     filtered_selection.sort_unstable();
+    let selection_scene_ids = filtered_selection
+        .iter()
+        .filter_map(|bits| {
+            let entity = bevy_ecs::entity::Entity::try_from_bits(*bits).ok()?;
+            world.get::<SceneNodeId>(entity).map(|id| id.0.clone())
+        })
+        .collect();
 
     Ok(EditorSnapshot {
         revision,
@@ -195,6 +209,7 @@ pub fn build_snapshot(
         entities,
         component_catalog,
         selection: filtered_selection,
+        selection_scene_ids,
         diagnostics,
     })
 }
@@ -249,6 +264,7 @@ fn build_hierarchy(
             .unwrap_or_default();
         nodes.push(HierarchyNode {
             entity: *bits,
+            scene_id: world.get::<SceneNodeId>(entity).map(|id| id.0.clone()),
             name,
             parent,
             children,

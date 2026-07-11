@@ -28,7 +28,7 @@ pub use components::{
     AmbientLight, AudioBus, AudioListener, AudioRolloff, AudioSource, Camera, CharacterController,
     Children, Collider, ColliderShape, DirectionalLight, EditorCamera, FogVolume, GlobalTransform,
     Joint, LightComponent, MaterialHandle, MeshHandle, Name, Parent, PersistOnReload, PointLight,
-    PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, StaticMesh,
+    PostProcessVolume, RigidBody, RigidBodyKind, SceneNodeId, ScriptRef, SpotLight, StaticMesh,
     StaticMeshAssetRefs, Transform, WorldTransform,
 };
 pub use env::{AmbientParams, Environment, FogParams, PostProcessProfile};
@@ -39,10 +39,14 @@ pub use prefab::{
 pub use prefab_asset::PrefabAsset;
 pub use prefab_id::PrefabId;
 pub use runtime::{
+    assign_legacy_scene_node_ids, assign_new_scene_node_ids, capture_editor_scene_layer,
     load_world_document_from_bytes, load_world_document_from_path, reload_loaded_scene_from_disk,
     resolve_static_mesh_asset_refs, resolve_static_mesh_asset_refs_system, scene_hot_reload_system,
-    EnvironmentLibrary, LoadedSceneState, PrefabLibrary, SceneDocumentDiff, SceneEnvironmentState,
-    SceneManagedEntity, ScenePostProcessState,
+    sync_editor_layer_from_world, EnvironmentLibrary, LoadedSceneState, PrefabLibrary,
+    SceneDocumentDiff, SceneEnvironmentState, SceneManagedEntity, ScenePostProcessState,
 };
-pub use world::{PrefabInstance, WorldDocument, WorldLoader};
+pub use world::{
+    PrefabInstance, SceneEditLayer, SceneNodeRecord, WorldDocument, WorldLoader,
+    EDITOR_SCENE_LAYER_VERSION,
+};
 pub use world_asset::WorldAsset;

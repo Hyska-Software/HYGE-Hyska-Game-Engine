@@ -144,6 +144,7 @@ fn build_world(prefab: &Prefab) -> WorldDocument {
             })
             .collect(),
         post_process: PostProcessProfile::default(),
+        editor_layer: None,
     }
 }
 

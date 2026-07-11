@@ -17,15 +17,22 @@ use std::{
 };
 
 use bevy_ecs::prelude::{Component, Entity, Resource, World};
+use bevy_ecs::reflect::ReflectComponent;
+use bevy_reflect::serde::ReflectSerializer;
 use hyge_asset::{Asset, AssetId, Handle, MaterialAsset, MeshAsset, ReloadQueue};
 use hyge_core::result::{HygeError, HygeResult};
 
 use crate::{
-    components::{AmbientLight, Children, DirectionalLight, Name, StaticMesh, StaticMeshAssetRefs},
+    components::{
+        AmbientLight, Children, DirectionalLight, GlobalTransform, Name, Parent, SceneNodeId,
+        StaticMesh, StaticMeshAssetRefs,
+    },
     env::{Environment, PostProcessProfile},
     prefab::Prefab,
     prefab_id::PrefabId,
-    world::{WorldDocument, WorldLoader},
+    world::{
+        SceneEditLayer, SceneNodeRecord, WorldDocument, WorldLoader, EDITOR_SCENE_LAYER_VERSION,
+    },
     world_asset::WorldAsset,
 };
 
@@ -153,6 +160,97 @@ pub struct LoadedSceneState {
     pub environment_entities: Vec<Entity>,
     /// Last diff applied through hot-reload.
     pub last_diff: SceneDocumentDiff,
+}
+
+/// Assigns deterministic IDs to a legacy prefab subtree.
+pub fn assign_legacy_scene_node_ids(world: &mut World, root: Entity, seed: &str) -> HygeResult<()> {
+    assign_scene_node_ids_recursive(world, root, seed, "0", false)
+}
+
+/// Assigns fresh IDs to a newly created editor subtree.
+pub fn assign_new_scene_node_ids(world: &mut World, root: Entity) -> HygeResult<()> {
+    let seed = format!("new:{}", blake3::hash(format!("{:?}", root).as_bytes()));
+    assign_scene_node_ids_recursive(world, root, &seed, "0", true)
+}
+
+/// Captures the scene-managed ECS world into the persistent editor layer.
+pub fn capture_editor_scene_layer(world: &mut World) -> HygeResult<SceneEditLayer> {
+    let registry = world
+        .get_resource::<hyge_ecs::AppTypeRegistry>()
+        .ok_or_else(|| HygeError::invalid_argument("AppTypeRegistry resource not found"))?
+        .0
+        .clone();
+    let read = registry.read();
+    let mut query = world.query::<(Entity, &SceneNodeId, Option<&Parent>, Option<&Name>)>();
+    let entities: Vec<(Entity, SceneNodeId, Option<Entity>, String)> = query
+        .iter(world)
+        .map(|(entity, id, parent, name)| {
+            (
+                entity,
+                id.clone(),
+                parent.map(|parent| parent.0),
+                name.map(|name| name.0.clone())
+                    .unwrap_or_else(|| entity.to_bits().to_string()),
+            )
+        })
+        .collect();
+    let mut records = Vec::with_capacity(entities.len());
+    for (entity, id, parent, name) in entities {
+        let order = parent
+            .and_then(|parent| world.get::<Children>(parent))
+            .and_then(|children| children.0.iter().position(|child| *child == entity))
+            .unwrap_or(0) as u32;
+        let mut components = Vec::new();
+        for registration in read.iter_with_data::<ReflectComponent>() {
+            let type_path = registration.0.type_info().type_path();
+            if type_path.ends_with("::Parent")
+                || type_path.ends_with("::Children")
+                || type_path.ends_with("::GlobalTransform")
+                || type_path.ends_with("::Name")
+                || type_path.ends_with("::SceneNodeId")
+            {
+                continue;
+            }
+            let Some(value) = registration.1.reflect(world.entity(entity)) else {
+                continue;
+            };
+            let data = rmp_serde::to_vec(&ReflectSerializer::new(value, &read))
+                .map_err(|error| HygeError::invalid_argument(error.to_string()))?;
+            components.push(crate::SerializedComponentOverride {
+                type_name: type_path.to_owned(),
+                data,
+            });
+        }
+        components.sort_by(|left, right| left.type_name.cmp(&right.type_name));
+        records.push(SceneNodeRecord {
+            id: id.0,
+            parent: parent
+                .and_then(|parent| world.get::<SceneNodeId>(parent).map(|id| id.0.clone())),
+            order,
+            name,
+            components,
+        });
+    }
+    records.sort_by(|left, right| {
+        left.parent
+            .cmp(&right.parent)
+            .then(left.order.cmp(&right.order))
+            .then(left.id.cmp(&right.id))
+    });
+    Ok(SceneEditLayer {
+        version: EDITOR_SCENE_LAYER_VERSION,
+        nodes: records,
+        tombstones: Vec::new(),
+    })
+}
+
+/// Replaces the document's editor layer with a materialized ECS capture.
+pub fn sync_editor_layer_from_world(
+    world: &mut World,
+    document: &mut WorldDocument,
+) -> HygeResult<()> {
+    document.editor_layer = Some(capture_editor_scene_layer(world)?);
+    Ok(())
 }
 
 /// Resolves `StaticMeshAssetRefs` into runtime `StaticMesh` components.
@@ -298,7 +396,19 @@ fn replace_loaded_scene(
     unload_current_scene(world)?;
     apply_scene_state_resources(world, doc);
     let environment_entities = spawn_environment_entities(world, &doc.env);
-    let roots = instantiate_root_prefab_instances(world, doc)?;
+    let roots = if let Some(layer) = doc
+        .editor_layer
+        .as_ref()
+        .filter(|layer| !layer.nodes.is_empty())
+    {
+        instantiate_editor_layer(world, layer)?
+    } else {
+        let roots = instantiate_root_prefab_instances(world, doc)?;
+        for (index, root) in roots.iter().copied().enumerate() {
+            assign_legacy_scene_node_ids(world, root, &format!("root-{index}"))?;
+        }
+        roots
+    };
 
     world.insert_resource(LoadedSceneState {
         source_path,
@@ -310,6 +420,105 @@ fn replace_loaded_scene(
     });
 
     Ok(roots)
+}
+
+fn instantiate_editor_layer(world: &mut World, layer: &SceneEditLayer) -> HygeResult<Vec<Entity>> {
+    if layer.version != EDITOR_SCENE_LAYER_VERSION {
+        return Err(HygeError::invalid_argument(format!(
+            "unsupported editor scene layer version {}",
+            layer.version
+        )));
+    }
+    let registry = world
+        .get_resource::<hyge_ecs::AppTypeRegistry>()
+        .ok_or_else(|| HygeError::invalid_argument("AppTypeRegistry resource not found"))?
+        .0
+        .clone();
+    let mut entities = HashMap::new();
+    for record in &layer.nodes {
+        let entity = world
+            .spawn((
+                Name::new(record.name.clone()),
+                GlobalTransform::identity(),
+                SceneNodeId::new(record.id.clone()),
+                SceneManagedEntity,
+            ))
+            .id();
+        entities.insert(record.id.clone(), entity);
+    }
+    for record in &layer.nodes {
+        let entity = entities[&record.id];
+        if let Some(parent_id) = record.parent.as_deref() {
+            let parent = *entities.get(parent_id).ok_or_else(|| {
+                HygeError::invalid_argument(format!(
+                    "editor node '{}' has missing parent",
+                    record.id
+                ))
+            })?;
+            world.entity_mut(entity).insert(Parent(parent));
+            let mut children = world
+                .get_mut::<Children>(parent)
+                .map(|children| children.0.clone())
+                .unwrap_or_default();
+            let position = (record.order as usize).min(children.len());
+            children.insert(position, entity);
+            world.entity_mut(parent).insert(Children(children));
+        }
+        let read = registry.read();
+        for component in &record.components {
+            let registration = read
+                .get_with_type_path(&component.type_name)
+                .ok_or_else(|| {
+                    HygeError::invalid_argument(format!(
+                        "component '{}' is not registered",
+                        component.type_name
+                    ))
+                })?;
+            let reflect_component = registration.data::<ReflectComponent>().ok_or_else(|| {
+                HygeError::invalid_argument(format!(
+                    "component '{}' is not an ECS component",
+                    component.type_name
+                ))
+            })?;
+            let mut deserializer = rmp_serde::Deserializer::new(component.data.as_slice());
+            let value = bevy_reflect::serde::ReflectDeserializer::new(&read);
+            let value = serde::de::DeserializeSeed::deserialize(value, &mut deserializer)
+                .map_err(|error| HygeError::invalid_argument(error.to_string()))?;
+            reflect_component.insert(&mut world.entity_mut(entity), value.as_ref(), &read);
+        }
+    }
+    Ok(layer
+        .nodes
+        .iter()
+        .filter(|record| record.parent.is_none())
+        .map(|record| entities[&record.id])
+        .collect())
+}
+
+fn assign_scene_node_ids_recursive(
+    world: &mut World,
+    entity: Entity,
+    seed: &str,
+    path: &str,
+    replace: bool,
+) -> HygeResult<()> {
+    if world.get::<SceneNodeId>(entity).is_none() || replace {
+        let digest = blake3::hash(format!("{seed}:{path}").as_bytes());
+        world.entity_mut(entity).insert((
+            SceneNodeId::new(format!("scene-{}", digest.to_hex())),
+            SceneManagedEntity,
+        ));
+    } else {
+        world.entity_mut(entity).insert(SceneManagedEntity);
+    }
+    let children = world
+        .get::<Children>(entity)
+        .map(|children| children.0.clone())
+        .unwrap_or_default();
+    for (index, child) in children.into_iter().enumerate() {
+        assign_scene_node_ids_recursive(world, child, seed, &format!("{path}/{index}"), replace)?;
+    }
+    Ok(())
 }
 
 fn instantiate_root_prefab_instances(
@@ -519,6 +728,7 @@ mod tests {
                 })
                 .collect(),
             post_process: PostProcessProfile::default(),
+            editor_layer: None,
         }
     }
 

@@ -55,6 +55,10 @@ def test_schema_lists_the_version_and_wire_message_names():
     assert "hello" in schema["properties"]["message_type"]["enum"]
     assert "server_shutdown" in schema["properties"]["message_type"]["enum"]
     assert schema["properties"]["payload"]["type"] == "object"
+    assert schema["$defs"]["select_entities_payload"]["properties"]["shift"] == {
+        "type": "boolean",
+        "default": False,
+    }
     assert Draft202012Validator.check_schema(schema) is None
 
 

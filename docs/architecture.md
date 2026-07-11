@@ -877,6 +877,13 @@ destruction. Every mutation carries the snapshot revision and stale requests
 are rejected before world or history mutation. Save updates the persisted
 scene revision without clearing undo/redo history.
 
+R-085 adds the persistent editor scene layer defined by ADR-0016. Legacy
+prefab-only documents receive deterministic `SceneNodeId` values at load;
+editor saves materialize scene-managed ECS nodes, reciprocal hierarchy links,
+reflected component overrides and sibling ordering into the versioned layer.
+The layer is loaded through the same `AppTypeRegistry` used by prefab and
+editor reflection, while Bevy entity bits remain process-local IDs.
+
 **File layout:**
 ```
 hyge-editor/src/

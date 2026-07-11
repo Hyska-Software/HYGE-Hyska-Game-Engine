@@ -1530,10 +1530,12 @@ title = "Hierarchy, selection and scene editing backend"
 phase = "phase_9"
 owner = "editor"
 priority = "P1"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-083", "R-084"]
 summary = "Implement hierarchy queries, multi-selection and scene edit commands against the real world."
+completed_at = "2026-07-11"
+completion_notes = "Implemented the R-085 persistent editor scene layer. hyge-scene now assigns deterministic SceneNodeId values to legacy prefab scenes, materializes versioned SceneEditLayer nodes with reflected components and sibling ordering, reloads edited layers, and synchronizes the live ECS world back into .hyge-world on save. hyge-editor now owns Shift multi-selection, exposes persisted scene IDs in snapshots, validates reciprocal Parent/Children links and cycles, preserves duplicate/restore parent ordering, assigns IDs to new subtrees, updates selection after mutations, and preserves hierarchy/IDs through undo and save/reopen. The protocol schema adds optional select_entities.shift with backward-compatible false behavior. ADR-0016 documents the scene-layer contract. Evidence: cargo test --workspace -- --test-threads=1 (all workspace and doc tests passed), cargo clippy --workspace --all-targets -- --deny warnings, cargo fmt --all -- --check, cargo doc --workspace --no-deps, python -m pytest -q tools/hyge-editor-python/tests (10 passed), and r085_hierarchy_selection (6 passed) with real TCP, save/reopen and legacy-ID coverage."
 acceptance = [
   "selection supports single and shift multi-select with stable entity ids",
   "reparent validates cycles and updates Parent/Children consistently",

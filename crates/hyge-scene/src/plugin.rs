@@ -10,8 +10,8 @@ use crate::components::{
     AmbientLight, AudioBus, AudioListener, AudioRolloff, AudioSource, Camera, CharacterController,
     Children, Collider, ColliderShape, DirectionalLight, EditorCamera, FogVolume, GlobalTransform,
     Joint, LightComponent, MaterialHandle, MeshHandle, Name, Parent, PersistOnReload, PointLight,
-    PostProcessVolume, RigidBody, RigidBodyKind, ScriptRef, SpotLight, StaticMeshAssetRefs,
-    Transform, WorldTransform,
+    PostProcessVolume, RigidBody, RigidBodyKind, SceneNodeId, ScriptRef, SpotLight,
+    StaticMeshAssetRefs, Transform, WorldTransform,
 };
 use crate::env::{AmbientParams, FogParams, PostProcessProfile};
 use crate::extract::{add_render_extract_system, FrameSnapshot};
@@ -101,6 +101,7 @@ pub fn build_scene_type_registry() -> TypeRegistry {
     registry.register::<Children>();
     registry.register::<Name>();
     registry.register::<PersistOnReload>();
+    registry.register::<SceneNodeId>();
     registry.register::<StaticMeshAssetRefs>();
 
     // Legacy render-facing components.

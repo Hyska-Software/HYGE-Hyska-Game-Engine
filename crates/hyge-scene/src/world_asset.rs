@@ -55,6 +55,7 @@ mod tests {
             env: Environment::empty(),
             root_prefab_instances: vec![PrefabInstance::new(PrefabId::NULL, Transform::identity())],
             post_process: PostProcessProfile::default(),
+            editor_layer: None,
         }
     }
 

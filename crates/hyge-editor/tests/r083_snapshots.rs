@@ -41,6 +41,7 @@ impl TempProject {
                 Transform::identity(),
             )],
             post_process: PostProcessProfile::default(),
+            editor_layer: None,
         };
         let scene = self.0.join("main.hyge-world");
         fs::write(&scene, document.to_bytes().expect("scene bytes")).expect("write scene");

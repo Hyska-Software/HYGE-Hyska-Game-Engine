@@ -108,6 +108,7 @@ fn sample_world_document(registry: &TypeRegistry, prefab_id: PrefabId) -> WorldD
             bloom_levels: 4,
             exposure: 1.05,
         },
+        editor_layer: None,
     }
 }
 
@@ -200,6 +201,7 @@ fn world_loader_rejects_out_of_range_parent() {
             PrefabInstance::new(prefab.prefab_id, Transform::identity()).with_parent(99)
         ],
         post_process: PostProcessProfile::default(),
+        editor_layer: None,
     };
 
     let mut world = World::new();

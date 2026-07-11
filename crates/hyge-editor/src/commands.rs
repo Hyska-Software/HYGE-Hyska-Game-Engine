@@ -7,7 +7,10 @@ use bevy_ecs::reflect::ReflectComponent;
 use bevy_ecs::world::World;
 use bevy_reflect::serde::{ReflectDeserializer, ReflectSerializer};
 use hyge_core::result::HygeError;
-use hyge_scene::{Children, Parent, PrefabId, PrefabLibrary, Transform};
+use hyge_scene::{
+    assign_new_scene_node_ids, Children, Parent, PrefabId, PrefabLibrary, SceneManagedEntity,
+    SceneNodeId, Transform,
+};
 use serde::de::DeserializeSeed;
 use serde::{Deserialize, Serialize};
 
@@ -250,6 +253,7 @@ struct CapturedEntity {
     parent: Option<EntityId>,
     children: Vec<EntityId>,
     components: Vec<CapturedComponent>,
+    scene_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -357,7 +361,14 @@ impl Command for ReparentCommand {
         validate_parent(world, entity, self.new_parent)?;
         self.old_parent = world.get::<Parent>(entity).map(|p| p.0.to_bits());
         set_parent(world, entity, self.new_parent)?;
-        Ok(effect([self.entity]))
+        let mut affected = vec![self.entity];
+        if let Some(parent) = self.old_parent {
+            affected.push(parent);
+        }
+        if let Some(parent) = self.new_parent {
+            affected.push(parent);
+        }
+        Ok(effect_vec(affected))
     }
 
     fn revert(&mut self, world: &mut World) -> Result<CommandEffect, CommandFailure> {
@@ -392,8 +403,13 @@ impl Command for InstantiateCommand {
         let root = prefab
             .instantiate(world, self.transform, parent)
             .map_err(map_error)?;
+        assign_new_scene_node_ids(world, root).map_err(map_error)?;
         self.spawned_root = Some(root.to_bits());
-        Ok(effect([root.to_bits()]))
+        let mut affected = vec![root.to_bits()];
+        if let Some(parent) = parent {
+            affected.push(parent.to_bits());
+        }
+        Ok(effect_vec(affected))
     }
 
     fn revert(&mut self, world: &mut World) -> Result<CommandEffect, CommandFailure> {
@@ -410,8 +426,12 @@ impl Command for DestroyCommand {
         let root = entity(world, self.entity)?;
         let captured = capture_subtree(world, root)?;
         destroy_subtree(world, root)?;
+        let mut affected: Vec<_> = captured.nodes.iter().map(|node| node.entity).collect();
+        if let Some(parent) = captured.parent {
+            affected.push(parent);
+        }
         self.captured = Some(captured);
-        Ok(effect([self.entity]))
+        Ok(effect_vec(affected))
     }
 
     fn revert(&mut self, world: &mut World) -> Result<CommandEffect, CommandFailure> {
@@ -625,6 +645,9 @@ fn set_parent(
     if let Some(old) = world.get::<Parent>(child).map(|p| p.0) {
         if let Some(mut children) = world.get_mut::<Children>(old) {
             children.0.retain(|candidate| *candidate != child);
+            if children.0.is_empty() {
+                world.entity_mut(old).remove::<Children>();
+            }
         }
     }
     if let Some(parent_bits) = parent {
@@ -687,7 +710,10 @@ fn capture_entity(world: &World, entity: Entity) -> Result<CapturedEntity, Comma
     let mut components = Vec::new();
     for registration in read.iter_with_data::<ReflectComponent>() {
         let type_path = registration.0.type_info().type_path().to_owned();
-        if type_path.ends_with("::Parent") || type_path.ends_with("::Children") {
+        if type_path.ends_with("::Parent")
+            || type_path.ends_with("::Children")
+            || type_path.ends_with("::SceneNodeId")
+        {
             continue;
         }
         let Some(value) = registration.1.reflect(world.entity(entity)) else {
@@ -706,6 +732,7 @@ fn capture_entity(world: &World, entity: Entity) -> Result<CapturedEntity, Comma
             .map(|c| c.0.iter().map(|e| e.to_bits()).collect())
             .unwrap_or_default(),
         components,
+        scene_id: world.get::<SceneNodeId>(entity).map(|id| id.0.clone()),
     })
 }
 
@@ -730,29 +757,33 @@ fn restore_subtree(
     }
     for node in &subtree.nodes {
         let target = Entity::from_bits(mapping[&node.entity]);
+        if preserve_ids {
+            if let Some(scene_id) = &node.scene_id {
+                world
+                    .entity_mut(target)
+                    .insert(SceneNodeId::new(scene_id.clone()));
+            }
+        } else {
+            world.entity_mut(target).insert(SceneManagedEntity);
+        }
         for component in &node.components {
             insert_reflected(world, target, &component.type_path, component.value.clone())?;
         }
     }
     for node in &subtree.nodes {
         let target = Entity::from_bits(mapping[&node.entity]);
-        let parent = node
-            .parent
-            .and_then(|p| mapping.get(&p).copied())
-            .or_else(|| {
-                if node.entity == subtree.root {
-                    subtree.parent.and_then(|p| {
-                        if preserve_ids {
-                            Some(p)
-                        } else {
-                            mapping.get(&p).copied()
-                        }
-                    })
-                } else {
-                    None
-                }
-            });
+        let parent = node.parent.and_then(|p| mapping.get(&p).copied()).or({
+            if node.entity == subtree.root {
+                subtree.parent
+            } else {
+                None
+            }
+        });
         set_parent(world, target, parent)?;
+    }
+    if !preserve_ids {
+        assign_new_scene_node_ids(world, Entity::from_bits(mapping[&subtree.root]))
+            .map_err(map_error)?;
     }
     if let Some(index) = subtree.parent_children_index {
         if let Some(parent) = subtree.parent {
@@ -764,7 +795,12 @@ fn restore_subtree(
                     .position(|e| *e == Entity::from_bits(mapping[&subtree.root]))
                 {
                     let child = children.0.remove(pos);
-                    let insert_at = index.min(children.0.len());
+                    let desired = if preserve_ids {
+                        index
+                    } else {
+                        index.saturating_add(1)
+                    };
+                    let insert_at = desired.min(children.0.len());
                     children.0.insert(insert_at, child);
                 }
             }
@@ -778,6 +814,11 @@ fn destroy_subtree(world: &mut World, root: Entity) -> Result<(), CommandFailure
     if let Some(parent) = captured.parent {
         if let Some(mut children) = world.get_mut::<Children>(Entity::from_bits(parent)) {
             children.0.retain(|e| *e != root);
+            if children.0.is_empty() {
+                world
+                    .entity_mut(Entity::from_bits(parent))
+                    .remove::<Children>();
+            }
         }
     }
     for node in captured.nodes.iter().rev() {
