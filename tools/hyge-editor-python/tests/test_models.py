@@ -2,7 +2,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
 from hyge_editor.interaction import EditorInteractionController
-from hyge_editor.models import AssetModel, ConsoleModel, HierarchyModel, InspectorModel, ProfilerModel
+from hyge_editor.models import AssetGraphModel, AssetModel, ConsoleModel, HierarchyModel, InspectorModel, ProfilerModel
 
 
 def app():
@@ -36,6 +36,36 @@ def test_asset_console_profiler_models_handle_empty_and_diagnostics():
     console.update_snapshot({"lines": [], "filter": {}})
     profiler.update_snapshot({"samples": []})
     assert assets.rowCount() == console.rowCount() == profiler.rowCount() == 0
+
+
+def test_operational_panel_models_project_fixture_snapshots_and_actions():
+    app()
+
+    class Session:
+        def __init__(self): self.requests = []
+        def request(self, kind, payload=None): self.requests.append((kind, payload or {}))
+
+    class Interaction:
+        revision = 9
+
+    session = Session()
+    assets = AssetModel(Interaction(), session)
+    graph = AssetGraphModel()
+    console = ConsoleModel(session)
+    profiler = ProfilerModel()
+    first, second = "a" * 64, "b" * 64
+    snapshot = {"nodes": [{"asset_id": first, "path": "assets/demo.hyge-world"}, {"asset_id": second, "path": "assets/mesh.hyge-mesh"}], "edges": [{"parent": first, "child": second}], "diagnostics": []}
+    assets.update_snapshot(snapshot)
+    graph.update_snapshot(snapshot)
+    assets.select_asset(second)
+    assets.activate_asset(second)
+    graph.select_asset(first)
+    console.set_filter("warn", "hyge")
+    profiler.update_snapshot({"samples": [{"frame_id": 1, "frame_time_ms": 12.5, "fps": 80.0, "gpu_time_ms": 3.0, "draw_calls": 4, "instance_count": 8, "process_resident_bytes": None, "asset_cache_bytes": 5, "passes": []}]})
+    assert assets.rowCount() == graph.rowCount() == 2
+    assert graph.data(graph.index(1, 0), graph.HighlightedRole) is True
+    assert session.requests == [("activate_asset", {"asset_id": second, "expected_revision": 9}), ("request_console_snapshot", {"min_level": "warn", "target_prefix": "hyge"})]
+    assert profiler.frameTimes == [12.5]
 
 
 def test_hierarchy_preserves_expansion_and_delegates_authoritative_selection_and_drop():

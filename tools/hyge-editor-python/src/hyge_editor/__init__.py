@@ -8,8 +8,8 @@ __all__ = ["Envelope", "EditorClient", "PROTOCOL_VERSION", "ViewportTransport"]
 
 def __getattr__(name: str):
     """Load Qt-dependent exports only when PySide6 is available."""
-    if name in {"EditorSession", "EditorInteractionController", "HierarchyModel", "InspectorModel", "AssetModel", "ConsoleModel", "ProfilerModel", "ViewportController"}:
-        from .models import AssetModel, ConsoleModel, HierarchyModel, InspectorModel, ProfilerModel
+    if name in {"EditorSession", "EditorInteractionController", "HierarchyModel", "InspectorModel", "AssetModel", "AssetGraphModel", "AssetPreviewModel", "ConsoleModel", "ProfilerModel", "ViewportController"}:
+        from .models import AssetGraphModel, AssetModel, AssetPreviewModel, ConsoleModel, HierarchyModel, InspectorModel, ProfilerModel
         from .session import EditorSession
         from .interaction import EditorInteractionController
         from .viewport_item import ViewportController
@@ -19,6 +19,8 @@ def __getattr__(name: str):
             "HierarchyModel": HierarchyModel,
             "InspectorModel": InspectorModel,
             "AssetModel": AssetModel,
+            "AssetGraphModel": AssetGraphModel,
+            "AssetPreviewModel": AssetPreviewModel,
             "ConsoleModel": ConsoleModel,
             "ProfilerModel": ProfilerModel,
             "ViewportController": ViewportController,

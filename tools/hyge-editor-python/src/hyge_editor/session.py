@@ -31,6 +31,8 @@ class EditorSession(QObject):
     assetSnapshot = Signal(object)
     consoleSnapshot = Signal(object)
     profilerSnapshot = Signal(object)
+    assetPreviewReady = Signal(object)
+    assetPreviewCancelled = Signal(object)
     viewportTransportReady = Signal(object)
     viewportTransportReset = Signal(object)
     engineError = Signal(object)
@@ -141,6 +143,8 @@ class EditorSession(QObject):
             "asset_snapshot": self.assetSnapshot,
             "console_snapshot": self.consoleSnapshot,
             "profiler_snapshot": self.profilerSnapshot,
+            "asset_preview_ready": self.assetPreviewReady,
+            "asset_preview_cancelled": self.assetPreviewCancelled,
             "viewport_transport_ready": self.viewportTransportReady,
             "viewport_transport_reset": self.viewportTransportReset,
             "engine_error": self.engineError,
@@ -152,4 +156,3 @@ class EditorSession(QObject):
     def _set_state(self, state: str) -> None:
         self._state = state
         self.stateChanged.emit(state)
-

@@ -6,10 +6,12 @@ use std::sync::Mutex;
 use atomicwrites::{AllowOverwrite, AtomicFile};
 use bevy_app::App;
 use bevy_ecs::world::World;
+use hyge_asset::{AssetDb, AssetId};
 use hyge_core::result::{HygeError, HygeResult};
 use hyge_ecs::plugin::HygePlugin;
 use hyge_scene::{
-    load_world_document_from_path, sync_editor_layer_from_world, LoadedSceneState, ScenePlugin,
+    load_world_document_from_path, sync_editor_layer_from_world, LoadedSceneState, PrefabId,
+    ScenePlugin, Transform,
 };
 
 use crate::commands::{CommandEffect, CommandFailure, EditorCommand};
@@ -266,6 +268,58 @@ impl EditorSessionRuntime {
         self.data.previews.request(asset_id, job_id)
     }
 
+    /// Resolves an asset id through the project-owned AssetDb and rejects paths
+    /// that do not canonicalize below the open project root.
+    pub fn asset_path(&self, asset_id: &str) -> Result<PathBuf, String> {
+        let project = self
+            .project
+            .as_ref()
+            .ok_or_else(|| "project is not open".to_owned())?;
+        let id = parse_asset_id(asset_id)?;
+        let db = AssetDb::open(&project.root.join(".hyge.db"))
+            .map_err(|error| format!("asset db unavailable: {error}"))?;
+        let path = db.lookup(&id).ok_or_else(|| "asset not found".to_owned())?;
+        let candidate = if path.is_absolute() {
+            path
+        } else {
+            project.root.join(path)
+        };
+        let canonical = candidate
+            .canonicalize()
+            .map_err(|error| format!("asset path: {error}"))?;
+        if !canonical.starts_with(&project.root) {
+            return Err("asset path escapes the open project".to_owned());
+        }
+        Ok(canonical)
+    }
+
+    /// Instantiates a prefab selected by its AssetDb identity as one undoable command.
+    pub fn instantiate_asset_prefab(
+        &mut self,
+        asset_id: &str,
+        expected_revision: u64,
+    ) -> Result<(CommandEffect, EditorSnapshot), CommandFailure> {
+        let id = parse_asset_id(asset_id)
+            .map_err(|error| CommandFailure::new("invalid_asset", error))?;
+        let path = self
+            .asset_path(asset_id)
+            .map_err(|error| CommandFailure::new("invalid_asset", error))?;
+        if path.extension().and_then(|extension| extension.to_str()) != Some("hyge-prefab") {
+            return Err(CommandFailure::new(
+                "invalid_asset_kind",
+                "asset is not a .hyge-prefab",
+            ));
+        }
+        self.apply_command(
+            expected_revision,
+            EditorCommand::Instantiate(crate::commands::InstantiateCommand::new(
+                PrefabId::from(id),
+                Transform::identity(),
+                None,
+            )),
+        )
+    }
+
     /// Cancels a preview job.
     pub fn cancel_asset_preview(&self, job_id: &str) -> bool {
         self.data.previews.cancel(job_id)
@@ -516,6 +570,26 @@ fn read_revision(root: &Path) -> HygeResult<u64> {
             .map_err(|_| HygeError::invalid_argument("editor revision is corrupt")),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
         Err(error) => Err(error.into()),
+    }
+}
+
+fn parse_asset_id(value: &str) -> Result<AssetId, String> {
+    if value.len() != 64 {
+        return Err("asset id must be 64 hex characters".to_owned());
+    }
+    let mut bytes = [0_u8; 32];
+    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+        bytes[index] = (hex(pair[0])? << 4) | hex(pair[1])?;
+    }
+    Ok(AssetId::from(bytes))
+}
+
+fn hex(value: u8) -> Result<u8, String> {
+    match value {
+        b'0'..=b'9' => Ok(value - b'0'),
+        b'a'..=b'f' => Ok(value - b'a' + 10),
+        b'A'..=b'F' => Ok(value - b'A' + 10),
+        _ => Err("asset id is not hexadecimal".to_owned()),
     }
 }
 

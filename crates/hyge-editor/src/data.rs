@@ -397,7 +397,7 @@ impl PreviewManager {
         }
     }
 
-    /// Builds a deterministic 1x1 PNG preview for a registered asset.
+    /// Builds a deterministic 256x256 neutral preview for a registered mesh.
     pub fn request(&self, asset_id: &str, job_id: &str) -> Result<PreviewResult, String> {
         let root = self
             .root
@@ -430,14 +430,13 @@ impl PreviewManager {
                     hash: None,
                 });
             }
+            if source.extension().and_then(|extension| extension.to_str()) != Some("hyge-mesh") {
+                return Err("asset preview supports .hyge-mesh only".to_owned());
+            }
             let bytes = fs::read(&source).map_err(|error| error.to_string())?;
-            let hash = blake3::hash(&bytes);
-            let color = hash.as_bytes();
-            let image = image::RgbaImage::from_pixel(
-                1,
-                1,
-                image::Rgba([color[0], color[1], color[2], 255]),
-            );
+            let mesh = hyge_asset::importer::mesh::from_bytes(&bytes)
+                .map_err(|error| format!("mesh preview: {error}"))?;
+            let image = render_mesh_preview(&mesh);
             let mut encoded = Cursor::new(Vec::new());
             image::DynamicImage::ImageRgba8(image)
                 .write_to(&mut encoded, image::ImageFormat::Png)
@@ -479,13 +478,105 @@ impl PreviewManager {
                         .display()
                         .to_string(),
                 ),
-                width: Some(1),
-                height: Some(1),
+                width: Some(256),
+                height: Some(256),
                 hash: Some(blake3::hash(encoded.get_ref()).to_hex().to_string()),
             })
         })();
         self.jobs.lock().ok().map(|mut jobs| jobs.remove(job_id));
         result
+    }
+}
+
+fn render_mesh_preview(mesh: &hyge_asset::importer::mesh::MeshData) -> image::RgbaImage {
+    const SIZE: u32 = 256;
+    let mut image = image::RgbaImage::from_pixel(SIZE, SIZE, image::Rgba([20, 24, 30, 255]));
+    if mesh.vertices.is_empty() {
+        return image;
+    }
+    let (mut min_x, mut max_x, mut min_y, mut max_y) = (
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+    );
+    for vertex in &mesh.vertices {
+        let [x, y, z] = vertex.position;
+        let projected_x = x - z * 0.35;
+        let projected_y = y + z * 0.2;
+        min_x = min_x.min(projected_x);
+        max_x = max_x.max(projected_x);
+        min_y = min_y.min(projected_y);
+        max_y = max_y.max(projected_y);
+    }
+    let span = (max_x - min_x).max(max_y - min_y).max(0.001);
+    let point = |vertex: &hyge_asset::importer::mesh::Vertex| {
+        let [x, y, z] = vertex.position;
+        let x = (x - z * 0.35 - min_x) / span * 216.0 + 20.0;
+        let y = (y + z * 0.2 - min_y) / span * 216.0 + 20.0;
+        (x as i32, (SIZE as f32 - 1.0 - y) as i32)
+    };
+    for triangle in mesh.indices.chunks_exact(3) {
+        let Some(a) = mesh.vertices.get(triangle[0] as usize) else {
+            continue;
+        };
+        let Some(b) = mesh.vertices.get(triangle[1] as usize) else {
+            continue;
+        };
+        let Some(c) = mesh.vertices.get(triangle[2] as usize) else {
+            continue;
+        };
+        let normal = [
+            (a.normal[0] + b.normal[0] + c.normal[0]) / 3.0,
+            (a.normal[1] + b.normal[1] + c.normal[1]) / 3.0,
+            (a.normal[2] + b.normal[2] + c.normal[2]) / 3.0,
+        ];
+        let light = (normal[0] * 0.4 + normal[1] * 0.7 + normal[2] * 0.5).max(0.0);
+        let color = image::Rgba([
+            (70.0 + 130.0 * light) as u8,
+            (100.0 + 110.0 * light) as u8,
+            (135.0 + 95.0 * light) as u8,
+            255,
+        ]);
+        let (ax, ay) = point(a);
+        let (bx, by) = point(b);
+        let (cx, cy) = point(c);
+        draw_line(&mut image, ax, ay, bx, by, color);
+        draw_line(&mut image, bx, by, cx, cy, color);
+        draw_line(&mut image, cx, cy, ax, ay, color);
+    }
+    image
+}
+
+fn draw_line(
+    image: &mut image::RgbaImage,
+    mut x0: i32,
+    mut y0: i32,
+    x1: i32,
+    y1: i32,
+    color: image::Rgba<u8>,
+) {
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut error = dx + dy;
+    loop {
+        if x0 >= 0 && y0 >= 0 && x0 < image.width() as i32 && y0 < image.height() as i32 {
+            image.put_pixel(x0 as u32, y0 as u32, color);
+        }
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+        let twice = error * 2;
+        if twice >= dy {
+            error += dy;
+            x0 += sx;
+        }
+        if twice <= dx {
+            error += dx;
+            y0 += sy;
+        }
     }
 }
 

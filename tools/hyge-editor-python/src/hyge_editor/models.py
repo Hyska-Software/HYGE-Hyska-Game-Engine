@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from PySide6.QtCore import QAbstractItemModel, QAbstractListModel, QModelIndex, QObject, Qt, Signal, Slot
+from pathlib import PurePosixPath
+
+from PySide6.QtCore import QAbstractItemModel, QAbstractListModel, QModelIndex, QObject, Property, Qt, Signal, Slot
 
 
 def _payload(value: Any) -> dict[str, Any]:
@@ -460,13 +463,98 @@ class AssetModel(SnapshotListModel):
 
     AssetIdRole = Qt.ItemDataRole.UserRole + 1
     PathRole = Qt.ItemDataRole.UserRole + 2
+    NameRole = Qt.ItemDataRole.UserRole + 3
+    KindRole = Qt.ItemDataRole.UserRole + 4
+    SelectedRole = Qt.ItemDataRole.UserRole + 5
+    selectionChanged = Signal()
 
-    def __init__(self, parent: QObject | None = None) -> None:
-        super().__init__({"assetId": self.AssetIdRole, "path": self.PathRole}, parent)
+    def __init__(self, interaction: Any = None, session: Any = None, parent: QObject | None = None) -> None:
+        super().__init__({"assetId": self.AssetIdRole, "path": self.PathRole, "name": self.NameRole, "kind": self.KindRole, "selected": self.SelectedRole}, parent)
+        self._interaction = interaction
+        self._session = session
+        self._selected_asset_id = ""
+
+    @Property(str, notify=selectionChanged)
+    def selectedAssetId(self) -> str:
+        return self._selected_asset_id
 
     def update_snapshot(self, snapshot: Any) -> None:
         payload = _payload(snapshot)
-        self._replace([{"display": row.get("path", ""), "assetId": row.get("asset_id"), "path": row.get("path")} for row in payload.get("nodes", []) if isinstance(row, dict)] if isinstance(payload, dict) else [])
+        rows = []
+        for row in payload.get("nodes", []) if isinstance(payload, dict) else []:
+            if not isinstance(row, dict):
+                continue
+            path = str(row.get("path", ""))
+            name = PurePosixPath(path).name
+            rows.append({"display": path, "assetId": row.get("asset_id", ""), "path": path, "name": name, "kind": PurePosixPath(path).suffix.lstrip("."), "selected": row.get("asset_id") == self._selected_asset_id})
+        self._replace(rows)
+
+    @Slot(str)
+    def select_asset(self, asset_id: str) -> None:
+        if asset_id == self._selected_asset_id:
+            return
+        self._selected_asset_id = asset_id
+        for row in self._rows:
+            row["selected"] = row.get("assetId") == asset_id
+        if self._rows:
+            self.dataChanged.emit(self.index(0, 0), self.index(len(self._rows) - 1, 0), [self.SelectedRole])
+        self.selectionChanged.emit()
+
+    @Slot(str)
+    def activate_asset(self, asset_id: str) -> None:
+        if self._session is None:
+            return
+        payload: dict[str, Any] = {"asset_id": asset_id}
+        if self._interaction is not None and getattr(self._interaction, "revision", 0):
+            payload["expected_revision"] = self._interaction.revision
+        self._session.request("activate_asset", payload)
+
+
+class AssetGraphModel(SnapshotListModel):
+    """Disposable graph nodes with deterministic presentation coordinates."""
+
+    AssetIdRole = Qt.ItemDataRole.UserRole + 1
+    LabelRole = Qt.ItemDataRole.UserRole + 2
+    XRole = Qt.ItemDataRole.UserRole + 3
+    YRole = Qt.ItemDataRole.UserRole + 4
+    HighlightedRole = Qt.ItemDataRole.UserRole + 5
+    selectedChanged = Signal()
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__({"assetId": self.AssetIdRole, "label": self.LabelRole, "x": self.XRole, "y": self.YRole, "highlighted": self.HighlightedRole}, parent)
+        self._edges: list[tuple[str, str]] = []
+        self._selected = ""
+
+    @Property(str, notify=selectedChanged)
+    def selectedAssetId(self) -> str:
+        return self._selected
+
+    @Property("QVariantList", notify=selectedChanged)
+    def edges(self) -> list[dict[str, str]]:
+        return [{"parent": parent, "child": child} for parent, child in self._edges]
+
+    @Property("QVariantList", notify=selectedChanged)
+    def edgeLines(self) -> list[dict[str, Any]]:
+        positions = {str(row.get("assetId")): (int(row.get("x", 0)) + 72, int(row.get("y", 0)) + 21) for row in self._rows}
+        return [{"x1": positions[parent][0], "y1": positions[parent][1], "x2": positions[child][0], "y2": positions[child][1], "highlighted": bool(self._selected) and (parent == self._selected or child == self._selected)} for parent, child in self._edges if parent in positions and child in positions]
+
+    def update_snapshot(self, snapshot: Any) -> None:
+        payload = _payload(snapshot)
+        nodes = sorted((row for row in payload.get("nodes", []) if isinstance(row, dict)), key=lambda row: str(row.get("asset_id", ""))) if isinstance(payload, dict) else []
+        self._edges = [(str(edge.get("parent")), str(edge.get("child"))) for edge in payload.get("edges", []) if isinstance(edge, dict)] if isinstance(payload, dict) else []
+        self._replace([{"display": row.get("path", ""), "assetId": row.get("asset_id", ""), "label": PurePosixPath(str(row.get("path", ""))).name, "x": (index % 5) * 160, "y": (index // 5) * 96, "highlighted": self._highlighted(str(row.get("asset_id", "")))} for index, row in enumerate(nodes)])
+
+    @Slot(str)
+    def select_asset(self, asset_id: str) -> None:
+        self._selected = asset_id
+        for row in self._rows:
+            row["highlighted"] = self._highlighted(str(row.get("assetId", "")))
+        if self._rows:
+            self.dataChanged.emit(self.index(0, 0), self.index(len(self._rows) - 1, 0), [self.HighlightedRole])
+        self.selectedChanged.emit()
+
+    def _highlighted(self, asset_id: str) -> bool:
+        return bool(self._selected) and (asset_id == self._selected or any(parent == self._selected and child == asset_id or child == self._selected and parent == asset_id for parent, child in self._edges))
 
 
 class ConsoleModel(SnapshotListModel):
@@ -478,9 +566,38 @@ class ConsoleModel(SnapshotListModel):
     MessageRole = Qt.ItemDataRole.UserRole + 4
     FileRole = Qt.ItemDataRole.UserRole + 5
     LineRole = Qt.ItemDataRole.UserRole + 6
+    filterChanged = Signal()
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, session: Any = None, parent: QObject | None = None) -> None:
         super().__init__({"sequence": self.SequenceRole, "level": self.LevelRole, "target": self.TargetRole, "message": self.MessageRole, "file": self.FileRole, "line": self.LineRole}, parent)
+        self._session = session
+        self._min_level = ""
+        self._target_prefix = ""
+
+    @Property(str, notify=filterChanged)
+    def minLevel(self) -> str:
+        return self._min_level
+
+    @Property(str, notify=filterChanged)
+    def targetPrefix(self) -> str:
+        return self._target_prefix
+
+    @Slot(str, str)
+    def set_filter(self, min_level: str, target_prefix: str) -> None:
+        self._min_level = min_level
+        self._target_prefix = target_prefix
+        self.filterChanged.emit()
+        self.refresh()
+
+    @Slot()
+    def refresh(self) -> None:
+        if self._session is not None:
+            payload = {}
+            if self._min_level:
+                payload["min_level"] = self._min_level
+            if self._target_prefix:
+                payload["target_prefix"] = self._target_prefix
+            self._session.request("request_console_snapshot", payload)
 
     def update_snapshot(self, snapshot: Any) -> None:
         payload = _payload(snapshot)
@@ -498,9 +615,24 @@ class ProfilerModel(SnapshotListModel):
     InstanceCountRole = Qt.ItemDataRole.UserRole + 6
     MemoryRole = Qt.ItemDataRole.UserRole + 7
     PassesRole = Qt.ItemDataRole.UserRole + 8
+    seriesChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__({"frameId": self.FrameRole, "fps": self.FpsRole, "frameTimeMs": self.FrameTimeRole, "gpuTimeMs": self.GpuTimeRole, "drawCalls": self.DrawCallsRole, "instanceCount": self.InstanceCountRole, "memory": self.MemoryRole, "passes": self.PassesRole}, parent)
+
+    @Property("QVariantList", notify=seriesChanged)
+    def frameTimes(self) -> list[float]:
+        return [float(row.get("frame_time_ms", 0.0)) for row in self._rows]
+
+    @Property("QVariantMap", notify=seriesChanged)
+    def series(self) -> dict[str, list[float]]:
+        return {
+            "frame": [float(row.get("frame_time_ms", 0.0)) for row in self._rows],
+            "gpu": [float(row.get("gpu_time_ms", 0.0)) for row in self._rows],
+            "draw": [float(row.get("draw_calls", 0.0)) for row in self._rows],
+            "instances": [float(row.get("instance_count", 0.0)) for row in self._rows],
+            "memory": [float(row.get("process_resident_bytes") or row.get("asset_cache_bytes", 0)) / 1048576.0 for row in self._rows],
+        }
 
     def update_snapshot(self, snapshot: Any) -> None:
         payload = _payload(snapshot)
@@ -509,3 +641,54 @@ class ProfilerModel(SnapshotListModel):
             if isinstance(row, dict):
                 rows.append({**row, "display": f"Frame {row.get('frame_id', '')}: {row.get('frame_time_ms', 0):.2f} ms"})
         self._replace(rows)
+        self.seriesChanged.emit()
+
+
+class AssetPreviewModel(QObject):
+    """Presentation-only state for the latest session-owned mesh preview."""
+
+    changed = Signal()
+
+    def __init__(self, session: Any, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._path = ""
+        self._state = "idle"
+        self._error = ""
+        session.assetPreviewReady.connect(self._ready)
+        session.assetPreviewCancelled.connect(self._cancelled)
+        session.engineError.connect(self._error_received)
+
+    @Property(str, notify=changed)
+    def source(self) -> str:
+        return self._path
+
+    @Property(str, notify=changed)
+    def state(self) -> str:
+        return self._state
+
+    @Property(str, notify=changed)
+    def error(self) -> str:
+        return self._error
+
+    def _ready(self, envelope: Any) -> None:
+        payload = _payload(envelope)
+        relative = str(payload.get("path") or "") if isinstance(payload, dict) else ""
+        root = os.environ.get("HYGE_PROJECT", ".")
+        candidate = os.path.realpath(os.path.join(root, relative))
+        preview_root = os.path.realpath(os.path.join(root, ".hyge", "previews"))
+        if relative and candidate.startswith(preview_root + os.sep) and os.path.isfile(candidate):
+            self._path = "file:///" + candidate.replace("\\", "/")
+            self._state, self._error = "ready", ""
+        else:
+            self._state, self._error = "failed", "preview output was unavailable"
+        self.changed.emit()
+
+    def _cancelled(self, _envelope: Any) -> None:
+        self._state = "cancelled"
+        self.changed.emit()
+
+    def _error_received(self, envelope: Any) -> None:
+        error = getattr(envelope, "error", None) or {}
+        if error.get("code") in {"preview_failed", "asset_activation_failed"}:
+            self._state, self._error = "failed", error.get("message", "preview failed")
+            self.changed.emit()

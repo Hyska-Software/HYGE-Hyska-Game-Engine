@@ -12,7 +12,7 @@ PROTOCOL_VERSION = 2
 SUPPORTED_PROTOCOL_VERSIONS = (1, PROTOCOL_VERSION)
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 MESSAGE_TYPES = {
-    "hello", "hello_ack", "open_project", "open_scene", "save_scene", "request_world_snapshot",
+    "hello", "hello_ack", "open_project", "open_scene", "activate_asset", "save_scene", "request_world_snapshot",
     "select_entities", "edit_component", "edit_components", "add_component", "remove_component",
     "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab",
     "undo", "redo", "set_editor_camera", "set_viewport_size", "open_viewport_transport", "close_viewport_transport", "viewport_input", "request_asset_preview",

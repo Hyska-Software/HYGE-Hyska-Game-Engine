@@ -4,6 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use hyge_asset::importer::mesh::{self, MeshData, Vertex};
 use hyge_asset::{AssetDb, AssetId};
 use hyge_editor::{ConsoleFilter, ConsoleLayer, EditorDataServices};
 use hyge_render::profiler::{FrameStats, PassStats};
@@ -99,8 +100,28 @@ fn preview_output_path_and_bytes_are_deterministic() {
     let root = project_root("preview");
     let mut db = AssetDb::open(&root.join(".hyge.db")).expect("db");
     let asset = id(b"preview");
-    let source = root.join("source.bin");
-    fs::write(&source, b"preview source").expect("source");
+    let source = root.join("source.hyge-mesh");
+    let mesh = MeshData::from_triangle_list(
+        vec![
+            Vertex {
+                position: [-1.0, -1.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                uv: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.0, -1.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                uv: [1.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, 1.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                uv: [0.5, 1.0],
+            },
+        ],
+        vec![0, 1, 2],
+    );
+    fs::write(&source, mesh::to_bytes(&mesh).expect("mesh bytes")).expect("source");
     db.insert(&asset, &source).expect("asset");
     let services = EditorDataServices::default();
     services.previews.set_project(Some(&root));
@@ -115,6 +136,7 @@ fn preview_output_path_and_bytes_are_deterministic() {
     assert_eq!(first.state, "completed");
     assert_eq!(first.path, second.path);
     assert_eq!(first.hash, second.hash);
+    assert_eq!((first.width, first.height), (Some(256), Some(256)));
     assert!(root.join(first.path.expect("path")).exists());
 }
 

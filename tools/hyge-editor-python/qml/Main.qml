@@ -83,7 +83,21 @@ ApplicationWindow {
                     Layout.preferredHeight: 160
                     model: assetModel
                     clip: true
-                    delegate: Label { width: ListView.view.width; text: model.path; elide: Text.ElideMiddle }
+                    delegate: ItemDelegate {
+                        width: ListView.view.width
+                        text: model.name + "  (" + model.kind + ")"
+                        highlighted: model.selected
+                        onClicked: assetModel.select_asset(model.assetId)
+                        onDoubleClicked: assetModel.activate_asset(model.assetId)
+                        ToolTip.visible: hovered
+                        ToolTip.text: model.path
+                    }
+                }
+                Label { text: "Mesh Preview"; font.bold: true }
+                Rectangle {
+                    Layout.fillWidth: true; Layout.preferredHeight: 150; color: "#101216"
+                    Image { anchors.fill: parent; anchors.margins: 4; fillMode: Image.PreserveAspectFit; source: assetPreviewModel.source }
+                    Label { anchors.centerIn: parent; visible: assetPreviewModel.state !== "ready"; text: assetPreviewModel.error !== "" ? assetPreviewModel.error : "Double-click a mesh to preview"; color: "#9aa1ad"; wrapMode: Text.Wrap }
                 }
             }
         }
@@ -112,6 +126,12 @@ ApplicationWindow {
                     }
                 }
                 Label { text: "Console"; font.bold: true }
+                RowLayout {
+                    Layout.fillWidth: true
+                    ComboBox { id: levelFilter; model: ["", "trace", "debug", "info", "warn", "error"]; onActivated: consoleModel.set_filter(currentText, targetFilter.text) }
+                    TextField { id: targetFilter; Layout.fillWidth: true; placeholderText: "Target prefix"; onAccepted: consoleModel.set_filter(levelFilter.currentText, text) }
+                    Button { text: "Filter"; onClicked: consoleModel.set_filter(levelFilter.currentText, targetFilter.text) }
+                }
                 ListView {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 140
@@ -119,6 +139,7 @@ ApplicationWindow {
                     clip: true
                     delegate: Label { width: ListView.view.width; text: model.display; color: "#c4c9d4"; elide: Text.ElideRight }
                 }
+                Timer { interval: 750; running: editorBridge.status === "Ready"; repeat: true; onTriggered: consoleModel.refresh() }
             }
         }
 
@@ -164,12 +185,77 @@ ApplicationWindow {
                     }
                 }
                 Label { text: "Profiler"; font.bold: true }
+                Canvas {
+                    id: profilerChart
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 90
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.fillStyle = "#101216"; ctx.fillRect(0, 0, width, height)
+                        var series = profilerModel.series
+                        var samples = series.frame
+                        var count = samples.length
+                        if (!count) return
+                        var names = ["frame", "gpu", "draw", "instances", "memory"]
+                        var colors = ["#79c0ff", "#d2a8ff", "#f2cc60", "#7ee787", "#ff7b72"]
+                        for (var seriesIndex = 0; seriesIndex < names.length; ++seriesIndex) {
+                            var values = series[names[seriesIndex]]
+                            var maxValue = 1
+                            for (var i = 0; i < values.length; ++i) maxValue = Math.max(maxValue, values[i])
+                            ctx.strokeStyle = colors[seriesIndex]; ctx.beginPath()
+                            for (var j = 0; j < values.length; ++j) {
+                                var value = values[j] || 0
+                                var x = count === 1 ? 0 : j * width / (count - 1)
+                                var y = height - value * height / maxValue
+                                if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+                            }
+                            ctx.stroke()
+                        }
+                    }
+                    Connections { target: profilerModel; function onSeriesChanged() { profilerChart.requestPaint() } }
+                }
                 ListView {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 160
                     model: profilerModel
                     clip: true
                     delegate: Label { width: ListView.view.width; text: model.display; color: "#c4c9d4" }
+                }
+                Label { text: "Asset Graph"; font.bold: true }
+                Flickable {
+                    id: graphView
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 150
+                    contentWidth: 800; contentHeight: 500; clip: true
+                    Rectangle { width: graphView.contentWidth; height: graphView.contentHeight; color: "#15191f" }
+                    Canvas {
+                        id: graphLines
+                        width: graphView.contentWidth; height: graphView.contentHeight
+                        onPaint: {
+                            var ctx = getContext("2d"); ctx.clearRect(0, 0, width, height)
+                            var edges = assetGraphModel.edgeLines
+                            for (var index = 0; index < edges.length; ++index) {
+                                var edge = edges[index]; ctx.strokeStyle = edge.highlighted ? "#79c0ff" : "#56606e"; ctx.lineWidth = edge.highlighted ? 2 : 1
+                                ctx.beginPath(); ctx.moveTo(edge.x1, edge.y1); ctx.lineTo(edge.x2, edge.y2); ctx.stroke()
+                            }
+                        }
+                        Connections {
+                            target: assetGraphModel
+                            function onSelectedChanged() { graphLines.requestPaint() }
+                            function onModelReset() { graphLines.requestPaint() }
+                        }
+                    }
+                    Repeater {
+                        model: assetGraphModel
+                        delegate: Rectangle {
+                            x: model.x; y: model.y; width: 145; height: 42; radius: 4
+                            color: model.highlighted ? "#315a78" : "#252b34"
+                            border.color: model.assetId === assetGraphModel.selectedAssetId ? "#79c0ff" : "#4b5563"
+                            Label { anchors.fill: parent; anchors.margins: 6; text: model.label; elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter }
+                            MouseArea { anchors.fill: parent; onClicked: assetGraphModel.select_asset(model.assetId) }
+                        }
+                    }
+                    PinchHandler { target: null; onActiveScaleChanged: { graphView.contentWidth = Math.max(400, graphView.contentWidth * activeScale); graphView.contentHeight = Math.max(300, graphView.contentHeight * activeScale) } }
                 }
             }
         }

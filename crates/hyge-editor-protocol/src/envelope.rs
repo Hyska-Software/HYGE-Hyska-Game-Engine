@@ -35,6 +35,8 @@ pub enum MessageType {
     OpenProject,
     /// Opens a cooked world scene.
     OpenScene,
+    /// Activates a project asset by its authoritative BLAKE3 identity.
+    ActivateAsset,
     /// Saves the active scene.
     SaveScene,
     /// Updates the editor selection.

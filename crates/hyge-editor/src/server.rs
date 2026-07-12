@@ -434,6 +434,7 @@ fn handle_authenticated(
     match envelope.message_type.clone() {
         MessageType::OpenProject => lifecycle_open_project(envelope, sessions, binding, runtime),
         MessageType::OpenScene => lifecycle_open_scene(envelope, sessions, binding, runtime),
+        MessageType::ActivateAsset => asset_activate(envelope, sessions, binding, runtime),
         MessageType::RequestWorldSnapshot => world_snapshot_request(envelope, runtime),
         MessageType::SaveScene => lifecycle_save_scene(envelope, runtime, &binding.session_id),
         MessageType::SelectEntities => {
@@ -611,6 +612,89 @@ fn data_asset_snapshot(
             &envelope.message_id,
             "asset_db_unavailable",
             error,
+        )],
+    }
+}
+
+fn asset_activate(
+    envelope: &Envelope,
+    sessions: &Arc<Mutex<SessionRegistry>>,
+    binding: &crate::state::SessionBinding,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let Some(asset_id) = envelope
+        .payload
+        .get("asset_id")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "activate_asset requires asset_id",
+        )];
+    };
+    let path = match runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_owned())
+        .and_then(|runtime| runtime.asset_path(asset_id))
+    {
+        Ok(path) => path,
+        Err(error) => {
+            return vec![Envelope::error(
+                &envelope.message_id,
+                "invalid_asset",
+                error,
+            )]
+        }
+    };
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("hyge-world") => {
+            let mut forwarded = envelope.clone();
+            forwarded.message_type = MessageType::OpenScene;
+            forwarded.payload = serde_json::json!({"path": path});
+            lifecycle_open_scene(&forwarded, sessions, binding, runtime)
+        }
+        Some("hyge-prefab") => {
+            let Some(expected_revision) = envelope
+                .payload
+                .get("expected_revision")
+                .and_then(serde_json::Value::as_u64)
+            else {
+                return vec![Envelope::error(
+                    &envelope.message_id,
+                    "invalid_request",
+                    "prefab activation requires expected_revision",
+                )];
+            };
+            match runtime
+                .lock()
+                .map_err(|_| "runtime lock poisoned".to_owned())
+                .and_then(|mut runtime| {
+                    runtime
+                        .instantiate_asset_prefab(asset_id, expected_revision)
+                        .map_err(|error| error.message)
+                }) {
+                Ok((_effect, snapshot)) => vec![
+                    world_snapshot(envelope, &snapshot),
+                    selection_changed(envelope, &snapshot),
+                    data_envelope(
+                        envelope,
+                        MessageType::CommandCompleted,
+                        serde_json::json!({"command":"activate_asset","revision":snapshot.revision}),
+                    ),
+                ],
+                Err(error) => vec![Envelope::error(
+                    &envelope.message_id,
+                    "asset_activation_failed",
+                    error,
+                )],
+            }
+        }
+        Some("hyge-mesh") => data_asset_preview(envelope, runtime),
+        _ => vec![Envelope::error(
+            &envelope.message_id,
+            "unsupported_asset",
+            "only .hyge-world, .hyge-prefab and .hyge-mesh can be activated",
         )],
     }
 }

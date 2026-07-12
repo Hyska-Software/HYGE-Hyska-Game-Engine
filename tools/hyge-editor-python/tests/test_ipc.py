@@ -182,6 +182,8 @@ def test_schema_validates_every_declared_message_type():
             }
         elif message_type == "set_viewport_size":
             envelope["payload"] = {"width": 640, "height": 360}
+        elif message_type == "activate_asset":
+            envelope["payload"] = {"asset_id": "0" * 64}
         elif message_type == "request_asset_preview":
             envelope["payload"] = {"asset_id": "0" * 64}
         elif message_type == "cancel_asset_preview":

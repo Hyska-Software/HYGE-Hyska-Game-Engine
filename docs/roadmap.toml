@@ -1646,10 +1646,12 @@ title = "Qt assets, graph, console and profiler panels"
 phase = "phase_11"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-089", "R-086"]
 summary = "Complete the operational panels required for daily engine development."
+completed_at = "2026-07-12"
+completion_notes = "Implemented the complete operational Qt panels. The versioned protocol adds activate_asset, resolving world/prefab/mesh actions through AssetDb; mesh previews decode real .hyge-mesh data into deterministic 256x256 PNG output with bounded cancellation and atomic paths. AssetModel and AssetPreviewModel provide validated QML selection/preview state, AssetGraphModel draws deterministic nodes and dependency edges with highlighting, ConsoleModel exposes level/target filtering, and ProfilerModel exposes frame/GPU/draw/instance/memory series. The real TCP fixture exercises two assets, one dependency edge, 1005 retained console events with filtering, and profiler metrics. Evidence: cargo fmt --all -- --check; cargo clippy --workspace --all-targets -- --deny warnings; cargo test --workspace -- --test-threads=1; cargo test --workspace --doc; R-099 TCP fixture 2 passed; QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software python -m pytest -q tools/hyge-editor-python/tests (18 passed); cargo doc --workspace --no-deps with RUSTDOCFLAGS=-D warnings."
 acceptance = [
   "content browser lists assets and opens worlds, prefabs and mesh previews",
   "asset graph supports pan, zoom, selection and dependency highlighting",

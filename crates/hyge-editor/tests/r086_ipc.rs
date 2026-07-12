@@ -29,13 +29,19 @@ fn send(stream: &mut TcpStream, envelope: Envelope) -> Envelope {
 }
 
 #[test]
-fn asset_console_and_profiler_round_trip_through_tcp() {
+fn r099_fixture_populates_operational_panel_snapshots_through_tcp() {
     let project = root();
     let mut db = AssetDb::open(&project.join(".hyge.db")).expect("db");
     let asset = AssetId::from(blake3::hash(b"ipc-asset"));
     let source = project.join("assets").join("ipc.bin");
     fs::write(&source, b"ipc asset").expect("source");
     db.insert(&asset, &source).expect("asset");
+    let dependency = AssetId::from(blake3::hash(b"ipc-dependency"));
+    let dependency_source = project.join("assets").join("dependency.hyge-mesh");
+    fs::write(&dependency_source, b"fixture dependency").expect("dependency source");
+    db.insert(&dependency, &dependency_source)
+        .expect("dependency");
+    db.add_dependency(&asset, &dependency).expect("edge");
 
     let server = Arc::new(
         EditorServer::bind(EditorServerConfig {
@@ -74,7 +80,12 @@ fn asset_console_and_profiler_round_trip_through_tcp() {
         .expect("session services");
     tracing::subscriber::with_default(
         tracing_subscriber::registry().with(services.console_layer()),
-        || tracing::info!(target: "hyge.ipc", "tracing round trip"),
+        || {
+            for index in 0..1_005 {
+                tracing::info!(target: "hyge.ipc", "fixture line {index}");
+            }
+            tracing::warn!(target: "hyge.render", "fixture warning");
+        },
     );
     services.profiler.record_frame_stats(
         &FrameStats {
@@ -102,6 +113,10 @@ fn asset_console_and_profiler_round_trip_through_tcp() {
     assert_eq!(snapshot.message_type, MessageType::AssetSnapshot);
     assert_eq!(
         snapshot.payload["nodes"].as_array().expect("nodes").len(),
+        2
+    );
+    assert_eq!(
+        snapshot.payload["edges"].as_array().expect("edges").len(),
         1
     );
 
@@ -110,11 +125,12 @@ fn asset_console_and_profiler_round_trip_through_tcp() {
         Envelope::new(
             "console",
             MessageType::RequestConsoleSnapshot,
-            serde_json::json!({}),
+            serde_json::json!({"min_level":"warn", "target_prefix":"hyge.render"}),
         ),
     );
     assert_eq!(console.message_type, MessageType::ConsoleSnapshot);
-    assert_eq!(console.payload["lines"][0]["message"], "tracing round trip");
+    assert_eq!(console.payload["lines"].as_array().expect("lines").len(), 1);
+    assert_eq!(console.payload["lines"][0]["level"], "WARN");
     let profiler = send(
         &mut stream,
         Envelope::new(
@@ -125,6 +141,8 @@ fn asset_console_and_profiler_round_trip_through_tcp() {
     );
     assert_eq!(profiler.message_type, MessageType::ProfilerSnapshot);
     assert_eq!(profiler.payload["samples"][0]["draw_calls"], 3);
+    assert_eq!(profiler.payload["samples"][0]["instance_count"], 4);
+    assert_eq!(profiler.payload["samples"][0]["gpu_time_ms"], 2.0);
 
     let shutdown = send(
         &mut stream,
