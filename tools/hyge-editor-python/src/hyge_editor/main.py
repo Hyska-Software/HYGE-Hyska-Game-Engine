@@ -15,6 +15,9 @@ from .models import AssetGraphModel, AssetModel, AssetPreviewModel, ConsoleModel
 from .interaction import EditorInteractionController
 from .session import EditorSession
 from .viewport_item import ViewportController
+from .input_controller import ViewportInputController
+from .layout_state import EditorPreferences
+from .theme import EditorTheme
 
 
 class EditorBridge(QObject):
@@ -23,10 +26,11 @@ class EditorBridge(QObject):
     statusChanged = Signal()
     droppedFramesChanged = Signal()
 
-    def __init__(self, session: EditorSession, viewport: ViewportController, parent: QObject | None = None) -> None:
+    def __init__(self, session: EditorSession, viewport: ViewportController, preferences: EditorPreferences, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._session = session
         self._viewport = viewport
+        self._preferences = preferences
         self._status = "Disconnected"
         session.stateChanged.connect(self._set_status)
         session.protocolError.connect(self._set_error)
@@ -57,6 +61,11 @@ class EditorBridge(QObject):
         """Close the backend connection."""
         self._session.close()
 
+    @Property(str, notify=statusChanged)
+    def mode(self) -> str:
+        """Return the local editor mode label."""
+        return self._preferences.mode
+
     def _set_status(self, state: str) -> None:
         self._status = state.capitalize()
         self.statusChanged.emit()
@@ -69,9 +78,13 @@ class EditorBridge(QObject):
 def create_application(
     argv: list[str] | None = None,
     session: EditorSession | None = None,
+    user_data: Path | None = None,
 ) -> tuple[QApplication, QQmlApplicationEngine, EditorSession, ViewportController]:
     """Create a source-checkout shell suitable for production or tests."""
     app = QApplication.instance() or QApplication(argv if argv is not None else sys.argv)
+    preferences = EditorPreferences(user_data or Path(os.environ.get("HYGE_USER_DATA", Path.cwd() / "user_data")))
+    theme = EditorTheme(preferences, app)
+    theme.apply()
     backend = session or EditorSession(
         os.environ.get("HYGE_EDITOR_ADDRESS", "127.0.0.1:3765"),
         os.environ.get("HYGE_EDITOR_TOKEN", "hyge-local-dev"),
@@ -79,8 +92,9 @@ def create_application(
     viewport = ViewportController(backend)
     engine = QQmlApplicationEngine()
     engine.addImageProvider("hyge-viewport", viewport.provider)
-    bridge = EditorBridge(backend, viewport, engine)
+    bridge = EditorBridge(backend, viewport, preferences, engine)
     interaction = EditorInteractionController(backend, engine)
+    viewport_input = ViewportInputController(backend, viewport, engine)
     hierarchy = HierarchyModel(interaction, engine)
     inspector = InspectorModel(interaction, engine)
     assets = AssetModel(interaction, backend, engine)
@@ -107,6 +121,8 @@ def create_application(
     backend.connected.connect(prime_frontend)
     root = engine.rootContext()
     root.setContextProperty("editorBridge", bridge)
+    root.setContextProperty("editorPreferences", preferences)
+    root.setContextProperty("editorTheme", theme)
     root.setContextProperty("editorInteraction", interaction)
     root.setContextProperty("hierarchyModel", hierarchy)
     root.setContextProperty("inspectorModel", inspector)
@@ -116,10 +132,13 @@ def create_application(
     root.setContextProperty("consoleModel", console)
     root.setContextProperty("profilerModel", profiler)
     root.setContextProperty("viewportController", viewport)
+    root.setContextProperty("viewportInput", viewport_input)
     qml_path = Path(__file__).parents[2] / "qml" / "Main.qml"
     engine.load(QUrl.fromLocalFile(str(qml_path)))
     app.aboutToQuit.connect(backend.close)
     app.aboutToQuit.connect(viewport.close)
+    app.aboutToQuit.connect(viewport_input.clear_transient)
+    app.aboutToQuit.connect(preferences.save)
     return app, engine, backend, viewport
 
 

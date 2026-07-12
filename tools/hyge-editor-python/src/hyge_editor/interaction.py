@@ -92,6 +92,21 @@ class EditorInteractionController(QObject):
         """Request an authoritative snapshot after a conflict or manual refresh."""
         self._session.request("request_world_snapshot")
 
+    @Slot()
+    def save_scene(self) -> None:
+        """Save the authoritative scene without changing local history."""
+        self._send_or_queue("save_scene", "save", {})
+
+    @Slot()
+    def undo(self) -> None:
+        """Undo the latest authoritative editor command."""
+        self._send_or_queue("undo", "undo", {"expected_revision": self._revision})
+
+    @Slot()
+    def redo(self) -> None:
+        """Redo the latest authoritative editor command."""
+        self._send_or_queue("redo", "redo", {"expected_revision": self._revision})
+
     def _send_or_report(self, kind: str, key: str, payload: dict[str, Any]) -> None:
         if self._pending is not None:
             self.commandError.emit("another editor command is still pending")

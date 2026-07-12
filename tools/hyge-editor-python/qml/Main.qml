@@ -3,11 +3,24 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 ApplicationWindow {
+    id: window
     visible: true
-    width: 1440
-    height: 900
+    width: editorPreferences.windowWidth
+    height: editorPreferences.windowHeight
     title: "Hyge Editor"
-    color: "#20242b"
+    color: editorTheme.window
+
+    property bool textEditorFocused: activeFocusItem && activeFocusItem.objectName === "editorTextField"
+    onWidthChanged: if (visible) editorPreferences.set_window_size(width, height)
+    onHeightChanged: if (visible) editorPreferences.set_window_size(width, height)
+    onActiveChanged: if (!active) viewportInput.clear_transient()
+
+    Shortcut { sequence: editorPreferences.shortcut("save"); enabled: !window.textEditorFocused; onActivated: editorInteraction.save_scene() }
+    Shortcut { sequence: editorPreferences.shortcut("undo"); enabled: !window.textEditorFocused; onActivated: editorInteraction.undo() }
+    Shortcut { sequence: editorPreferences.shortcut("redo"); enabled: !window.textEditorFocused; onActivated: editorInteraction.redo() }
+    Shortcut { sequence: editorPreferences.shortcut("focus_selection"); enabled: !window.textEditorFocused; onActivated: viewportInput.camera("focus", 0, 0) }
+    Shortcut { sequence: editorPreferences.shortcut("frame_selection"); enabled: !window.textEditorFocused; onActivated: viewportInput.camera("focus", 1, 0) }
+    Shortcut { sequence: editorPreferences.shortcut("toggle_play_editor"); enabled: !window.textEditorFocused; onActivated: editorPreferences.toggle_mode() }
 
     property int viewportRevision: 0
 
@@ -21,14 +34,30 @@ ApplicationWindow {
             anchors.fill: parent
             anchors.leftMargin: 12
             anchors.rightMargin: 12
-            Label { text: "HYGE"; font.bold: true; font.pixelSize: 18 }
-            Label { text: editorBridge.status; color: editorBridge.status === "Ready" ? "#9be7a5" : "#f2c879" }
+            Label { text: "HYGE"; color: editorTheme.text; font.bold: true; font.pixelSize: 18 }
+            Label { text: editorBridge.status; color: editorBridge.status === "Ready" ? editorTheme.ok : editorTheme.muted }
+            Label { text: editorPreferences.mode === "play" ? "PLAY" : "EDITOR"; color: editorTheme.accent; font.bold: true }
             Item { Layout.fillWidth: true }
-            Label { text: editorInteraction.hasConflict ? editorInteraction.conflictMessage : "Revision " + editorInteraction.revision; color: editorInteraction.hasConflict ? "#ed8b8b" : "#c4c9d4" }
-            Label { text: "Dropped: " + editorBridge.droppedFrames; color: "#c4c9d4" }
+            Label { text: editorInteraction.hasConflict ? editorInteraction.conflictMessage : "Revision " + editorInteraction.revision; color: editorInteraction.hasConflict ? editorTheme.error : editorTheme.muted }
+            Label { text: "Dropped: " + editorBridge.droppedFrames; color: editorTheme.muted }
             Button { text: "Connect"; onClicked: editorBridge.connect_backend() }
             Button { text: "Open Project"; onClicked: editorBridge.open_project() }
             Button { text: "Refresh"; onClicked: editorInteraction.refresh_snapshot() }
+            Button { text: editorPreferences.theme === "dark" ? "Light" : "Dark"; onClicked: { editorPreferences.toggle_theme(); editorTheme.apply() } }
+            Button { text: "Save"; onClicked: editorInteraction.save_scene() }
+            Button {
+                text: "Panels"
+                onClicked: panelMenu.open()
+                Menu {
+                    id: panelMenu
+                    MenuItem { text: "Hierarchy"; checkable: true; checked: editorPreferences.panel_visible("hierarchy"); onTriggered: editorPreferences.set_panel_visible("hierarchy", checked) }
+                    MenuItem { text: "Assets"; checkable: true; checked: editorPreferences.panel_visible("assets"); onTriggered: editorPreferences.set_panel_visible("assets", checked) }
+                    MenuItem { text: "Inspector"; checkable: true; checked: editorPreferences.panel_visible("inspector"); onTriggered: editorPreferences.set_panel_visible("inspector", checked) }
+                    MenuItem { text: "Console"; checkable: true; checked: editorPreferences.panel_visible("console"); onTriggered: editorPreferences.set_panel_visible("console", checked) }
+                    MenuItem { text: "Profiler"; checkable: true; checked: editorPreferences.panel_visible("profiler"); onTriggered: editorPreferences.set_panel_visible("profiler", checked) }
+                    MenuItem { text: "Asset Graph"; checkable: true; checked: editorPreferences.panel_visible("asset_graph"); onTriggered: editorPreferences.set_panel_visible("asset_graph", checked) }
+                }
+            }
         }
     }
 
@@ -37,15 +66,18 @@ ApplicationWindow {
 
         Frame {
             SplitView.preferredWidth: 330
+            SplitView.onPreferredWidthChanged: editorPreferences.set_left_width(SplitView.preferredWidth)
+            visible: editorPreferences.panel_visible("hierarchy") || editorPreferences.panel_visible("assets")
             ColumnLayout {
                 anchors.fill: parent
-                Label { text: "Hierarchy"; font.bold: true }
+                Label { text: "Hierarchy"; color: editorTheme.text; font.bold: true }
                 TreeView {
                     id: hierarchyTree
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     model: hierarchyModel
                     clip: true
+                    visible: editorPreferences.panel_visible("hierarchy")
                     delegate: ItemDelegate {
                         required property int row
                         required property int depth
@@ -77,12 +109,13 @@ ApplicationWindow {
                         }
                     }
                 }
-                Label { text: "Assets"; font.bold: true }
+                Label { text: "Assets"; color: editorTheme.text; font.bold: true }
                 ListView {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 160
                     model: assetModel
                     clip: true
+                    visible: editorPreferences.panel_visible("assets")
                     delegate: ItemDelegate {
                         width: ListView.view.width
                         text: model.name + "  (" + model.kind + ")"
@@ -93,11 +126,12 @@ ApplicationWindow {
                         ToolTip.text: model.path
                     }
                 }
-                Label { text: "Mesh Preview"; font.bold: true }
+                Label { text: "Mesh Preview"; color: editorTheme.text; font.bold: true }
                 Rectangle {
-                    Layout.fillWidth: true; Layout.preferredHeight: 150; color: "#101216"
+                    Layout.fillWidth: true; Layout.preferredHeight: 150; color: editorTheme.surfaceAlt
+                    visible: editorPreferences.panel_visible("assets")
                     Image { anchors.fill: parent; anchors.margins: 4; fillMode: Image.PreserveAspectFit; source: assetPreviewModel.source }
-                    Label { anchors.centerIn: parent; visible: assetPreviewModel.state !== "ready"; text: assetPreviewModel.error !== "" ? assetPreviewModel.error : "Double-click a mesh to preview"; color: "#9aa1ad"; wrapMode: Text.Wrap }
+                    Label { anchors.centerIn: parent; visible: assetPreviewModel.state !== "ready"; text: assetPreviewModel.error !== "" ? assetPreviewModel.error : "Double-click a mesh to preview"; color: editorTheme.muted; wrapMode: Text.Wrap }
                 }
             }
         }
@@ -107,27 +141,55 @@ ApplicationWindow {
             SplitView.fillHeight: true
             ColumnLayout {
                 anchors.fill: parent
-                Label { text: "Viewport"; font.bold: true }
-                Rectangle {
+                Label { text: "Viewport"; color: editorTheme.text; font.bold: true }
+                FocusScope {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    color: "#101216"
-                    Image {
+                    focus: true
+                    Keys.onPressed: { if (!event.isAutoRepeat) viewportInput.key(event.key.toString(), true); event.accepted = true }
+                    Keys.onReleased: { if (!event.isAutoRepeat) viewportInput.key(event.key.toString(), false); event.accepted = true }
+                    onActiveFocusChanged: if (!activeFocus) viewportInput.clear_transient()
+                    Rectangle {
                         anchors.fill: parent
-                        fillMode: Image.PreserveAspectFit
-                        source: "image://hyge-viewport/frame?" + viewportRevision
-                        asynchronous: true
+                        color: editorTheme.surfaceAlt
+                        Image {
+                            anchors.fill: parent
+                            fillMode: Image.PreserveAspectFit
+                            source: "image://hyge-viewport/frame?" + viewportRevision
+                            asynchronous: true
+                        }
+                        MouseArea {
+                            id: viewportMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            property real lastX: 0
+                            property real lastY: 0
+                            onPressed: {
+                                parent.parent.forceActiveFocus()
+                                lastX = mouse.x; lastY = mouse.y
+                                viewportInput.button(mouse.button.toString(), true)
+                            }
+                            onReleased: viewportInput.button(mouse.button.toString(), false)
+                            onPositionChanged: {
+                                if (pressed) {
+                                    viewportInput.mouse(mouse.x - lastX, mouse.y - lastY)
+                                    lastX = mouse.x; lastY = mouse.y
+                                }
+                            }
+                            onWheel: viewportInput.wheel(wheel.angleDelta.x, wheel.angleDelta.y)
+                        }
                     }
                     Label {
                         anchors.centerIn: parent
                         visible: viewportController.state !== "connected"
                         text: "Waiting for viewport frame"
-                        color: "#9aa1ad"
+                        color: editorTheme.muted
                     }
                 }
-                Label { text: "Console"; font.bold: true }
+                Label { text: "Console"; color: editorTheme.text; font.bold: true }
                 RowLayout {
                     Layout.fillWidth: true
+                    visible: editorPreferences.panel_visible("console")
                     ComboBox { id: levelFilter; model: ["", "trace", "debug", "info", "warn", "error"]; onActivated: consoleModel.set_filter(currentText, targetFilter.text) }
                     TextField { id: targetFilter; Layout.fillWidth: true; placeholderText: "Target prefix"; onAccepted: consoleModel.set_filter(levelFilter.currentText, text) }
                     Button { text: "Filter"; onClicked: consoleModel.set_filter(levelFilter.currentText, targetFilter.text) }
@@ -137,7 +199,8 @@ ApplicationWindow {
                     Layout.preferredHeight: 140
                     model: consoleModel
                     clip: true
-                    delegate: Label { width: ListView.view.width; text: model.display; color: "#c4c9d4"; elide: Text.ElideRight }
+                    visible: editorPreferences.panel_visible("console")
+                    delegate: Label { width: ListView.view.width; text: model.display; color: editorTheme.text; elide: Text.ElideRight }
                 }
                 Timer { interval: 750; running: editorBridge.status === "Ready"; repeat: true; onTriggered: consoleModel.refresh() }
             }
@@ -145,15 +208,18 @@ ApplicationWindow {
 
         Frame {
             SplitView.preferredWidth: 390
+            SplitView.onPreferredWidthChanged: editorPreferences.set_right_width(SplitView.preferredWidth)
+            visible: editorPreferences.panel_visible("inspector") || editorPreferences.panel_visible("profiler") || editorPreferences.panel_visible("asset_graph")
             ColumnLayout {
                 anchors.fill: parent
-                Label { text: "Inspector"; font.bold: true }
+                Label { text: "Inspector"; color: editorTheme.text; font.bold: true }
                 TreeView {
                     id: inspectorTree
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     model: inspectorModel
                     clip: true
+                    visible: editorPreferences.panel_visible("inspector")
                     delegate: ColumnLayout {
                         required property int depth
                         required property bool isTreeNode
@@ -162,11 +228,12 @@ ApplicationWindow {
                         RowLayout {
                             Layout.fillWidth: true
                             Layout.leftMargin: 8 + depth * 14
-                            Label { text: model.label; font.bold: model.nodeKind === "component"; Layout.preferredWidth: 120; elide: Text.ElideRight }
-                            Label { text: model.mixed ? "Multiple Values" : model.displayValue; color: model.error ? "#ed8b8b" : "#c4c9d4"; Layout.fillWidth: true; elide: Text.ElideRight }
+                            Label { text: model.label; color: editorTheme.text; font.bold: model.nodeKind === "component"; Layout.preferredWidth: 120; elide: Text.ElideRight }
+                            Label { text: model.mixed ? "Multiple Values" : model.displayValue; color: model.error ? editorTheme.error : editorTheme.text; Layout.fillWidth: true; elide: Text.ElideRight }
                             TextField {
                                 visible: model.editable && model.editorKind !== "group"
                                 Layout.preferredWidth: 150
+                                objectName: "editorTextField"
                                 text: model.mixed ? "" : model.displayValue
                                 placeholderText: model.mixed ? "Multiple Values" : ""
                                 onTextChanged: {
@@ -181,17 +248,18 @@ ApplicationWindow {
                                 }
                             }
                         }
-                        Label { visible: model.error !== ""; text: model.error; color: "#ed8b8b"; wrapMode: Text.Wrap; Layout.leftMargin: 8 + depth * 14 }
+                        Label { visible: model.error !== ""; text: model.error; color: editorTheme.error; wrapMode: Text.Wrap; Layout.leftMargin: 8 + depth * 14 }
                     }
                 }
-                Label { text: "Profiler"; font.bold: true }
+                Label { text: "Profiler"; color: editorTheme.text; font.bold: true }
                 Canvas {
                     id: profilerChart
                     Layout.fillWidth: true
                     Layout.preferredHeight: 90
+                    visible: editorPreferences.panel_visible("profiler")
                     onPaint: {
                         var ctx = getContext("2d")
-                        ctx.fillStyle = "#101216"; ctx.fillRect(0, 0, width, height)
+                        ctx.fillStyle = editorTheme.surfaceAlt; ctx.fillRect(0, 0, width, height)
                         var series = profilerModel.series
                         var samples = series.frame
                         var count = samples.length
@@ -219,14 +287,16 @@ ApplicationWindow {
                     Layout.preferredHeight: 160
                     model: profilerModel
                     clip: true
-                    delegate: Label { width: ListView.view.width; text: model.display; color: "#c4c9d4" }
+                    visible: editorPreferences.panel_visible("profiler")
+                    delegate: Label { width: ListView.view.width; text: model.display; color: editorTheme.text }
                 }
-                Label { text: "Asset Graph"; font.bold: true }
+                Label { text: "Asset Graph"; color: editorTheme.text; font.bold: true }
                 Flickable {
                     id: graphView
                     Layout.fillWidth: true
                     Layout.preferredHeight: 150
                     contentWidth: 800; contentHeight: 500; clip: true
+                    visible: editorPreferences.panel_visible("asset_graph")
                     Rectangle { width: graphView.contentWidth; height: graphView.contentHeight; color: "#15191f" }
                     Canvas {
                         id: graphLines

@@ -79,6 +79,11 @@ class ViewportController(QObject):
         """Return the current transport state."""
         return "connected" if self._reader is not None else "disconnected"
 
+    @Property(int, notify=transportChanged)
+    def generation(self) -> int:
+        """Return the current shared-memory transport generation."""
+        return self._generation
+
     @property
     def provider(self) -> ViewportImageProvider:
         """Return the image provider registered with the QML engine."""
@@ -143,4 +148,5 @@ class ViewportController(QObject):
         if self._reader is not None:
             self._reader.close()
             self._reader = None
+        self._generation = 0
         self.transportChanged.emit("disconnected")

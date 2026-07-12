@@ -1666,10 +1666,12 @@ title = "Qt theme, layout persistence and editor input"
 phase = "phase_11"
 owner = "editor"
 priority = "P1"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-089", "R-098"]
 summary = "Make the editor usable as a persistent desktop tool rather than a demo shell."
+completed_at = "2026-07-12"
+completion_notes = "Implemented the persistent Qt editor shell. EditorPreferences provides versioned global user_data/editor_layout.json state with validation, corrupt-file fallback, bounded geometry, debounce and same-directory fsync plus atomic replace. EditorTheme applies dark-by-default and light palettes through QApplication and QML color properties. Main.qml now restores window/split/panel visibility state, exposes panel toggles, theme toggle and Editor/Play presentation mode. EditorInteractionController serializes save, undo and redo against the authoritative revision. ViewportInputController coalesces revisioned keyboard/mouse/wheel/camera batches, resets on transport generation changes and releases transient input on focus loss/disconnect. Evidence: QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software python -m pytest -q tools/hyge-editor-python/tests (22 passed); cargo test -p hyge-editor --test r098_qt_contract -- --test-threads=1 (7 passed); cargo fmt --all -- --check; cargo clippy --workspace --all-targets -- --deny warnings; cargo test --workspace -- --test-threads=1; RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps. No Rust/schema changes were required."
 acceptance = [
   "dark theme is default with light-theme toggle",
   "panel layout persists atomically in user_data/editor_layout.json",
