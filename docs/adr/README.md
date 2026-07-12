@@ -36,6 +36,7 @@ This directory contains the Architecture Decision Records for the Hyge engine. E
 | [0014](0014-stable-msrv-1.80.md) | Stable only, MSRV 1.80 | Accepted | Build |
 | [0015](0015-python-qt-editor.md) | External PySide6/QML editor | Accepted | Editor |
 | [0016](0016-persistent-editor-scene-layer.md) | Persistent editor scene layer | Accepted | Editor/Scene |
+| [0018](0018-editor-scene-hot-reload.md) | Editor scene hot-reload ownership and conflict policy | Accepted | Editor/Scene |
 
 ## Conventions
 

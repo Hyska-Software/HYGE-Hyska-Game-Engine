@@ -20,9 +20,10 @@ pub use crate::prefab_asset::PrefabAsset;
 pub use crate::prefab_id::PrefabId;
 pub use crate::runtime::{
     load_world_document_from_bytes, load_world_document_from_path, reload_loaded_scene_from_disk,
-    resolve_static_mesh_asset_refs, resolve_static_mesh_asset_refs_system, scene_hot_reload_system,
-    EnvironmentLibrary, LoadedSceneState, PrefabLibrary, SceneDocumentDiff, SceneEnvironmentState,
-    SceneManagedEntity, ScenePostProcessState,
+    reload_loaded_scene_from_disk_detailed, resolve_static_mesh_asset_refs,
+    resolve_static_mesh_asset_refs_system, scene_hot_reload_system, EnvironmentLibrary,
+    LoadedSceneState, PrefabLibrary, SceneDocumentDiff, SceneEnvironmentState, SceneManagedEntity,
+    ScenePostProcessState, SceneReloadReport,
 };
 pub use crate::transform::{hierarchy_cleanup_system, transform_propagate_system};
 pub use crate::world::{PrefabInstance, WorldDocument, WorldLoader};

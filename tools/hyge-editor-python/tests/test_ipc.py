@@ -198,6 +198,15 @@ def test_schema_validates_every_declared_message_type():
             envelope["payload"] = {"samples": []}
         elif message_type == "asset_preview_ready":
             envelope["payload"] = {"job_id": "job", "state": "completed", "path": None, "width": None, "height": None, "hash": None}
+        elif message_type == "resolve_scene_reload":
+            envelope["payload"] = {"action": "keep_editor"}
+        elif message_type == "scene_reload_conflict":
+            envelope["payload"] = {
+                "path": "scene.hyge-world",
+                "external_asset_id": "0" * 64,
+                "dirty": True,
+                "actions": ["reload_discard", "keep_editor", "save_then_reload"],
+            }
         assert list(validator.iter_errors(envelope)) == [], message_type
 
 

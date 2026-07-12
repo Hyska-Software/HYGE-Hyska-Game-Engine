@@ -12,14 +12,14 @@ PROTOCOL_VERSION = 2
 SUPPORTED_PROTOCOL_VERSIONS = (1, PROTOCOL_VERSION)
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 MESSAGE_TYPES = {
-    "hello", "hello_ack", "open_project", "open_scene", "activate_asset", "save_scene", "request_world_snapshot",
+    "hello", "hello_ack", "open_project", "open_scene", "activate_asset", "save_scene", "resolve_scene_reload", "request_world_snapshot",
     "select_entities", "edit_component", "edit_components", "add_component", "remove_component",
     "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab",
     "undo", "redo", "set_editor_camera", "set_viewport_size", "open_viewport_transport", "close_viewport_transport", "viewport_input", "request_asset_preview",
     "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot",
     "cancel_asset_preview", "world_snapshot", "selection_changed", "component_changed",
     "asset_changed", "asset_snapshot", "console_snapshot", "profiler_snapshot",
-    "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available", "viewport_transport_ready", "viewport_transport_reset",
+    "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "scene_reload_conflict", "console_line", "profiler_sample", "viewport_frame_available", "viewport_transport_ready", "viewport_transport_reset",
     "command_completed", "engine_error", "server_shutdown", "lifecycle_status",
 }
 
@@ -195,6 +195,7 @@ class EditorClient:
             "request_asset_preview": "asset_preview_ready",
             "cancel_asset_preview": "asset_preview_cancelled",
             "request_world_snapshot": "selection_changed",
+            "resolve_scene_reload": "command_completed",
             "open_viewport_transport": "viewport_transport_ready",
             "viewport_transport_reset": "viewport_transport_reset",
             "server_shutdown": "server_shutdown",

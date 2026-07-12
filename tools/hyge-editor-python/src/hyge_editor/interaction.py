@@ -26,6 +26,7 @@ class EditorInteractionController(QObject):
     conflictFieldChanged = Signal(str)
     commandError = Signal(str)
     revisionChanged = Signal(int)
+    sceneReloadConflictChanged = Signal()
 
     def __init__(self, session: EditorSession, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -35,10 +36,17 @@ class EditorInteractionController(QObject):
         self._pending: _PendingMutation | None = None
         self._queued: dict[str, tuple[str, dict[str, Any]]] = {}
         self._conflict: dict[str, Any] | None = None
+        self._scene_reload_conflict: dict[str, Any] | None = None
         session.worldSnapshot.connect(self._on_snapshot)
         session.selectionChanged.connect(self._on_selection)
         session.commandCompleted.connect(self._on_command_completed)
         session.engineError.connect(self._on_error)
+        scene_conflict = getattr(session, "sceneReloadConflict", None)
+        if scene_conflict is not None:
+            scene_conflict.connect(self._on_scene_reload_conflict)
+        scene_reloaded = getattr(session, "sceneReloaded", None)
+        if scene_reloaded is not None:
+            scene_reloaded.connect(self._on_scene_reloaded)
 
     @Property(int, notify=revisionChanged)
     def revision(self) -> int:
@@ -54,6 +62,21 @@ class EditorInteractionController(QObject):
     def conflictMessage(self) -> str:
         """Return the current conflict diagnostic."""
         return (self._conflict or {}).get("message", "")
+
+    @Property(bool, notify=sceneReloadConflictChanged)
+    def hasSceneReloadConflict(self) -> bool:
+        """Return whether an external scene change needs a decision."""
+        return self._scene_reload_conflict is not None
+
+    @Property(str, notify=sceneReloadConflictChanged)
+    def sceneReloadPath(self) -> str:
+        """Return the path involved in the external reload conflict."""
+        return (self._scene_reload_conflict or {}).get("path", "")
+
+    @Slot(str)
+    def resolve_scene_reload(self, action: str) -> None:
+        """Send an explicit external scene reload decision to Rust."""
+        self._session.request("resolve_scene_reload", {"action": action})
 
     @Slot(int, bool)
     def select_entity(self, entity: int, shift: bool = False) -> None:
@@ -170,6 +193,16 @@ class EditorInteractionController(QObject):
         payload = {**payload, "expected_revision": self._revision}
         self._pending = _PendingMutation(kind, key)
         self._session.request(kind, payload)
+
+    def _on_scene_reload_conflict(self, envelope: Envelope) -> None:
+        payload = envelope.payload if hasattr(envelope, "payload") else envelope
+        self._scene_reload_conflict = dict(payload or {})
+        self.sceneReloadConflictChanged.emit()
+
+    def _on_scene_reloaded(self, _envelope: Envelope) -> None:
+        self._scene_reload_conflict = None
+        self.sceneReloadConflictChanged.emit()
+        self._session.request("request_world_snapshot")
 
     def _set_revision(self, revision: int) -> None:
         if revision != self._revision:

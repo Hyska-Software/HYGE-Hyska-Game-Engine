@@ -33,6 +33,8 @@ class EditorSession(QObject):
     profilerSnapshot = Signal(object)
     assetPreviewReady = Signal(object)
     assetPreviewCancelled = Signal(object)
+    sceneReloaded = Signal(object)
+    sceneReloadConflict = Signal(object)
     viewportTransportReady = Signal(object)
     viewportTransportReset = Signal(object)
     engineError = Signal(object)
@@ -145,6 +147,8 @@ class EditorSession(QObject):
             "profiler_snapshot": self.profilerSnapshot,
             "asset_preview_ready": self.assetPreviewReady,
             "asset_preview_cancelled": self.assetPreviewCancelled,
+            "scene_reloaded": self.sceneReloaded,
+            "scene_reload_conflict": self.sceneReloadConflict,
             "viewport_transport_ready": self.viewportTransportReady,
             "viewport_transport_reset": self.viewportTransportReset,
             "engine_error": self.engineError,

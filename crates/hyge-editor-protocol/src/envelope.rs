@@ -39,6 +39,8 @@ pub enum MessageType {
     ActivateAsset,
     /// Saves the active scene.
     SaveScene,
+    /// Resolves an external scene reload conflict.
+    ResolveSceneReload,
     /// Updates the editor selection.
     SelectEntities,
     /// Changes a reflected component field.
@@ -103,6 +105,8 @@ pub enum MessageType {
     AssetPreviewCancelled,
     /// Publishes a scene reload.
     SceneReloaded,
+    /// Requests a decision for an external scene reload conflict.
+    SceneReloadConflict,
     /// Publishes a console line.
     ConsoleLine,
     /// Publishes profiler data.

@@ -31,7 +31,9 @@ pub use data::{
     ProfilerSample, ProfilerSnapshot, ProfilerStore,
 };
 pub use history::CommandHistory;
-pub use lifecycle::{EditorSessionRuntime, LifecycleSnapshot, LifecycleState};
+pub use lifecycle::{
+    EditorSessionRuntime, LifecycleSnapshot, LifecycleState, PendingSceneReload, SceneReloadEvent,
+};
 pub use server::{EditorServer, EditorServerConfig};
 pub use snapshots::{
     build_snapshot, ComponentDescriptor, EditorSnapshot, EntityId, EntitySnapshot, FieldDescriptor,

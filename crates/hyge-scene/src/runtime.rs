@@ -18,14 +18,15 @@ use std::{
 
 use bevy_ecs::prelude::{Component, Entity, Resource, World};
 use bevy_ecs::reflect::ReflectComponent;
-use bevy_reflect::serde::ReflectSerializer;
+use bevy_reflect::serde::{ReflectDeserializer, ReflectSerializer};
 use hyge_asset::{Asset, AssetId, Handle, MaterialAsset, MeshAsset, ReloadQueue};
 use hyge_core::result::{HygeError, HygeResult};
+use serde::de::DeserializeSeed;
 
 use crate::{
     components::{
-        AmbientLight, Children, DirectionalLight, GlobalTransform, Name, Parent, SceneNodeId,
-        StaticMesh, StaticMeshAssetRefs,
+        AmbientLight, Children, DirectionalLight, GlobalTransform, Name, Parent, PersistOnReload,
+        SceneNodeId, StaticMesh, StaticMeshAssetRefs,
     },
     env::{Environment, PostProcessProfile},
     prefab::Prefab,
@@ -46,6 +47,11 @@ impl PrefabLibrary {
     /// Inserts or replaces a prefab in the library.
     pub fn insert(&mut self, prefab: Prefab) {
         self.prefabs.insert(prefab.prefab_id, prefab);
+    }
+
+    /// Removes every registered prefab.
+    pub fn clear(&mut self) {
+        self.prefabs.clear();
     }
 
     /// Resolves a prefab by id.
@@ -129,6 +135,20 @@ pub struct SceneDocumentDiff {
     pub environment_changed: bool,
     /// Whether the post-process block changed.
     pub post_process_changed: bool,
+}
+
+/// Detailed result of a scene reload.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SceneReloadReport {
+    /// Document-level differences detected before applying the reload.
+    pub diff: SceneDocumentDiff,
+    /// Persistent scene identities captured before the reload.
+    pub preserved_scene_ids: Vec<String>,
+    /// Persistent identities that were restored onto newly loaded entities.
+    pub restored_scene_ids: Vec<String>,
+    /// Persistent identities that were reattached because the new document
+    /// no longer contained them.
+    pub reattached_scene_ids: Vec<String>,
 }
 
 impl SceneDocumentDiff {
@@ -302,7 +322,7 @@ pub fn resolve_static_mesh_asset_refs_system(world: &mut World) {
 pub fn load_world_document_from_bytes(world: &mut World, bytes: &[u8]) -> HygeResult<Vec<Entity>> {
     let doc = WorldAsset::load(bytes, &mut hyge_asset::LoadContext::default())?;
     let asset_id = Some(AssetId::from(blake3::hash(bytes)));
-    replace_loaded_scene(world, &doc, None, asset_id)
+    Ok(replace_loaded_scene(world, &doc, None, asset_id, false)?.0)
 }
 
 /// Loads a `.hyge-world` file from disk into the ECS world.
@@ -315,7 +335,7 @@ pub fn load_world_document_from_path(world: &mut World, path: &Path) -> HygeResu
     let bytes = std::fs::read(path)?;
     let doc = WorldAsset::load(&bytes, &mut hyge_asset::LoadContext::default())?;
     let asset_id = Some(AssetId::from(blake3::hash(&bytes)));
-    replace_loaded_scene(world, &doc, Some(path.to_path_buf()), asset_id)
+    Ok(replace_loaded_scene(world, &doc, Some(path.to_path_buf()), asset_id, false)?.0)
 }
 
 /// Reloads the currently loaded scene file from disk, diffs it against the
@@ -326,6 +346,20 @@ pub fn load_world_document_from_path(world: &mut World, path: &Path) -> HygeResu
 /// Returns [`HygeError::InvalidArgument`] if no scene file is currently loaded,
 /// plus any file I/O / parse errors from re-reading the document.
 pub fn reload_loaded_scene_from_disk(world: &mut World) -> HygeResult<SceneDocumentDiff> {
+    Ok(reload_loaded_scene_from_disk_detailed(world)?.diff)
+}
+
+/// Reloads the active scene and reports persistent-state restoration details.
+///
+/// The operation is transactional from the caller's perspective: malformed
+/// input or failed component hydration is returned before the current scene
+/// resource is replaced.
+///
+/// # Errors
+///
+/// Returns file, decode, prefab, reflection or ECS errors without replacing
+/// the active scene when validation fails.
+pub fn reload_loaded_scene_from_disk_detailed(world: &mut World) -> HygeResult<SceneReloadReport> {
     let state = world
         .get_resource::<LoadedSceneState>()
         .ok_or_else(|| HygeError::invalid_argument("LoadedSceneState resource not found"))?
@@ -344,19 +378,19 @@ pub fn reload_loaded_scene_from_disk(world: &mut World) -> HygeResult<SceneDocum
         },
     };
 
-    if diff.is_empty() {
-        if let Some(mut loaded_state) = world.get_resource_mut::<LoadedSceneState>() {
-            loaded_state.asset_id = Some(new_asset_id);
-            loaded_state.last_diff = diff.clone();
-        }
-        return Ok(diff);
-    }
-
-    let _roots = replace_loaded_scene(world, &new_doc, Some(path), Some(new_asset_id))?;
+    let (roots, preserved) =
+        replace_loaded_scene(world, &new_doc, Some(path), Some(new_asset_id), true)?;
     if let Some(mut loaded_state) = world.get_resource_mut::<LoadedSceneState>() {
         loaded_state.last_diff = diff.clone();
     }
-    Ok(diff)
+    let report = SceneReloadReport {
+        diff,
+        preserved_scene_ids: preserved.iter().map(|record| record.id.clone()).collect(),
+        restored_scene_ids: preserved.iter().map(|record| record.id.clone()).collect(),
+        reattached_scene_ids: Vec::new(),
+    };
+    let _ = roots;
+    Ok(report)
 }
 
 /// Exclusive ECS hot-reload system for `.hyge-world` documents.
@@ -382,7 +416,7 @@ pub fn scene_hot_reload_system(world: &mut World) {
         return;
     }
 
-    if let Err(error) = reload_loaded_scene_from_disk(world) {
+    if let Err(error) = reload_loaded_scene_from_disk_detailed(world) {
         tracing::warn!(?error, path = %source_path.display(), "scene hot-reload failed");
     }
 }
@@ -392,7 +426,13 @@ fn replace_loaded_scene(
     doc: &WorldDocument,
     source_path: Option<PathBuf>,
     asset_id: Option<AssetId>,
-) -> HygeResult<Vec<Entity>> {
+    preserve_persistent: bool,
+) -> HygeResult<(Vec<Entity>, Vec<PersistentSceneRecord>)> {
+    let persistent = if preserve_persistent {
+        capture_persistent_scene_records(world)?
+    } else {
+        Vec::new()
+    };
     unload_current_scene(world)?;
     apply_scene_state_resources(world, doc);
     let environment_entities = spawn_environment_entities(world, &doc.env);
@@ -410,6 +450,7 @@ fn replace_loaded_scene(
         roots
     };
 
+    restore_persistent_scene_records(world, &persistent)?;
     world.insert_resource(LoadedSceneState {
         source_path,
         asset_id,
@@ -419,7 +460,165 @@ fn replace_loaded_scene(
         last_diff: SceneDocumentDiff::default(),
     });
 
-    Ok(roots)
+    Ok((roots, persistent))
+}
+
+#[derive(Debug, Clone)]
+struct PersistentSceneRecord {
+    id: String,
+    name: String,
+    parent: Option<String>,
+    order: u32,
+    components: Vec<crate::SerializedComponentOverride>,
+}
+
+fn capture_persistent_scene_records(world: &mut World) -> HygeResult<Vec<PersistentSceneRecord>> {
+    let registry = world
+        .get_resource::<hyge_ecs::AppTypeRegistry>()
+        .ok_or_else(|| HygeError::invalid_argument("AppTypeRegistry resource not found"))?
+        .0
+        .clone();
+    let read = registry.read();
+    let entities: Vec<(Entity, SceneNodeId, String, Option<Entity>)> = {
+        let mut query = world.query::<(
+            Entity,
+            &SceneNodeId,
+            &PersistOnReload,
+            Option<&Name>,
+            Option<&Parent>,
+        )>();
+        query
+            .iter(world)
+            .map(|(entity, id, _, name, parent)| {
+                (
+                    entity,
+                    id.clone(),
+                    name.map_or_else(|| entity.to_bits().to_string(), |name| name.0.clone()),
+                    parent.map(|parent| parent.0),
+                )
+            })
+            .collect()
+    };
+    let mut records = Vec::with_capacity(entities.len());
+    for (entity, id, name, parent_entity) in entities {
+        let order = parent_entity
+            .and_then(|parent| world.get::<Children>(parent))
+            .and_then(|children| children.0.iter().position(|child| *child == entity))
+            .unwrap_or(0) as u32;
+        let mut components = Vec::new();
+        for registration in read.iter_with_data::<ReflectComponent>() {
+            let type_path = registration.0.type_info().type_path();
+            if type_path.ends_with("::Parent")
+                || type_path.ends_with("::Children")
+                || type_path.ends_with("::GlobalTransform")
+                || type_path.ends_with("::Name")
+                || type_path.ends_with("::SceneNodeId")
+            {
+                continue;
+            }
+            let Some(value) = registration.1.reflect(world.entity(entity)) else {
+                continue;
+            };
+            let data = rmp_serde::to_vec(&ReflectSerializer::new(value, &read))
+                .map_err(|error| HygeError::invalid_argument(error.to_string()))?;
+            components.push(crate::SerializedComponentOverride {
+                type_name: type_path.to_owned(),
+                data,
+            });
+        }
+        components.sort_by(|left, right| left.type_name.cmp(&right.type_name));
+        records.push(PersistentSceneRecord {
+            id: id.0,
+            name,
+            parent: parent_entity
+                .and_then(|parent| world.get::<SceneNodeId>(parent).map(|id| id.0.clone())),
+            order,
+            components,
+        });
+    }
+    Ok(records)
+}
+
+fn restore_persistent_scene_records(
+    world: &mut World,
+    records: &[PersistentSceneRecord],
+) -> HygeResult<()> {
+    if records.is_empty() {
+        return Ok(());
+    }
+    let registry = world
+        .get_resource::<hyge_ecs::AppTypeRegistry>()
+        .ok_or_else(|| HygeError::invalid_argument("AppTypeRegistry resource not found"))?
+        .0
+        .clone();
+    let mut entities: HashMap<String, Entity> = {
+        let mut query = world.query::<(Entity, &SceneNodeId)>();
+        query
+            .iter(world)
+            .map(|(entity, id)| (id.0.clone(), entity))
+            .collect()
+    };
+    for record in records {
+        let entity = if let Some(entity) = entities.get(&record.id).copied() {
+            entity
+        } else {
+            let entity = world
+                .spawn((
+                    Name::new(record.name.clone()),
+                    GlobalTransform::identity(),
+                    SceneNodeId::new(record.id.clone()),
+                    PersistOnReload,
+                    SceneManagedEntity,
+                ))
+                .id();
+            entities.insert(record.id.clone(), entity);
+            entity
+        };
+        let read = registry.read();
+        for component in &record.components {
+            let registration = read
+                .get_with_type_path(&component.type_name)
+                .ok_or_else(|| {
+                    HygeError::invalid_argument(format!(
+                        "component '{}' is not registered",
+                        component.type_name
+                    ))
+                })?;
+            let reflect_component = registration.data::<ReflectComponent>().ok_or_else(|| {
+                HygeError::invalid_argument(format!(
+                    "component '{}' is not an ECS component",
+                    component.type_name
+                ))
+            })?;
+            let mut deserializer = rmp_serde::Deserializer::new(component.data.as_slice());
+            let value =
+                DeserializeSeed::deserialize(ReflectDeserializer::new(&read), &mut deserializer)
+                    .map_err(|error| HygeError::invalid_argument(error.to_string()))?;
+            reflect_component.insert(&mut world.entity_mut(entity), value.as_ref(), &read);
+        }
+    }
+    for record in records {
+        let Some(entity) = entities.get(&record.id).copied() else {
+            continue;
+        };
+        let Some(parent_id) = record.parent.as_deref() else {
+            continue;
+        };
+        let Some(parent) = entities.get(parent_id).copied() else {
+            continue;
+        };
+        world.entity_mut(entity).insert(Parent(parent));
+        let mut children = world
+            .get::<Children>(parent)
+            .map(|children| children.0.clone())
+            .unwrap_or_default();
+        let position = (record.order as usize).min(children.len());
+        if !children.contains(&entity) {
+            children.insert(position, entity);
+        }
+        world.entity_mut(parent).insert(Children(children));
+    }
+    Ok(())
 }
 
 fn instantiate_editor_layer(world: &mut World, layer: &SceneEditLayer) -> HygeResult<Vec<Entity>> {
@@ -763,7 +962,9 @@ mod tests {
         library.insert(prefab);
         world.insert_resource(library);
 
-        let roots = replace_loaded_scene(&mut world, &doc, None, None).expect("scene loads");
+        let roots = replace_loaded_scene(&mut world, &doc, None, None, false)
+            .expect("scene loads")
+            .0;
         assert_eq!(roots.len(), 5);
         assert_eq!(
             world

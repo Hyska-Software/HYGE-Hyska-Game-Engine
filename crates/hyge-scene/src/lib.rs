@@ -41,9 +41,10 @@ pub use prefab_id::PrefabId;
 pub use runtime::{
     assign_legacy_scene_node_ids, assign_new_scene_node_ids, capture_editor_scene_layer,
     load_world_document_from_bytes, load_world_document_from_path, reload_loaded_scene_from_disk,
-    resolve_static_mesh_asset_refs, resolve_static_mesh_asset_refs_system, scene_hot_reload_system,
-    sync_editor_layer_from_world, EnvironmentLibrary, LoadedSceneState, PrefabLibrary,
-    SceneDocumentDiff, SceneEnvironmentState, SceneManagedEntity, ScenePostProcessState,
+    reload_loaded_scene_from_disk_detailed, resolve_static_mesh_asset_refs,
+    resolve_static_mesh_asset_refs_system, scene_hot_reload_system, sync_editor_layer_from_world,
+    EnvironmentLibrary, LoadedSceneState, PrefabLibrary, SceneDocumentDiff, SceneEnvironmentState,
+    SceneManagedEntity, ScenePostProcessState, SceneReloadReport,
 };
 pub use world::{
     PrefabInstance, SceneEditLayer, SceneNodeRecord, WorldDocument, WorldLoader,

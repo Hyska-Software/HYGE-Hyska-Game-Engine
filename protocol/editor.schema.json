@@ -13,14 +13,14 @@
     "message_type": {
       "type": "string",
       "enum": [
-        "hello", "hello_ack", "open_project", "open_scene", "activate_asset", "save_scene",
+        "hello", "hello_ack", "open_project", "open_scene", "activate_asset", "save_scene", "resolve_scene_reload",
         "select_entities", "edit_component", "edit_components", "add_component", "remove_component",
         "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab",
         "undo", "redo", "set_editor_camera", "set_viewport_size", "open_viewport_transport", "close_viewport_transport", "viewport_input", "request_asset_preview",
         "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot",
         "cancel_asset_preview", "request_world_snapshot", "world_snapshot", "selection_changed", "component_changed",
         "asset_changed", "asset_snapshot", "console_snapshot", "profiler_snapshot",
-        "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available", "viewport_transport_ready", "viewport_transport_reset",
+        "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "scene_reload_conflict", "console_line", "profiler_sample", "viewport_frame_available", "viewport_transport_ready", "viewport_transport_reset",
         "command_completed", "engine_error", "server_shutdown", "lifecycle_status"
       ]
     },
@@ -156,6 +156,14 @@
     {
       "if": { "properties": { "message_type": { "const": "asset_preview_ready" } } },
       "then": { "properties": { "payload": { "$ref": "#/$defs/preview_result_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "resolve_scene_reload" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/scene_reload_resolution_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "scene_reload_conflict" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/scene_reload_conflict_payload" } } }
     }
   ],
   "$defs": {
@@ -394,11 +402,30 @@
     },
     "history_payload": {
       "allOf": [ { "$ref": "#/$defs/revision_payload" } ]
+    },
+    "scene_reload_resolution_payload": {
+      "type": "object",
+      "required": ["action"],
+      "additionalProperties": false,
+      "properties": {
+        "action": { "enum": ["reload_discard", "keep_editor", "save_then_reload"] }
+      }
+    },
+    "scene_reload_conflict_payload": {
+      "type": "object",
+      "required": ["path", "external_asset_id", "dirty", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "external_asset_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "dirty": { "const": true },
+        "actions": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["reload_discard", "keep_editor", "save_then_reload"] } }
+      }
     }
   },
   "x-hyge-message-directions": {
-    "requests": ["hello", "open_project", "open_scene", "activate_asset", "request_world_snapshot", "save_scene", "select_entities", "edit_component", "edit_components", "add_component", "remove_component", "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab", "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview", "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot", "cancel_asset_preview", "server_shutdown"],
+    "requests": ["hello", "open_project", "open_scene", "activate_asset", "request_world_snapshot", "save_scene", "resolve_scene_reload", "select_entities", "edit_component", "edit_components", "add_component", "remove_component", "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab", "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview", "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot", "cancel_asset_preview", "server_shutdown"],
     "responses": ["hello_ack", "command_completed", "engine_error", "asset_snapshot", "console_snapshot", "profiler_snapshot", "asset_preview_ready", "asset_preview_cancelled"],
-    "events": ["lifecycle_status", "world_snapshot", "selection_changed", "component_changed", "asset_changed", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available"]
+    "events": ["lifecycle_status", "world_snapshot", "selection_changed", "component_changed", "asset_changed", "scene_reloaded", "scene_reload_conflict", "console_line", "profiler_sample", "viewport_frame_available"]
   }
 }

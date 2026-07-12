@@ -431,12 +431,14 @@ fn handle_authenticated(
             }
         }
     };
-    match envelope.message_type.clone() {
+    let mut responses = poll_scene_events(&runtime, &binding.session_id);
+    responses.extend(match envelope.message_type.clone() {
         MessageType::OpenProject => lifecycle_open_project(envelope, sessions, binding, runtime),
         MessageType::OpenScene => lifecycle_open_scene(envelope, sessions, binding, runtime),
         MessageType::ActivateAsset => asset_activate(envelope, sessions, binding, runtime),
         MessageType::RequestWorldSnapshot => world_snapshot_request(envelope, runtime),
         MessageType::SaveScene => lifecycle_save_scene(envelope, runtime, &binding.session_id),
+        MessageType::ResolveSceneReload => resolve_scene_reload(envelope, runtime),
         MessageType::SelectEntities => {
             lifecycle_select_entities(envelope, runtime, &binding.session_id)
         }
@@ -481,7 +483,49 @@ fn handle_authenticated(
                 "editor command is reserved for a later editor milestone",
             )]
         }
+    });
+    responses
+}
+
+fn poll_scene_events(runtime: &crate::lifecycle::RuntimeHandle, session_id: &str) -> Vec<Envelope> {
+    let result = runtime
+        .lock()
+        .ok()
+        .and_then(|mut runtime| runtime.poll_scene_reload().ok().flatten());
+    match result {
+        Some(crate::lifecycle::SceneReloadEvent::Conflict(conflict)) => vec![Envelope::new(
+            format!("scene-reload-conflict-{session_id}"),
+            MessageType::SceneReloadConflict,
+            serde_json::json!({
+                "path": conflict.path.display().to_string(),
+                "external_asset_id": asset_id_string(conflict.external_asset_id),
+                "dirty": true,
+                "actions": ["reload_discard", "keep_editor", "save_then_reload"]
+            }),
+        )],
+        Some(crate::lifecycle::SceneReloadEvent::Reloaded(report)) => vec![Envelope::new(
+            format!("scene-reloaded-{session_id}"),
+            MessageType::SceneReloaded,
+            serde_json::json!({
+                "session_id": session_id,
+                "diff": {
+                    "added_instances": report.diff.added_instances,
+                    "removed_instances": report.diff.removed_instances,
+                    "changed_instances": report.diff.changed_instances,
+                    "environment_changed": report.diff.environment_changed,
+                    "post_process_changed": report.diff.post_process_changed
+                },
+                "preserved_scene_ids": report.preserved_scene_ids,
+                "restored_scene_ids": report.restored_scene_ids,
+                "reattached_scene_ids": report.reattached_scene_ids
+            }),
+        )],
+        None => Vec::new(),
     }
+}
+
+fn asset_id_string(id: hyge_asset::AssetId) -> String {
+    id.0.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn viewport_open_transport(
@@ -1275,6 +1319,64 @@ fn lifecycle_save_scene(
             error.to_string(),
         )],
     }
+}
+
+fn resolve_scene_reload(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    let Some(action) = envelope
+        .payload
+        .get("action")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "invalid_request",
+            "resolve_scene_reload requires action",
+        )];
+    };
+    let result = runtime
+        .lock()
+        .map_err(|_| HygeError::invalid_argument("runtime lock poisoned"))
+        .and_then(|mut runtime| runtime.resolve_scene_reload(action));
+    match result {
+        Ok(Some(report)) => vec![
+            Envelope::new(
+                format!("scene-reloaded-{}", envelope.message_id),
+                MessageType::SceneReloaded,
+                serde_json::json!({
+                    "diff": {
+                        "added_instances": report.diff.added_instances,
+                        "removed_instances": report.diff.removed_instances,
+                        "changed_instances": report.diff.changed_instances,
+                        "environment_changed": report.diff.environment_changed,
+                        "post_process_changed": report.diff.post_process_changed
+                    },
+                    "preserved_scene_ids": report.preserved_scene_ids,
+                    "restored_scene_ids": report.restored_scene_ids,
+                    "reattached_scene_ids": report.reattached_scene_ids
+                }),
+            ),
+            command_completed_simple(envelope, "resolve_scene_reload"),
+        ],
+        Ok(None) => vec![command_completed_simple(envelope, "resolve_scene_reload")],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "scene_reload_failed",
+            error.to_string(),
+        )],
+    }
+}
+
+fn command_completed_simple(envelope: &Envelope, command: &str) -> Envelope {
+    let mut response = Envelope::new(
+        &envelope.message_id,
+        MessageType::CommandCompleted,
+        serde_json::json!({"command": command}),
+    );
+    response.correlation_id = Some(envelope.message_id.clone());
+    response
 }
 
 fn lifecycle_status(

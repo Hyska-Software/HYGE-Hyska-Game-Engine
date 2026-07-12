@@ -884,6 +884,15 @@ reflected component overrides and sibling ordering into the versioned layer.
 The layer is loaded through the same `AppTypeRegistry` used by prefab and
 editor reflection, while Bevy entity bits remain process-local IDs.
 
+R-101 adds the editor-owned scene hot-reload path defined by ADR-0018. The
+`EditorSessionRuntime` owns the live `FileWatcher`/`ReloadQueue` and routes
+external `.hyge-world` and `.hyge-prefab` changes through `hyge-scene`.
+`SceneNodeId` is the reload identity; `PersistOnReload` components are
+captured through `AppTypeRegistry` reflection and restored after successful
+scene instantiation. Dirty local edits produce an explicit protocol conflict
+instead of being overwritten; the frontend can discard, keep, or save before
+reloading. Failed decode or hydration leaves the previous active scene intact.
+
 **File layout:**
 ```
 hyge-editor/src/

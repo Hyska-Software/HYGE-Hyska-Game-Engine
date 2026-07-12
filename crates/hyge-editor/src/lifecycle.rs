@@ -1,17 +1,18 @@
 //! Engine-owned project and scene lifecycle.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use atomicwrites::{AllowOverwrite, AtomicFile};
 use bevy_app::App;
 use bevy_ecs::world::World;
-use hyge_asset::{AssetDb, AssetId};
+use hyge_asset::{AssetDb, AssetId, AssetResolver, FileWatcher, ReloadQueue};
 use hyge_core::result::{HygeError, HygeResult};
 use hyge_ecs::plugin::HygePlugin;
 use hyge_scene::{
-    load_world_document_from_path, sync_editor_layer_from_world, LoadedSceneState, PrefabId,
-    ScenePlugin, Transform,
+    load_world_document_from_path, reload_loaded_scene_from_disk_detailed,
+    sync_editor_layer_from_world, LoadedSceneState, PrefabId, ScenePlugin, SceneReloadReport,
+    Transform,
 };
 
 use crate::commands::{CommandEffect, CommandFailure, EditorCommand};
@@ -80,6 +81,28 @@ pub struct EditorSessionRuntime {
     editor_camera: EditorCameraState,
     viewport: ViewportState,
     input: InputBridge,
+    watcher: Option<FileWatcher>,
+    reload_queue: Option<ReloadQueue>,
+    saved_snapshot_revision: u64,
+    pending_reload: Option<PendingSceneReload>,
+}
+
+/// External scene change waiting for an explicit editor decision.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingSceneReload {
+    /// Changed path.
+    pub path: PathBuf,
+    /// Content hash observed by the watcher.
+    pub external_asset_id: AssetId,
+}
+
+/// Result of polling the editor-owned scene watcher.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SceneReloadEvent {
+    /// The scene was applied.
+    Reloaded(SceneReloadReport),
+    /// The external file changed while local state was dirty.
+    Conflict(PendingSceneReload),
 }
 
 impl EditorSessionRuntime {
@@ -106,6 +129,10 @@ impl EditorSessionRuntime {
             editor_camera: EditorCameraState::default(),
             viewport: ViewportState::default(),
             input: InputBridge::default(),
+            watcher: None,
+            reload_queue: None,
+            saved_snapshot_revision: 0,
+            pending_reload: None,
         }
     }
 
@@ -125,6 +152,21 @@ impl EditorSessionRuntime {
             diagnostics.push("project contains no .hyge-prefab files".to_owned());
         }
         self.world = candidate;
+        let queue = ReloadQueue::new();
+        let resolver: AssetResolver =
+            Arc::new(
+                |path| match path.extension().and_then(|extension| extension.to_str()) {
+                    Some("hyge-world") | Some("hyge-prefab") => std::fs::read(path)
+                        .ok()
+                        .map(|bytes| AssetId::from(blake3::hash(&bytes))),
+                    _ => None,
+                },
+            );
+        let watcher =
+            FileWatcher::watch_paths(vec![project.root.clone()], queue.clone(), resolver)?;
+        self.world.insert_resource(queue.clone());
+        self.watcher = Some(watcher);
+        self.reload_queue = Some(queue);
         self.project = Some(project);
         self.data
             .previews
@@ -137,6 +179,8 @@ impl EditorSessionRuntime {
         self.viewport.state = crate::viewport::ViewportRenderState::Ready;
         self.selection.clear();
         self.history.clear();
+        self.saved_snapshot_revision = self.snapshot_revision;
+        self.pending_reload = None;
         self.snapshot = self.make_snapshot(
             if diagnostics.is_empty() {
                 LifecycleState::Ready
@@ -182,8 +226,84 @@ impl EditorSessionRuntime {
         self.viewport.state = crate::viewport::ViewportRenderState::Ready;
         self.selection.clear();
         self.history.clear();
+        self.saved_snapshot_revision = self.snapshot_revision;
+        self.pending_reload = None;
         self.snapshot = self.make_snapshot(LifecycleState::Ready, Vec::new());
         Ok(self.snapshot.clone())
+    }
+
+    /// Returns whether local editor state changed since the last accepted save
+    /// or reload.
+    #[must_use]
+    pub fn is_scene_dirty(&self) -> bool {
+        self.snapshot_revision != self.saved_snapshot_revision
+    }
+
+    /// Polls the editor-owned scene watcher and applies a clean external edit.
+    pub fn poll_scene_reload(&mut self) -> HygeResult<Option<SceneReloadEvent>> {
+        let Some(queue) = self.reload_queue.clone() else {
+            return Ok(None);
+        };
+        let Some(scene) = self.scene.clone() else {
+            let _ = queue.drain();
+            return Ok(None);
+        };
+        let events = queue.drain();
+        let Some((path, asset_id)) = events.into_iter().find(|(path, _)| {
+            path == &scene
+                || matches!(
+                    path.extension().and_then(|extension| extension.to_str()),
+                    Some("hyge-prefab")
+                )
+        }) else {
+            return Ok(None);
+        };
+        let pending = PendingSceneReload {
+            path,
+            external_asset_id: asset_id,
+        };
+        if self.is_scene_dirty() {
+            self.pending_reload = Some(pending.clone());
+            return Ok(Some(SceneReloadEvent::Conflict(pending)));
+        }
+        Ok(Some(SceneReloadEvent::Reloaded(
+            self.apply_external_reload()?,
+        )))
+    }
+
+    /// Resolves a pending external-edit conflict.
+    pub fn resolve_scene_reload(&mut self, action: &str) -> HygeResult<Option<SceneReloadReport>> {
+        if self.pending_reload.take().is_none() {
+            return Err(HygeError::invalid_argument(
+                "no pending scene reload conflict",
+            ));
+        }
+        match action {
+            "reload_discard" => Ok(Some(self.apply_external_reload()?)),
+            "keep_editor" => Ok(None),
+            "save_then_reload" => {
+                self.save_scene()?;
+                Ok(Some(self.apply_external_reload()?))
+            }
+            _ => Err(HygeError::invalid_argument(format!(
+                "unsupported scene reload action '{action}'"
+            ))),
+        }
+    }
+
+    fn apply_external_reload(&mut self) -> HygeResult<SceneReloadReport> {
+        if let Some(project) = self.project.as_ref() {
+            if let Some(mut library) = self.world.get_resource_mut::<hyge_scene::PrefabLibrary>() {
+                library.clear();
+                project.load_prefabs(&mut library)?;
+            }
+        }
+        let report = reload_loaded_scene_from_disk_detailed(&mut self.world)?;
+        self.filter_selection_to_live_entities();
+        self.bump_snapshot_revision();
+        self.saved_snapshot_revision = self.snapshot_revision;
+        self.snapshot = self.make_snapshot(LifecycleState::Ready, Vec::new());
+        Ok(report)
     }
 
     /// Atomically persists the currently loaded world document.
@@ -224,6 +344,7 @@ impl EditorSessionRuntime {
         self.viewport.scene_revision = self.snapshot_revision;
         self.viewport.last_frame_revision = None;
         self.snapshot = self.make_snapshot(LifecycleState::Ready, Vec::new());
+        self.saved_snapshot_revision = self.snapshot_revision;
         Ok(self.snapshot.clone())
     }
 

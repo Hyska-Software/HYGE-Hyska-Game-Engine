@@ -1686,7 +1686,7 @@ title = "Scene hot-reload and PersistOnReload integration"
 phase = "phase_12"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "high"
 dependencies = ["R-082", "R-084", "R-098"]
 summary = "Connect FileWatcher/world diff/reinstantiation to the live editor session without losing persistent state."
@@ -1697,6 +1697,8 @@ acceptance = [
   "unsaved editor changes produce an explicit conflict decision",
   "test: real fixture reload preserves persistent state and refreshes snapshots"
 ]
+completed_at = "2026-07-12"
+completion_notes = "Implemented the R-101 scene reload path end-to-end. hyge-scene now exposes SceneReloadReport, captures reflected PersistOnReload components by SceneNodeId before replacement, restores hierarchy/components after successful reload, and preserves the previous scene on decode/hydration failure. hyge-editor now owns a real project FileWatcher/ReloadQueue, polls .hyge-world/.hyge-prefab changes, tracks dirty snapshot state, emits explicit reload conflicts, and supports reload_discard, keep_editor and save_then_reload. The protocol/schema adds resolve_scene_reload and scene_reload_conflict/scene_reloaded payloads; the Python session/controller/QML surface receives events and presents the three-way decision dialog. Evidence: cargo test -p hyge-scene --test r101_persist_reload -- --test-threads=1, cargo test -p hyge-editor --test r101_scene_hot_reload -- --test-threads=1, cargo test --workspace -- --test-threads=1, cargo clippy --workspace --all-targets -- --deny warnings, RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps, and QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software python -m pytest -q tools/hyge-editor-python/tests (22 passed). ADR-0018, architecture.md and the R-101 goal package document ownership and conflict policy."
 
 [[items]]
 id = "R-102"

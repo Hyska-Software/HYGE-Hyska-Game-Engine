@@ -39,6 +39,7 @@ ApplicationWindow {
             Label { text: editorPreferences.mode === "play" ? "PLAY" : "EDITOR"; color: editorTheme.accent; font.bold: true }
             Item { Layout.fillWidth: true }
             Label { text: editorInteraction.hasConflict ? editorInteraction.conflictMessage : "Revision " + editorInteraction.revision; color: editorInteraction.hasConflict ? editorTheme.error : editorTheme.muted }
+            Label { visible: editorInteraction.hasSceneReloadConflict; text: "External scene change"; color: editorTheme.error }
             Label { text: "Dropped: " + editorBridge.droppedFrames; color: editorTheme.muted }
             Button { text: "Connect"; onClicked: editorBridge.connect_backend() }
             Button { text: "Open Project"; onClicked: editorBridge.open_project() }
@@ -57,6 +58,22 @@ ApplicationWindow {
                     MenuItem { text: "Profiler"; checkable: true; checked: editorPreferences.panel_visible("profiler"); onTriggered: editorPreferences.set_panel_visible("profiler", checked) }
                     MenuItem { text: "Asset Graph"; checkable: true; checked: editorPreferences.panel_visible("asset_graph"); onTriggered: editorPreferences.set_panel_visible("asset_graph", checked) }
                 }
+            }
+        }
+    }
+
+    Dialog {
+        id: sceneReloadDialog
+        modal: true
+        title: "Scene changed on disk"
+        standardButtons: Dialog.NoButton
+        visible: editorInteraction.hasSceneReloadConflict
+        contentItem: ColumnLayout {
+            Label { text: "The scene changed outside the editor:\n" + editorInteraction.sceneReloadPath; wrapMode: Text.WordWrap }
+            RowLayout {
+                Button { text: "Reload"; onClicked: { editorInteraction.resolve_scene_reload("reload_discard"); sceneReloadDialog.close() } }
+                Button { text: "Keep editor"; onClicked: { editorInteraction.resolve_scene_reload("keep_editor"); sceneReloadDialog.close() } }
+                Button { text: "Save then reload"; onClicked: { editorInteraction.resolve_scene_reload("save_then_reload"); sceneReloadDialog.close() } }
             }
         }
     }
