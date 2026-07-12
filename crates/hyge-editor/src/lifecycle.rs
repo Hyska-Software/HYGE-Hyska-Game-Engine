@@ -473,6 +473,7 @@ impl EditorSessionRuntime {
             EditorCommand::Destroy(_) => self.filter_selection_to_live_entities(),
             EditorCommand::Reparent(_)
             | EditorCommand::EditComponent(_)
+            | EditorCommand::EditComponents(_)
             | EditorCommand::AddComponent(_)
             | EditorCommand::RemoveComponent(_) => {}
         }

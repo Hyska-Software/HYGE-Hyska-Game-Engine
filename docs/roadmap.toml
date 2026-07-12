@@ -1627,10 +1627,12 @@ title = "Qt hierarchy and reflection inspector models"
 phase = "phase_11"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "high"
 dependencies = ["R-089", "R-084"]
 summary = "Implement QML-facing hierarchy and inspector models backed by immutable Rust snapshots and command responses."
+completed_at = "2026-07-11"
+completion_notes = "Implemented interactive QML hierarchy and reflection inspector models. The Rust protocol now supports request_world_snapshot and atomic edit_components batch commands with revision checks, validation-before-mutation, undo/redo capture and real TCP dispatch. The Python interaction controller serializes live mutations by authoritative revision, handles stale_revision conflicts by discarding pending writes and refreshing snapshots, and exposes selection/reparent/edit operations to QML. HierarchyModel preserves stable expansion keys and delegates selection/reparent to Rust; InspectorModel computes common multi-selection fields, mixed values, recursive reflected nodes and typed editor roles. Main.qml now uses TreeView delegates, Shift selection, drag/drop reparent and live field delegates. Evidence: cargo test -p hyge-editor --test r098_qt_contract -- --test-threads=1 (7 passed), cargo test -p hyge-editor --lib (12 passed), QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software python -m pytest -q tools/hyge-editor-python/tests (17 passed), and real TCP refresh/batch-edit coverage. R-099/R-100 remain responsible for operational asset/graph panels and persistent editor UX."
 acceptance = [
   "hierarchy supports expand/collapse, selection, multi-selection and drag-drop reparent",
   "inspector renders primitive, vector, quaternion, string, handle and nested reflected values",

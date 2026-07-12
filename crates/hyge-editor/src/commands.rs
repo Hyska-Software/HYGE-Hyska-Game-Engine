@@ -70,6 +70,21 @@ pub struct EditComponentCommand {
     old_value: Option<serde_json::Value>,
 }
 
+/// A reflected component edit applied atomically to several entities.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EditComponentsCommand {
+    /// Target entities.
+    pub entities: Vec<EntityId>,
+    /// Reflected component type path.
+    pub type_path: String,
+    /// Optional dot-separated reflected field path.
+    pub field_path: Option<String>,
+    /// New complete component value or field value.
+    pub value: serde_json::Value,
+    #[serde(skip)]
+    old_values: Option<Vec<serde_json::Value>>,
+}
+
 /// Adds a reflected component.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AddComponentCommand {
@@ -145,6 +160,25 @@ impl EditComponentCommand {
             field_path: None,
             value,
             old_value: None,
+        }
+    }
+}
+
+impl EditComponentsCommand {
+    /// Creates an atomic multi-entity reflected edit.
+    #[must_use]
+    pub fn new(
+        entities: Vec<EntityId>,
+        type_path: impl Into<String>,
+        field_path: Option<String>,
+        value: serde_json::Value,
+    ) -> Self {
+        Self {
+            entities,
+            type_path: type_path.into(),
+            field_path,
+            value,
+            old_values: None,
         }
     }
 }
@@ -225,6 +259,8 @@ impl DestroyCommand {
 pub enum EditorCommand {
     /// Edit a reflected component.
     EditComponent(EditComponentCommand),
+    /// Edit a reflected component across multiple entities atomically.
+    EditComponents(EditComponentsCommand),
     /// Reparent an entity.
     Reparent(ReparentCommand),
     /// Instantiate a prefab.
@@ -266,6 +302,7 @@ impl Command for EditorCommand {
     fn apply(&mut self, world: &mut World) -> Result<CommandEffect, CommandFailure> {
         match self {
             Self::EditComponent(command) => command.apply(world),
+            Self::EditComponents(command) => command.apply(world),
             Self::Reparent(command) => command.apply(world),
             Self::Instantiate(command) => command.apply(world),
             Self::Destroy(command) => command.apply(world),
@@ -278,6 +315,7 @@ impl Command for EditorCommand {
     fn revert(&mut self, world: &mut World) -> Result<CommandEffect, CommandFailure> {
         match self {
             Self::EditComponent(command) => command.revert(world),
+            Self::EditComponents(command) => command.revert(world),
             Self::Reparent(command) => command.revert(world),
             Self::Instantiate(command) => command.revert(world),
             Self::Destroy(command) => command.revert(world),
@@ -312,6 +350,78 @@ impl Command for EditComponentCommand {
             .ok_or_else(|| CommandFailure::new("command_failed", "edit has no captured value"))?;
         insert_reflected(world, entity, &self.type_path, value)?;
         Ok(effect([self.entity]))
+    }
+}
+
+impl Command for EditComponentsCommand {
+    fn apply(&mut self, world: &mut World) -> Result<CommandEffect, CommandFailure> {
+        if self.entities.is_empty() {
+            return Err(CommandFailure::new(
+                "invalid_request",
+                "multi-entity edit requires at least one entity",
+            ));
+        }
+        let mut unique = BTreeSet::new();
+        if self.entities.iter().any(|id| !unique.insert(*id)) {
+            return Err(CommandFailure::new(
+                "invalid_request",
+                "multi-entity edit contains duplicate entities",
+            ));
+        }
+        for entity_id in &self.entities {
+            entity(world, *entity_id)?;
+        }
+
+        let mut edits = Vec::with_capacity(self.entities.len());
+        for entity_id in &self.entities {
+            let target = entity(world, *entity_id)?;
+            let current = reflected_value(world, target, &self.type_path)?;
+            let next = if let Some(path) = self.field_path.as_deref().filter(|p| !p.is_empty()) {
+                replace_field(current.clone(), path, self.value.clone())?
+            } else {
+                self.value.clone()
+            };
+            validate_reflected_value(world, &self.type_path, &next)?;
+            edits.push((*entity_id, current, next));
+        }
+
+        let old_values: Vec<_> = edits.iter().map(|(_, old, _)| old.clone()).collect();
+        for (index, (entity_id, _, next)) in edits.iter().enumerate() {
+            if let Err(error) = insert_reflected(
+                world,
+                entity(world, *entity_id)?,
+                &self.type_path,
+                next.clone(),
+            ) {
+                for (rollback_id, old, _) in edits.iter().take(index) {
+                    let _ = insert_reflected(
+                        world,
+                        entity(world, *rollback_id)?,
+                        &self.type_path,
+                        old.clone(),
+                    );
+                }
+                return Err(error);
+            }
+        }
+        self.old_values = Some(old_values);
+        Ok(effect_vec(self.entities.iter().copied()))
+    }
+
+    fn revert(&mut self, world: &mut World) -> Result<CommandEffect, CommandFailure> {
+        let old_values = self.old_values.clone().ok_or_else(|| {
+            CommandFailure::new("command_failed", "multi-entity edit has no captured values")
+        })?;
+        if old_values.len() != self.entities.len() {
+            return Err(CommandFailure::new(
+                "command_failed",
+                "multi-entity edit captured value count is invalid",
+            ));
+        }
+        for (entity_id, old) in self.entities.iter().zip(old_values) {
+            insert_reflected(world, entity(world, *entity_id)?, &self.type_path, old)?;
+        }
+        Ok(effect_vec(self.entities.iter().copied()))
     }
 }
 
@@ -557,6 +667,23 @@ fn insert_reflected(
     Ok(())
 }
 
+fn validate_reflected_value(
+    world: &World,
+    type_path: &str,
+    value: &serde_json::Value,
+) -> Result<(), CommandFailure> {
+    let (registry, _) = registration(world, type_path)?;
+    let value_text = value.to_string();
+    let mut deserializer = serde_json::Deserializer::from_str(&value_text);
+    let result = DeserializeSeed::deserialize(
+        ReflectDeserializer::new(&registry.read()),
+        &mut deserializer,
+    );
+    result
+        .map(|_: Box<dyn bevy_reflect::Reflect>| ())
+        .map_err(|error| CommandFailure::new("reflection_error", error.to_string()))
+}
+
 fn remove_reflected(
     world: &mut World,
     entity: Entity,
@@ -573,7 +700,30 @@ fn replace_field(
     value: serde_json::Value,
 ) -> Result<serde_json::Value, CommandFailure> {
     let mut root = current;
-    let mut target = &mut root;
+    let is_wrapped_struct = root.as_object().is_some_and(|object| {
+        object.len() == 1
+            && object
+                .values()
+                .next()
+                .is_some_and(serde_json::Value::is_object)
+    });
+    if is_wrapped_struct {
+        if let Some(object) = root.as_object_mut() {
+            if let Some(inner) = object.values_mut().next() {
+                replace_field_in_value(inner, path, value)?;
+                return Ok(root);
+            }
+        }
+    }
+    replace_field_in_value(&mut root, path, value)?;
+    Ok(root)
+}
+
+fn replace_field_in_value(
+    mut target: &mut serde_json::Value,
+    path: &str,
+    value: serde_json::Value,
+) -> Result<(), CommandFailure> {
     let parts: Vec<&str> = path.split('.').collect();
     for part in &parts[..parts.len().saturating_sub(1)] {
         target = target.get_mut(*part).ok_or_else(|| {
@@ -599,7 +749,7 @@ fn replace_field(
         ));
     }
     object.insert((*last).to_owned(), value);
-    Ok(root)
+    Ok(())
 }
 
 fn validate_parent(

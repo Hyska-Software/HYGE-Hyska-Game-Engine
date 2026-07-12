@@ -14,7 +14,7 @@ def test_packaged_free_shell_connects_loads_qml_and_closes_cleanly(monkeypatch):
     # Replace the environment-selected endpoint before starting the session.
     session._address = server.address
     session.connect_async()
-    QTimer.singleShot(250, app.quit)
+    QTimer.singleShot(750, app.quit)
     assert engine.rootObjects()
     assert app.exec() == 0
     session.close()

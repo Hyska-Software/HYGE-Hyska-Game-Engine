@@ -12,6 +12,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
 
 from .models import AssetModel, ConsoleModel, HierarchyModel, InspectorModel, ProfilerModel
+from .interaction import EditorInteractionController
 from .session import EditorSession
 from .viewport_item import ViewportController
 
@@ -79,14 +80,17 @@ def create_application(
     engine = QQmlApplicationEngine()
     engine.addImageProvider("hyge-viewport", viewport.provider)
     bridge = EditorBridge(backend, viewport, engine)
-    hierarchy = HierarchyModel(engine)
-    inspector = InspectorModel(engine)
+    interaction = EditorInteractionController(backend, engine)
+    hierarchy = HierarchyModel(interaction, engine)
+    inspector = InspectorModel(interaction, engine)
     assets = AssetModel(engine)
     console = ConsoleModel(engine)
     profiler = ProfilerModel(engine)
     backend.worldSnapshot.connect(hierarchy.update_snapshot)
     backend.worldSnapshot.connect(inspector.update_snapshot)
     backend.selectionChanged.connect(hierarchy.update_selection)
+    backend.selectionChanged.connect(inspector.update_selection)
+    interaction.conflictFieldChanged.connect(inspector.set_conflict)
     backend.assetSnapshot.connect(assets.update_snapshot)
     backend.consoleSnapshot.connect(console.update_snapshot)
     backend.profilerSnapshot.connect(profiler.update_snapshot)
@@ -100,6 +104,7 @@ def create_application(
     backend.connected.connect(prime_frontend)
     root = engine.rootContext()
     root.setContextProperty("editorBridge", bridge)
+    root.setContextProperty("editorInteraction", interaction)
     root.setContextProperty("hierarchyModel", hierarchy)
     root.setContextProperty("inspectorModel", inspector)
     root.setContextProperty("assetModel", assets)

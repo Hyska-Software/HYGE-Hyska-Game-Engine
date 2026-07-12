@@ -152,6 +152,14 @@ def test_schema_validates_every_declared_message_type():
                 "type_path": "hyge_scene::components::Name",
                 "value": {},
             }
+        elif message_type == "edit_components":
+            envelope["payload"] = {
+                "expected_revision": 1,
+                "entities": [1, 2],
+                "type_path": "hyge_scene::components::Transform",
+                "field_path": "translation",
+                "value": [0.0, 0.0, 0.0],
+            }
         elif message_type == "remove_component":
             envelope["payload"] = {
                 "expected_revision": 1,

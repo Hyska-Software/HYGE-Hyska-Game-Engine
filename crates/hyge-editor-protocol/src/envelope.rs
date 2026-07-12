@@ -41,6 +41,8 @@ pub enum MessageType {
     SelectEntities,
     /// Changes a reflected component field.
     EditComponent,
+    /// Changes one reflected field across multiple entities atomically.
+    EditComponents,
     /// Adds a component.
     AddComponent,
     /// Removes a component.
@@ -77,6 +79,8 @@ pub enum MessageType {
     RequestProfilerSnapshot,
     /// Cancels an asset preview job.
     CancelAssetPreview,
+    /// Requests a fresh immutable world snapshot.
+    RequestWorldSnapshot,
     /// Publishes the current world hierarchy.
     WorldSnapshot,
     /// Publishes the current selection.

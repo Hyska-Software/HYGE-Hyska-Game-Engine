@@ -14,11 +14,11 @@
       "type": "string",
       "enum": [
         "hello", "hello_ack", "open_project", "open_scene", "save_scene",
-        "select_entities", "edit_component", "add_component", "remove_component",
+        "select_entities", "edit_component", "edit_components", "add_component", "remove_component",
         "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab",
         "undo", "redo", "set_editor_camera", "set_viewport_size", "open_viewport_transport", "close_viewport_transport", "viewport_input", "request_asset_preview",
         "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot",
-        "cancel_asset_preview", "world_snapshot", "selection_changed", "component_changed",
+        "cancel_asset_preview", "request_world_snapshot", "world_snapshot", "selection_changed", "component_changed",
         "asset_changed", "asset_snapshot", "console_snapshot", "profiler_snapshot",
         "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available", "viewport_transport_ready", "viewport_transport_reset",
         "command_completed", "engine_error", "server_shutdown", "lifecycle_status"
@@ -31,6 +31,10 @@
     {
       "if": { "properties": { "message_type": { "const": "edit_component" } } },
       "then": { "properties": { "payload": { "$ref": "#/$defs/edit_component_payload" } } }
+    },
+    {
+      "if": { "properties": { "message_type": { "const": "edit_components" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/edit_components_payload" } } }
     },
     {
       "if": { "properties": { "message_type": { "const": "add_component" } } },
@@ -334,6 +338,17 @@
         } }
       ]
     },
+    "edit_components_payload": {
+      "allOf": [
+        { "$ref": "#/$defs/revision_payload" },
+        { "required": ["entities", "type_path", "value"], "properties": {
+          "entities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 0 } },
+          "type_path": { "type": "string", "minLength": 1 },
+          "field_path": { "type": ["string", "null"] },
+          "value": {}
+        } }
+      ]
+    },
     "add_component_payload": {
       "allOf": [
         { "$ref": "#/$defs/revision_payload" },
@@ -371,7 +386,7 @@
     }
   },
   "x-hyge-message-directions": {
-    "requests": ["hello", "open_project", "open_scene", "save_scene", "select_entities", "edit_component", "add_component", "remove_component", "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab", "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview", "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot", "cancel_asset_preview", "server_shutdown"],
+    "requests": ["hello", "open_project", "open_scene", "request_world_snapshot", "save_scene", "select_entities", "edit_component", "edit_components", "add_component", "remove_component", "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab", "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview", "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot", "cancel_asset_preview", "server_shutdown"],
     "responses": ["hello_ack", "command_completed", "engine_error", "asset_snapshot", "console_snapshot", "profiler_snapshot", "asset_preview_ready", "asset_preview_cancelled"],
     "events": ["lifecycle_status", "world_snapshot", "selection_changed", "component_changed", "asset_changed", "scene_reloaded", "console_line", "profiler_sample", "viewport_frame_available"]
   }

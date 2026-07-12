@@ -14,9 +14,9 @@ WORLD = {
     "revision": 2,
     "scene_revision": 1,
     "hierarchy": [{"entity": 1, "name": "Root", "parent": None, "children": [2], "scene_id": "scene-root"}, {"entity": 2, "name": "Camera", "parent": 1, "children": [], "scene_id": "scene-camera"}],
-    "entities": [{"entity": 1, "components": [{"type_id": "name", "type_path": "hyge_scene::Name", "value": {"value": "Root"}, "error": None}]}, {"entity": 2, "components": []}],
-    "component_catalog": [],
-    "selection": [2],
+    "entities": [{"entity": 1, "components": [{"type_id": "name", "type_path": "hyge_scene::Name", "value": {"value": "Root"}, "error": None}, {"type_id": "transform", "type_path": "hyge_scene::Transform", "value": {"translation": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}, "error": None}]}, {"entity": 2, "components": [{"type_id": "name", "type_path": "hyge_scene::Name", "value": {"value": "Camera"}, "error": None}, {"type_id": "transform", "type_path": "hyge_scene::Transform", "value": {"translation": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}, "error": None}]}],
+    "component_catalog": [{"type_id": "name", "type_path": "hyge_scene::Name", "short_name": "Name", "reflection_kind": "tuple_struct", "fields": [{"field_id": "name-value", "field_path": "value", "name": "value", "type_path": "alloc::string::String", "fields": []}], "editable": True}, {"type_id": "transform", "type_path": "hyge_scene::Transform", "short_name": "Transform", "reflection_kind": "struct", "fields": [{"field_id": "transform-translation", "field_path": "translation", "name": "translation", "type_path": "glam::Vec3", "fields": []}, {"field_id": "transform-rotation", "field_path": "rotation", "name": "rotation", "type_path": "glam::Quat", "fields": []}, {"field_id": "transform-scale", "field_path": "scale", "name": "scale", "type_path": "glam::Vec3", "fields": []}], "editable": True}],
+    "selection": [1, 2],
     "selection_scene_ids": ["scene-camera"],
     "diagnostics": [],
 }
@@ -92,6 +92,18 @@ class FakeEditorServer:
             self._send(connection, request, "world_snapshot", WORLD)
             self._send(connection, request, "selection_changed", {"revision": 2, "scene_revision": 1, "entities": [2], "scene_ids": ["scene-camera"]})
             self._send(connection, request, "command_completed", {"command": request.message_type, "revision": 2})
+        elif request.message_type == "request_world_snapshot":
+            self._send(connection, request, "world_snapshot", WORLD)
+            self._send(connection, request, "selection_changed", {"revision": 2, "scene_revision": 1, "entities": [1, 2], "scene_ids": ["scene-root", "scene-camera"]})
+        elif request.message_type == "select_entities":
+            entities = request.payload.get("entities", [])
+            self._send(connection, request, "selection_changed", {"revision": 2, "scene_revision": 1, "entities": entities, "scene_ids": []})
+            self._send(connection, request, "command_completed", {"command": "select_entities", "revision": 2})
+        elif request.message_type in {"edit_components", "edit_component", "reparent_entity"}:
+            if request.payload.get("expected_revision") == 0:
+                connection.sendall(Envelope.error(request.message_id, "stale_revision", "expected revision is stale").to_bytes())
+                return
+            self._send(connection, request, "command_completed", {"command": request.message_type, "revision": 3})
         elif request.message_type == "request_asset_snapshot":
             self._send(connection, request, "asset_snapshot", {"snapshot_revision": 1, "nodes": [{"asset_id": "a" * 64, "path": "assets/test.hyge-mesh"}], "edges": [], "diagnostics": []})
         elif request.message_type == "request_console_snapshot":

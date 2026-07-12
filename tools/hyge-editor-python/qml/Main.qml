@@ -24,9 +24,11 @@ ApplicationWindow {
             Label { text: "HYGE"; font.bold: true; font.pixelSize: 18 }
             Label { text: editorBridge.status; color: editorBridge.status === "Ready" ? "#9be7a5" : "#f2c879" }
             Item { Layout.fillWidth: true }
+            Label { text: editorInteraction.hasConflict ? editorInteraction.conflictMessage : "Revision " + editorInteraction.revision; color: editorInteraction.hasConflict ? "#ed8b8b" : "#c4c9d4" }
             Label { text: "Dropped: " + editorBridge.droppedFrames; color: "#c4c9d4" }
             Button { text: "Connect"; onClicked: editorBridge.connect_backend() }
             Button { text: "Open Project"; onClicked: editorBridge.open_project() }
+            Button { text: "Refresh"; onClicked: editorInteraction.refresh_snapshot() }
         }
     }
 
@@ -34,25 +36,51 @@ ApplicationWindow {
         anchors.fill: parent
 
         Frame {
-            SplitView.preferredWidth: 300
+            SplitView.preferredWidth: 330
             ColumnLayout {
                 anchors.fill: parent
                 Label { text: "Hierarchy"; font.bold: true }
-                ListView {
+                TreeView {
+                    id: hierarchyTree
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     model: hierarchyModel
                     clip: true
                     delegate: ItemDelegate {
-                        width: ListView.view.width
+                        required property int row
+                        required property int depth
+                        required property bool isTreeNode
+                        required property bool expanded
+                        width: hierarchyTree.width
+                        leftPadding: 8 + depth * 16
                         text: model.name
                         highlighted: model.selected
+                        onExpandedChanged: hierarchyModel.set_expanded(model.entity, expanded)
+                        Drag.active: dragHandler.active
+                        Drag.keys: ["hyge-entity"]
+                        Drag.source: parent
+                        Drag.mimeData: { "text/plain": String(model.entity) }
+
+                        DragHandler { id: dragHandler; xAxis.enabled: false; yAxis.enabled: false }
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            onClicked: hierarchyModel.select_entity(model.entity, (mouse.modifiers & Qt.ShiftModifier) !== 0)
+                        }
+                        DropArea {
+                            anchors.fill: parent
+                            keys: ["hyge-entity"]
+                            onDropped: {
+                                if (drag.source && drag.source.model && drag.source.model.entity !== model.entity)
+                                    hierarchyModel.reparent_entity(drag.source.model.entity, model.entity)
+                            }
+                        }
                     }
                 }
                 Label { text: "Assets"; font.bold: true }
                 ListView {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 180
+                    Layout.preferredHeight: 160
                     model: assetModel
                     clip: true
                     delegate: Label { width: ListView.view.width; text: model.path; elide: Text.ElideMiddle }
@@ -86,7 +114,7 @@ ApplicationWindow {
                 Label { text: "Console"; font.bold: true }
                 ListView {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 150
+                    Layout.preferredHeight: 140
                     model: consoleModel
                     clip: true
                     delegate: Label { width: ListView.view.width; text: model.display; color: "#c4c9d4"; elide: Text.ElideRight }
@@ -95,27 +123,50 @@ ApplicationWindow {
         }
 
         Frame {
-            SplitView.preferredWidth: 340
+            SplitView.preferredWidth: 390
             ColumnLayout {
                 anchors.fill: parent
                 Label { text: "Inspector"; font.bold: true }
-                ListView {
+                TreeView {
+                    id: inspectorTree
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     model: inspectorModel
                     clip: true
-                    delegate: Column {
-                        width: ListView.view.width
-                        spacing: 3
-                        Label { text: model.typePath; font.bold: true; elide: Text.ElideRight }
-                        Label { text: model.error || JSON.stringify(model.value); color: model.error ? "#ed8b8b" : "#c4c9d4"; wrapMode: Text.Wrap }
-                        Rectangle { width: parent.width; height: 1; color: "#363c47" }
+                    delegate: ColumnLayout {
+                        required property int depth
+                        required property bool isTreeNode
+                        width: inspectorTree.width
+                        spacing: 2
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 8 + depth * 14
+                            Label { text: model.label; font.bold: model.nodeKind === "component"; Layout.preferredWidth: 120; elide: Text.ElideRight }
+                            Label { text: model.mixed ? "Multiple Values" : model.displayValue; color: model.error ? "#ed8b8b" : "#c4c9d4"; Layout.fillWidth: true; elide: Text.ElideRight }
+                            TextField {
+                                visible: model.editable && model.editorKind !== "group"
+                                Layout.preferredWidth: 150
+                                text: model.mixed ? "" : model.displayValue
+                                placeholderText: model.mixed ? "Multiple Values" : ""
+                                onTextChanged: {
+                                    if (!activeFocus) return
+                                    var value = text
+                                    if (model.editorKind === "number") value = Number(text)
+                                    else if (model.editorKind === "bool") value = text === "true"
+                                    else if (model.editorKind === "vector" || model.editorKind === "quaternion") {
+                                        try { value = JSON.parse(text) } catch (error) { return }
+                                    }
+                                    inspectorModel.edit_field(model.fieldId, value)
+                                }
+                            }
+                        }
+                        Label { visible: model.error !== ""; text: model.error; color: "#ed8b8b"; wrapMode: Text.Wrap; Layout.leftMargin: 8 + depth * 14 }
                     }
                 }
                 Label { text: "Profiler"; font.bold: true }
                 ListView {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 180
+                    Layout.preferredHeight: 160
                     model: profilerModel
                     clip: true
                     delegate: Label { width: ListView.view.width; text: model.display; color: "#c4c9d4" }

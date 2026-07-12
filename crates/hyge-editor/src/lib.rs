@@ -22,8 +22,8 @@ mod viewport;
 
 pub use commands::{
     AddComponentCommand, Command, CommandEffect, CommandFailure, DestroyCommand, DuplicateCommand,
-    EditComponentCommand, EditorCommand, InstantiateCommand, RemoveComponentCommand,
-    ReparentCommand,
+    EditComponentCommand, EditComponentsCommand, EditorCommand, InstantiateCommand,
+    RemoveComponentCommand, ReparentCommand,
 };
 pub use data::{
     AssetDependencyEdge, AssetNode, AssetSnapshot, ConsoleBuffer, ConsoleFilter, ConsoleLayer,
@@ -49,9 +49,9 @@ pub mod prelude {
     pub use crate::{
         AddComponentCommand, Command, CommandEffect, CommandFailure, CommandHistory,
         ComponentDescriptor, DestroyCommand, DuplicateCommand, EditComponentCommand,
-        EditorCameraState, EditorCommand, EditorRenderBridge, EditorServer, EditorServerConfig,
-        EditorSnapshot, EditorState, EntityId, EntitySnapshot, FieldDescriptor, HierarchyNode,
-        ReflectedComponent, RemoveComponentCommand, ReparentCommand, SnapshotDiagnostic,
-        ViewportRenderState, ViewportState,
+        EditComponentsCommand, EditorCameraState, EditorCommand, EditorRenderBridge, EditorServer,
+        EditorServerConfig, EditorSnapshot, EditorState, EntityId, EntitySnapshot, FieldDescriptor,
+        HierarchyNode, ReflectedComponent, RemoveComponentCommand, ReparentCommand,
+        SnapshotDiagnostic, ViewportRenderState, ViewportState,
     };
 }

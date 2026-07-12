@@ -434,6 +434,7 @@ fn handle_authenticated(
     match envelope.message_type.clone() {
         MessageType::OpenProject => lifecycle_open_project(envelope, sessions, binding, runtime),
         MessageType::OpenScene => lifecycle_open_scene(envelope, sessions, binding, runtime),
+        MessageType::RequestWorldSnapshot => world_snapshot_request(envelope, runtime),
         MessageType::SaveScene => lifecycle_save_scene(envelope, runtime, &binding.session_id),
         MessageType::SelectEntities => {
             lifecycle_select_entities(envelope, runtime, &binding.session_id)
@@ -449,6 +450,7 @@ fn handle_authenticated(
             viewport_reset_transport(envelope, sessions, binding)
         }
         MessageType::EditComponent
+        | MessageType::EditComponents
         | MessageType::AddComponent
         | MessageType::RemoveComponent
         | MessageType::ReparentEntity
@@ -795,6 +797,7 @@ fn editor_command(envelope: &Envelope, runtime: crate::lifecycle::RuntimeHandle)
 fn command_name(message_type: MessageType) -> &'static str {
     match message_type {
         MessageType::EditComponent => "edit_component",
+        MessageType::EditComponents => "edit_components",
         MessageType::AddComponent => "add_component",
         MessageType::RemoveComponent => "remove_component",
         MessageType::ReparentEntity => "reparent_entity",
@@ -821,6 +824,8 @@ fn decode_editor_command(
     match envelope.message_type.clone() {
         MessageType::EditComponent => decode::<crate::commands::EditComponentCommand>(payload)
             .map(EditorCommand::EditComponent),
+        MessageType::EditComponents => decode::<crate::commands::EditComponentsCommand>(payload)
+            .map(EditorCommand::EditComponents),
         MessageType::AddComponent => {
             decode::<crate::commands::AddComponentCommand>(payload).map(EditorCommand::AddComponent)
         }
@@ -842,6 +847,27 @@ fn decode_editor_command(
             "invalid_request",
             "message is not an editor command",
         )),
+    }
+}
+
+fn world_snapshot_request(
+    envelope: &Envelope,
+    runtime: crate::lifecycle::RuntimeHandle,
+) -> Vec<Envelope> {
+    match runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_owned())
+        .and_then(|runtime| runtime.editor_snapshot().map_err(|error| error.to_string()))
+    {
+        Ok(snapshot) => vec![
+            world_snapshot(envelope, &snapshot),
+            selection_changed(envelope, &snapshot),
+        ],
+        Err(error) => vec![Envelope::error(
+            &envelope.message_id,
+            "snapshot_unavailable",
+            error,
+        )],
     }
 }
 

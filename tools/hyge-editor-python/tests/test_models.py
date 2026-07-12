@@ -1,5 +1,7 @@
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
+from hyge_editor.interaction import EditorInteractionController
 from hyge_editor.models import AssetModel, ConsoleModel, HierarchyModel, InspectorModel, ProfilerModel
 
 
@@ -34,3 +36,71 @@ def test_asset_console_profiler_models_handle_empty_and_diagnostics():
     console.update_snapshot({"lines": [], "filter": {}})
     profiler.update_snapshot({"samples": []})
     assert assets.rowCount() == console.rowCount() == profiler.rowCount() == 0
+
+
+def test_hierarchy_preserves_expansion_and_delegates_authoritative_selection_and_drop():
+    app()
+    calls = []
+
+    class Interaction:
+        def select_entity(self, entity, shift): calls.append(("select", entity, shift))
+        def reparent_entity(self, entity, parent): calls.append(("reparent", entity, parent))
+
+    model = HierarchyModel(Interaction())
+    snapshot = {"selection": [], "hierarchy": [{"entity": 1, "scene_id": "root", "name": "Root", "parent": None, "children": [2]}, {"entity": 2, "scene_id": "child", "name": "Child", "parent": 1, "children": []}]}
+    model.update_snapshot(snapshot)
+    model.set_expanded(1, True)
+    model.select_entity(2, True)
+    model.reparent_entity(2, 1)
+    model.update_snapshot(snapshot)
+    assert model.data(model.index(0, 0), model.ExpandedRole) is True
+    assert calls == [("select", 2, True), ("reparent", 2, 1)]
+
+
+def test_inspector_intersects_components_and_marks_mixed_values():
+    app()
+    snapshot = {
+        "selection": [1, 2],
+        "entities": [
+            {"entity": 1, "components": [{"type_path": "Example", "type_id": "example", "value": {"value": 1}, "error": None}]},
+            {"entity": 2, "components": [{"type_path": "Example", "type_id": "example", "value": {"value": 2}, "error": None}]},
+        ],
+        "component_catalog": [{"type_path": "Example", "short_name": "Example", "editable": True, "fields": [{"field_path": "value", "field_id": "example-value", "name": "Value", "type_path": "i32", "fields": []}]}],
+    }
+    model = InspectorModel()
+    model.update_snapshot(snapshot)
+    component = model.index(0, 0)
+    field = model.index(0, 0, component)
+    assert model.rowCount() == 1
+    assert model.data(field, model.FieldIdRole) == "example-value"
+    assert model.data(field, model.MixedRole) is True
+    assert model.data(field, model.DisplayValueRole) == "Multiple Values"
+
+
+def test_interaction_conflict_refreshes_and_serializes_live_batch_edits():
+    app()
+
+    class FakeSession(QObject):
+        worldSnapshot = Signal(object)
+        selectionChanged = Signal(object)
+        commandCompleted = Signal(object)
+        engineError = Signal(object)
+
+        def __init__(self):
+            super().__init__()
+            self.requests = []
+
+        def request(self, kind, payload=None):
+            self.requests.append((kind, payload or {}))
+
+    session = FakeSession()
+    controller = EditorInteractionController(session)
+    session.worldSnapshot.emit({"revision": 7, "selection": [1, 2]})
+    session.selectionChanged.emit({"entities": [1, 2]})
+    controller.edit_field("Example", "value", "example-value", 9)
+    assert session.requests[-1] == ("edit_components", {"expected_revision": 7, "entities": [1, 2], "type_path": "Example", "field_path": "value", "value": 9})
+    session.engineError.emit(type("Envelope", (), {"error": {"code": "stale_revision", "message": "stale"}})())
+    assert controller.hasConflict is True
+    assert session.requests[-1][0] == "request_world_snapshot"
+    session.worldSnapshot.emit({"revision": 8, "selection": [1, 2]})
+    assert controller.hasConflict is False

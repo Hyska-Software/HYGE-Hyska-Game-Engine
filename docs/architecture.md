@@ -1358,6 +1358,25 @@ For each `Component` on selected entity:
   editing, conflict handling, layout persistence and recovery remain owned by
   later roadmap items R-098 through R-102.
 
+### 12.9.3 Qt hierarchy and reflection inspector models (R-098)
+
+- The frontend hierarchy is a `QAbstractItemModel` tree whose expansion state
+  is keyed by persisted `SceneNodeId` when available and by process-local
+  entity bits only as a fallback. Selection and reparent requests always carry
+  the last engine snapshot revision; structure changes are accepted only from
+  a subsequent Rust snapshot.
+- Reflection inspector fields are derived from the immutable component catalog
+  and serialized entity values. Multi-selection exposes only the intersection
+  of component/field paths and marks unequal values as mixed. Supported
+  primitive, vector, quaternion and string edits are sent live; handles and
+  unsupported reflected shapes remain display-only until the asset/editor
+  panels provide their value source.
+- `request_world_snapshot` is the explicit refresh path after a stale command.
+  `edit_components` applies one reflected field atomically across all selected
+  entities and records one undoable engine command. A stale response freezes
+  the affected field, discards unsent values, refreshes the snapshot and never
+  retries the obsolete mutation automatically.
+
 ### 12.10 Theme
 
 - Dark by default, light toggle.

@@ -12,8 +12,8 @@ PROTOCOL_VERSION = 2
 SUPPORTED_PROTOCOL_VERSIONS = (1, PROTOCOL_VERSION)
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 MESSAGE_TYPES = {
-    "hello", "hello_ack", "open_project", "open_scene", "save_scene",
-    "select_entities", "edit_component", "add_component", "remove_component",
+    "hello", "hello_ack", "open_project", "open_scene", "save_scene", "request_world_snapshot",
+    "select_entities", "edit_component", "edit_components", "add_component", "remove_component",
     "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab",
     "undo", "redo", "set_editor_camera", "set_viewport_size", "open_viewport_transport", "close_viewport_transport", "viewport_input", "request_asset_preview",
     "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot",
@@ -194,6 +194,7 @@ class EditorClient:
             "request_profiler_snapshot": "profiler_snapshot",
             "request_asset_preview": "asset_preview_ready",
             "cancel_asset_preview": "asset_preview_cancelled",
+            "request_world_snapshot": "selection_changed",
             "open_viewport_transport": "viewport_transport_ready",
             "viewport_transport_reset": "viewport_transport_reset",
             "server_shutdown": "server_shutdown",
@@ -239,6 +240,56 @@ class EditorClient:
     def request_asset_snapshot(self) -> Envelope:
         """Request the bounded asset tree and dependency graph."""
         return self.request("request_asset_snapshot")
+
+    def request_world_snapshot(self) -> Envelope:
+        """Request a fresh immutable world and selection snapshot."""
+        return self.request("request_world_snapshot")
+
+    def select_entities(self, entities: list[int], shift: bool = False) -> Envelope:
+        """Select entities through the engine-owned selection resource."""
+        return self.request("select_entities", {"entities": entities, "shift": shift})
+
+    def edit_component(
+        self,
+        expected_revision: int,
+        entity: int,
+        type_path: str,
+        value: Any,
+        field_path: str | None = None,
+    ) -> Envelope:
+        """Edit one reflected component field."""
+        payload: dict[str, Any] = {
+            "expected_revision": expected_revision,
+            "entity": entity,
+            "type_path": type_path,
+            "value": value,
+        }
+        if field_path is not None:
+            payload["field_path"] = field_path
+        return self.request("edit_component", payload)
+
+    def edit_components(
+        self,
+        expected_revision: int,
+        entities: list[int],
+        type_path: str,
+        value: Any,
+        field_path: str | None = None,
+    ) -> Envelope:
+        """Edit one reflected component field atomically across entities."""
+        payload: dict[str, Any] = {
+            "expected_revision": expected_revision,
+            "entities": entities,
+            "type_path": type_path,
+            "value": value,
+        }
+        if field_path is not None:
+            payload["field_path"] = field_path
+        return self.request("edit_components", payload)
+
+    def reparent_entity(self, expected_revision: int, entity: int, new_parent: int | None) -> Envelope:
+        """Reparent one entity through the engine-owned hierarchy."""
+        return self.request("reparent_entity", {"expected_revision": expected_revision, "entity": entity, "new_parent": new_parent})
 
     def request_console_snapshot(self, min_level: str | None = None, target_prefix: str | None = None) -> Envelope:
         """Request retained console lines with optional filters."""
