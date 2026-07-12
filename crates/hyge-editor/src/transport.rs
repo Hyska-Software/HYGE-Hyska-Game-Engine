@@ -19,6 +19,11 @@ pub const PIXEL_FORMAT_RGBA8_SRGB: u32 = 1;
 pub const MAX_VIEWPORT_DIMENSION: u32 = 4096;
 const GLOBAL_HEADER_BYTES: usize = 64;
 const SLOT_HEADER_BYTES: usize = 64;
+const PRODUCER_PID_OFFSET: usize = 24;
+const PRODUCER_HEARTBEAT_OFFSET: usize = 32;
+const CONSUMER_PID_OFFSET: usize = 40;
+const CONSUMER_HEARTBEAT_OFFSET: usize = 48;
+const TRANSPORT_STATE_OFFSET: usize = 56;
 
 /// State published in the shared-memory header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,16 +164,66 @@ impl SharedViewportTransport {
             Err(hyge_editor_shm::SharedMemoryError::UnsupportedPlatform) => None,
             Err(error) => return Err(error.to_string()),
         };
-        Ok(Self {
+        let mut transport = Self {
             name,
             ring: ViewportRing::new(generation),
             mapping,
-        })
+        };
+        if let Some(mapping) = &mut transport.mapping {
+            let pid = std::process::id() as u64;
+            let heartbeat = unix_millis();
+            mapping
+                .with_bytes_mut(|bytes| {
+                    bytes[PRODUCER_PID_OFFSET..PRODUCER_PID_OFFSET + 8]
+                        .copy_from_slice(&pid.to_le_bytes());
+                    bytes[PRODUCER_HEARTBEAT_OFFSET..PRODUCER_HEARTBEAT_OFFSET + 8]
+                        .copy_from_slice(&heartbeat.to_le_bytes());
+                    bytes[CONSUMER_PID_OFFSET..CONSUMER_PID_OFFSET + 8].fill(0);
+                    bytes[CONSUMER_HEARTBEAT_OFFSET..CONSUMER_HEARTBEAT_OFFSET + 8].fill(0);
+                    bytes[TRANSPORT_STATE_OFFSET..TRANSPORT_STATE_OFFSET + 8]
+                        .copy_from_slice(&1_u64.to_le_bytes());
+                })
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(transport)
     }
     /// Indicates whether an OS-backed mapping is active.
     #[must_use]
     pub const fn is_mapped(&self) -> bool {
         self.mapping.is_some()
+    }
+
+    /// Closes the producer side of the transport exactly once.
+    pub fn close(&mut self) {
+        if let Some(mapping) = &mut self.mapping {
+            mapping
+                .with_bytes_mut(|bytes| {
+                    bytes[TRANSPORT_STATE_OFFSET..TRANSPORT_STATE_OFFSET + 8]
+                        .copy_from_slice(&2_u64.to_le_bytes());
+                })
+                .ok();
+        }
+        self.ring.close();
+        self.mapping.take();
+    }
+
+    /// Returns whether the consumer heartbeat is older than `timeout`.
+    #[must_use]
+    pub fn consumer_is_stale(&self, timeout: std::time::Duration) -> bool {
+        let Some(mapping) = &self.mapping else {
+            return false;
+        };
+        let now = unix_millis();
+        mapping
+            .with_bytes(|bytes| {
+                let heartbeat = u64::from_le_bytes(
+                    bytes[CONSUMER_HEARTBEAT_OFFSET..CONSUMER_HEARTBEAT_OFFSET + 8]
+                        .try_into()
+                        .unwrap_or([0; 8]),
+                );
+                heartbeat != 0 && now.saturating_sub(heartbeat) > timeout.as_millis() as u64
+            })
+            .unwrap_or(false)
     }
 
     /// Publishes a frame into both the verifier and the named mapping.
@@ -184,33 +239,51 @@ impl SharedViewportTransport {
             .ring
             .publish(width, height, scene_revision, camera_revision, pixels)?;
         if let Some(mapping) = &mut self.mapping {
+            let heartbeat = unix_millis();
             let stride = SLOT_HEADER_BYTES + pixels.len();
             let offset = GLOBAL_HEADER_BYTES + header.slot as usize * stride;
             if offset + stride > mapping.len() {
                 return Err("shared-memory mapping is too small for viewport frame".into());
             }
-            mapping.with_bytes_mut(|bytes| {
-                bytes[..8].copy_from_slice(&RING_MAGIC);
-                bytes[8..12].copy_from_slice(&RING_ABI_VERSION.to_le_bytes());
-                bytes[12..16].copy_from_slice(&(RING_SLOT_COUNT as u32).to_le_bytes());
-                bytes[16..24].copy_from_slice(&header.generation.to_le_bytes());
-                bytes[offset..offset + SLOT_HEADER_BYTES].fill(0);
-                bytes[offset..offset + 8].copy_from_slice(&header.frame_id.to_le_bytes());
-                bytes[offset + 8..offset + 12].copy_from_slice(&header.width.to_le_bytes());
-                bytes[offset + 12..offset + 16].copy_from_slice(&header.height.to_le_bytes());
-                bytes[offset + 16..offset + 20].copy_from_slice(&header.pixel_format.to_le_bytes());
-                bytes[offset + 20..offset + 24].copy_from_slice(&header.byte_len.to_le_bytes());
-                bytes[offset + 24..offset + 32]
-                    .copy_from_slice(&header.scene_revision.to_le_bytes());
-                bytes[offset + 32..offset + 40]
-                    .copy_from_slice(&header.camera_revision.to_le_bytes());
-                bytes[offset + 40..offset + 48].copy_from_slice(&header.sequence.to_le_bytes());
-                bytes[offset + SLOT_HEADER_BYTES..offset + stride].copy_from_slice(pixels);
-                bytes[offset + 48..offset + 56].copy_from_slice(&header.sequence.to_le_bytes());
-            });
+            mapping
+                .with_bytes_mut(|bytes| {
+                    bytes[..8].copy_from_slice(&RING_MAGIC);
+                    bytes[8..12].copy_from_slice(&RING_ABI_VERSION.to_le_bytes());
+                    bytes[12..16].copy_from_slice(&(RING_SLOT_COUNT as u32).to_le_bytes());
+                    bytes[16..24].copy_from_slice(&header.generation.to_le_bytes());
+                    bytes[PRODUCER_HEARTBEAT_OFFSET..PRODUCER_HEARTBEAT_OFFSET + 8]
+                        .copy_from_slice(&heartbeat.to_le_bytes());
+                    bytes[offset..offset + SLOT_HEADER_BYTES].fill(0);
+                    bytes[offset..offset + 8].copy_from_slice(&header.frame_id.to_le_bytes());
+                    bytes[offset + 8..offset + 12].copy_from_slice(&header.width.to_le_bytes());
+                    bytes[offset + 12..offset + 16].copy_from_slice(&header.height.to_le_bytes());
+                    bytes[offset + 16..offset + 20]
+                        .copy_from_slice(&header.pixel_format.to_le_bytes());
+                    bytes[offset + 20..offset + 24].copy_from_slice(&header.byte_len.to_le_bytes());
+                    bytes[offset + 24..offset + 32]
+                        .copy_from_slice(&header.scene_revision.to_le_bytes());
+                    bytes[offset + 32..offset + 40]
+                        .copy_from_slice(&header.camera_revision.to_le_bytes());
+                    bytes[offset + 40..offset + 48].copy_from_slice(&header.sequence.to_le_bytes());
+                    bytes[offset + SLOT_HEADER_BYTES..offset + stride].copy_from_slice(pixels);
+                    bytes[offset + 48..offset + 56].copy_from_slice(&header.sequence.to_le_bytes());
+                })
+                .map_err(|error| error.to_string())?;
         }
         Ok(header)
     }
+}
+
+impl Drop for SharedViewportTransport {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis() as u64)
 }
 
 /// Normalized editor input accepted by the viewport.

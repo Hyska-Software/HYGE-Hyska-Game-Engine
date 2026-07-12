@@ -114,7 +114,15 @@ impl EditorServer {
 
     /// Requests the accept loop to stop after active connections finish.
     pub fn shutdown(&self) {
-        self.shutdown.store(true, Ordering::Release);
+        if !self.shutdown.swap(true, Ordering::AcqRel) {
+            // Wake the non-blocking accept loop immediately.  Active client
+            // sockets still converge through their bounded read timeout and
+            // the same session teardown path below.
+            if let Ok(address) = self.listener.local_addr() {
+                let _ = TcpStream::connect_timeout(&address, Duration::from_millis(50));
+            }
+            self.shutdown_resources();
+        }
     }
 
     /// Returns a retained session snapshot.
@@ -165,8 +173,15 @@ impl EditorServer {
                 Err(error) => break Err(error),
             }
         };
-        self.cleanup_frontend();
+        self.shutdown_resources();
         result
+    }
+
+    fn shutdown_resources(&self) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.shutdown();
+        }
+        self.cleanup_frontend();
     }
 
     fn cleanup_frontend(&self) {
@@ -199,8 +214,12 @@ impl EditorServer {
 
 impl Drop for EditorServer {
     fn drop(&mut self) {
-        self.shutdown.store(true, Ordering::Release);
-        self.cleanup_frontend();
+        if !self.shutdown.swap(true, Ordering::AcqRel) {
+            if let Ok(mut sessions) = self.sessions.lock() {
+                sessions.shutdown();
+            }
+            self.cleanup_frontend();
+        }
     }
 }
 
@@ -405,7 +424,7 @@ fn handle_authenticated(
             "editor handshake is required before requests",
         )];
     };
-    let runtime = {
+    let (runtime, mutation_gate) = {
         let Ok(mut registry) = sessions.lock() else {
             return vec![Envelope::error(
                 &envelope.message_id,
@@ -420,8 +439,8 @@ fn handle_authenticated(
                 session_error_message(error),
             )];
         }
-        match registry.runtime(binding) {
-            Ok(runtime) => runtime,
+        match registry.mutation_guard(binding) {
+            Ok(access) => access,
             Err(error) => {
                 return vec![Envelope::error(
                     &envelope.message_id,
@@ -431,6 +450,28 @@ fn handle_authenticated(
             }
         }
     };
+    let Ok(_mutation_guard) = mutation_gate.lock() else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "session_unavailable",
+            "editor session mutation gate is unavailable",
+        )];
+    };
+    let Ok(registry) = sessions.lock() else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "session_unavailable",
+            "session registry is unavailable",
+        )];
+    };
+    if !registry.is_current(binding) {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "session_replaced",
+            "editor session was replaced by a newer connection",
+        )];
+    }
+    drop(registry);
     let mut responses = poll_scene_events(&runtime, &binding.session_id);
     responses.extend(match envelope.message_type.clone() {
         MessageType::OpenProject => lifecycle_open_project(envelope, sessions, binding, runtime),
@@ -1150,10 +1191,14 @@ fn lifecycle_open_project(
                 LifecycleState::Failed,
                 None,
             ));
-            responses.push(Envelope::error(
+            responses.push(Envelope::diagnostic_error(
                 &envelope.message_id,
                 "project_open_failed",
                 error.to_string(),
+                true,
+                Some(path.to_owned()),
+                Some("open_project".to_owned()),
+                Some("check the project path and lock, then retry".to_owned()),
             ));
         }
     }
@@ -1218,10 +1263,14 @@ fn lifecycle_open_scene(
                 LifecycleState::Failed,
                 None,
             ));
-            responses.push(Envelope::error(
+            responses.push(Envelope::diagnostic_error(
                 &envelope.message_id,
                 "scene_open_failed",
                 error.to_string(),
+                true,
+                Some(path.to_owned()),
+                Some("open_scene".to_owned()),
+                Some("fix the scene or prefab diagnostic, then retry".to_owned()),
             ));
         }
     }
@@ -1515,6 +1564,7 @@ fn session_error_code(error: SessionError) -> &'static str {
         SessionError::InvalidId => "invalid_request",
         SessionError::NotFound => "session_not_found",
         SessionError::Replaced => "session_replaced",
+        SessionError::Unavailable => "session_unavailable",
     }
 }
 
@@ -1523,6 +1573,7 @@ fn session_error_message(error: SessionError) -> &'static str {
         SessionError::InvalidId => "session_id is invalid",
         SessionError::NotFound => "editor session was not found",
         SessionError::Replaced => "editor session was replaced by a newer connection",
+        SessionError::Unavailable => "editor session is temporarily unavailable",
     }
 }
 

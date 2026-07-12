@@ -21,7 +21,7 @@
         "cancel_asset_preview", "request_world_snapshot", "world_snapshot", "selection_changed", "component_changed",
         "asset_changed", "asset_snapshot", "console_snapshot", "profiler_snapshot",
         "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "scene_reload_conflict", "console_line", "profiler_sample", "viewport_frame_available", "viewport_transport_ready", "viewport_transport_reset",
-        "command_completed", "engine_error", "server_shutdown", "lifecycle_status"
+        "command_completed", "engine_error", "server_shutdown", "session_status", "session_replaced", "backend_shutdown", "transport_closed", "reconnect_required", "lifecycle_status"
       ]
     },
     "payload": { "type": "object" },
@@ -173,7 +173,11 @@
       "additionalProperties": false,
       "properties": {
         "code": { "type": "string", "minLength": 1 },
-        "message": { "type": "string", "minLength": 1 }
+        "message": { "type": "string", "minLength": 1 },
+        "recoverable": { "type": "boolean" },
+        "path": { "type": ["string", "null"] },
+        "operation": { "type": ["string", "null"] },
+        "suggested_action": { "type": ["string", "null"] }
       }
     },
     "hello_payload": {
@@ -236,7 +240,7 @@
       "additionalProperties": false,
       "properties": {
         "session_id": { "type": "string" },
-        "state": { "enum": ["loading", "ready", "degraded", "failed"] },
+        "state": { "enum": ["loading", "ready", "degraded", "failed", "disconnected", "reconnecting", "closing"] },
         "details": { "type": "object" }
       }
     },
@@ -425,7 +429,7 @@
   },
   "x-hyge-message-directions": {
     "requests": ["hello", "open_project", "open_scene", "activate_asset", "request_world_snapshot", "save_scene", "resolve_scene_reload", "select_entities", "edit_component", "edit_components", "add_component", "remove_component", "reparent_entity", "duplicate_entity", "destroy_entity", "instantiate_prefab", "undo", "redo", "set_editor_camera", "set_viewport_size", "request_asset_preview", "request_asset_snapshot", "request_console_snapshot", "request_profiler_snapshot", "cancel_asset_preview", "server_shutdown"],
-    "responses": ["hello_ack", "command_completed", "engine_error", "asset_snapshot", "console_snapshot", "profiler_snapshot", "asset_preview_ready", "asset_preview_cancelled"],
-    "events": ["lifecycle_status", "world_snapshot", "selection_changed", "component_changed", "asset_changed", "scene_reloaded", "scene_reload_conflict", "console_line", "profiler_sample", "viewport_frame_available"]
+    "responses": ["hello_ack", "command_completed", "engine_error", "asset_snapshot", "console_snapshot", "profiler_snapshot", "asset_preview_ready", "asset_preview_cancelled", "session_replaced", "transport_closed", "reconnect_required"],
+    "events": ["lifecycle_status", "session_status", "backend_shutdown", "world_snapshot", "selection_changed", "component_changed", "asset_changed", "scene_reloaded", "scene_reload_conflict", "console_line", "profiler_sample", "viewport_frame_available"]
   }
 }

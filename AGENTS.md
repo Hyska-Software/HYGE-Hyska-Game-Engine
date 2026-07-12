@@ -377,10 +377,10 @@ headless application:
 - [x] `cargo test --workspace` and the relevant `clippy --deny warnings`
   gates pass.
 
-The external editor foundation and R-089 Qt shell are complete. The remaining
-M6 editor work is tracked by `docs/roadmap.toml` phase_11 items R-098..R-100,
-followed by the recovery, workflow, packaging and integrated evidence gates in
-phase_12 (R-101..R-106).
+The external editor foundation, R-089 Qt shell and R-102 recovery/shutdown
+gate are complete. The remaining M6 editor work is tracked by
+`docs/roadmap.toml` phase_12 items R-103..R-106: real workflow, packaging,
+documentation and integrated evidence.
 
 ### 5.3 Per release (v0.1.0)
 

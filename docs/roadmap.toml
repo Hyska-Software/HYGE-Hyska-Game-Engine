@@ -1706,7 +1706,7 @@ title = "Editor reconnect, failure recovery and shutdown"
 phase = "phase_12"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "high"
 dependencies = ["R-081", "R-088", "R-089"]
 summary = "Define behavior for backend crashes, dropped frames, broken projects, reconnects and clean shutdown."
@@ -1717,6 +1717,8 @@ acceptance = [
   "project/scene errors are actionable and do not panic the service",
   "test: kill/restart backend during an active session and recover safely"
 ]
+completed_at = "2026-07-12"
+completion_notes = "Implemented R-102 recovery and shutdown behavior. SessionRegistry now fences mutations with a per-session generation gate, reconnect replacement waits for in-flight work, shutdown wakes the listener and releases runtimes, watchers, transports and project locks idempotently. The protocol adds session recovery message names and actionable diagnostic errors with recoverability, path, operation and suggested action metadata; lifecycle state accepts disconnected/reconnecting/closing. The Python session preserves session identity, retries transient failures with bounded 100ms/250ms/500ms/1s/2s/5s backoff, drops pending mutations, reopens known project/scene paths after a backend restart and exposes retry/close state in QML. Viewport transport close is idempotent, non-Windows access returns structured errors, and the shared header publishes producer/consumer ownership and heartbeat metadata. Evidence: cargo test -p hyge-editor --test r102_recovery -- --test-threads=1 (5 passed), cargo test -p hyge-editor-protocol (8 passed), cargo test --workspace -- --test-threads=1, cargo clippy --workspace --all-targets -- --deny warnings, cargo fmt --all -- --check, cargo doc --workspace --no-deps, and QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software python -m pytest -q tools/hyge-editor-python/tests (22 passed). ADR-0019, architecture.md and the R-102 goal package document ownership and recovery policy."
 
 [[items]]
 id = "R-103"

@@ -25,6 +25,7 @@ class EditorBridge(QObject):
 
     statusChanged = Signal()
     droppedFramesChanged = Signal()
+    retryChanged = Signal()
 
     def __init__(self, session: EditorSession, viewport: ViewportController, preferences: EditorPreferences, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -32,8 +33,11 @@ class EditorBridge(QObject):
         self._viewport = viewport
         self._preferences = preferences
         self._status = "Disconnected"
+        self._retry_attempt = 0
+        self._retry_delay_ms = 0
         session.stateChanged.connect(self._set_status)
         session.protocolError.connect(self._set_error)
+        session.reconnectScheduled.connect(self._set_retry)
         viewport.droppedFramesChanged.connect(self.droppedFramesChanged)
 
     @Property(str, notify=statusChanged)
@@ -45,6 +49,16 @@ class EditorBridge(QObject):
     def droppedFrames(self) -> int:
         """Return the number of dropped viewport frames."""
         return self._viewport.dropped_frames
+
+    @Property(int, notify=retryChanged)
+    def retryAttempt(self) -> int:
+        """Return the current bounded reconnect attempt."""
+        return self._retry_attempt
+
+    @Property(int, notify=retryChanged)
+    def retryDelayMs(self) -> int:
+        """Return the delay before the next reconnect attempt."""
+        return self._retry_delay_ms
 
     @Slot()
     def connect_backend(self) -> None:
@@ -61,6 +75,11 @@ class EditorBridge(QObject):
         """Close the backend connection."""
         self._session.close()
 
+    @Slot()
+    def retry_backend(self) -> None:
+        """Retry the backend connection immediately."""
+        self._session.retry_now()
+
     @Property(str, notify=statusChanged)
     def mode(self) -> str:
         """Return the local editor mode label."""
@@ -69,6 +88,11 @@ class EditorBridge(QObject):
     def _set_status(self, state: str) -> None:
         self._status = state.capitalize()
         self.statusChanged.emit()
+
+    def _set_retry(self, attempt: int, delay_ms: int) -> None:
+        self._retry_attempt = attempt
+        self._retry_delay_ms = delay_ms
+        self.retryChanged.emit()
 
     def _set_error(self, message: str) -> None:
         self._status = f"Error: {message}"

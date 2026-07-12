@@ -123,6 +123,16 @@ pub enum MessageType {
     EngineError,
     /// Announces service shutdown.
     ServerShutdown,
+    /// Publishes the connection/session recovery state.
+    SessionStatus,
+    /// Rejects a request from a superseded session generation.
+    SessionReplaced,
+    /// Announces that the backend is shutting down.
+    BackendShutdown,
+    /// Announces that a viewport transport was released.
+    TransportClosed,
+    /// Requests the client to establish a new connection.
+    ReconnectRequired,
     /// Announces a project/session lifecycle transition.
     LifecycleStatus,
 }
@@ -134,6 +144,18 @@ pub struct ProtocolError {
     pub code: String,
     /// Human-readable diagnostic.
     pub message: String,
+    /// Whether the client may retry the operation.
+    #[serde(default)]
+    pub recoverable: bool,
+    /// Project or scene path associated with the failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Operation which produced the failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    /// Suggested user-facing recovery action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_action: Option<String>,
 }
 
 impl Envelope {
@@ -206,6 +228,38 @@ impl Envelope {
             error: Some(ProtocolError {
                 code: code.into(),
                 message: message.into(),
+                recoverable: false,
+                path: None,
+                operation: None,
+                suggested_action: None,
+            }),
+        }
+    }
+
+    /// Creates an actionable engine error with recovery metadata.
+    #[must_use]
+    pub fn diagnostic_error(
+        message_id: impl Into<String>,
+        code: impl Into<String>,
+        message: impl Into<String>,
+        recoverable: bool,
+        path: Option<String>,
+        operation: Option<String>,
+        suggested_action: Option<String>,
+    ) -> Self {
+        Self {
+            protocol_version: PROTOCOL_VERSION,
+            message_id: message_id.into(),
+            message_type: MessageType::EngineError,
+            correlation_id: None,
+            payload: serde_json::json!({}),
+            error: Some(ProtocolError {
+                code: code.into(),
+                message: message.into(),
+                recoverable,
+                path,
+                operation,
+                suggested_action,
             }),
         }
     }
@@ -247,6 +301,7 @@ impl Envelope {
                     "error code and message must not be empty",
                 ));
             }
+            (MessageType::EngineError, Some(_)) => {}
             (_, Some(_)) => {
                 return Err(ProtocolIoError::InvalidEnvelope(
                     "only engine_error may contain error",

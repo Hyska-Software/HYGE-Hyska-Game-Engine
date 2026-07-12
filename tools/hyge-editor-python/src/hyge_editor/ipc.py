@@ -20,7 +20,7 @@ MESSAGE_TYPES = {
     "cancel_asset_preview", "world_snapshot", "selection_changed", "component_changed",
     "asset_changed", "asset_snapshot", "console_snapshot", "profiler_snapshot",
     "asset_preview_ready", "asset_preview_cancelled", "scene_reloaded", "scene_reload_conflict", "console_line", "profiler_sample", "viewport_frame_available", "viewport_transport_ready", "viewport_transport_reset",
-    "command_completed", "engine_error", "server_shutdown", "lifecycle_status",
+    "command_completed", "engine_error", "server_shutdown", "session_status", "session_replaced", "backend_shutdown", "transport_closed", "reconnect_required", "lifecycle_status",
 }
 
 
@@ -46,8 +46,10 @@ class Envelope:
         if not isinstance(self.payload, dict):
             raise ValueError("editor protocol payload must be an object")
         if self.error is not None:
-            if set(self.error) != {"code", "message"}:
+            if not {"code", "message"}.issubset(self.error):
                 raise ValueError("editor protocol error must contain code and message")
+            if not isinstance(self.error["code"], str) or not isinstance(self.error["message"], str):
+                raise ValueError("editor protocol error code and message must be strings")
         if self.message_type == "engine_error" and self.error is None:
             raise ValueError("engine_error requires error")
         if self.message_type != "engine_error" and self.error is not None:
@@ -145,6 +147,10 @@ class EditorClient:
             raise RuntimeError("cannot reconnect before a successful handshake")
         self.close()
         return self.connect()
+
+    def resume_session(self, session_id: str | None) -> None:
+        """Set the session identity used by the next handshake."""
+        self._session_id = session_id
 
     @property
     def session_id(self) -> str | None:

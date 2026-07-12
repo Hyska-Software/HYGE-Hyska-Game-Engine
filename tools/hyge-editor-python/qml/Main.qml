@@ -62,6 +62,29 @@ ApplicationWindow {
         }
     }
 
+    Rectangle {
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: editorBridge.status === "Ready" ? 0 : 34
+        visible: height > 0
+        color: editorBridge.status === "Failed" ? editorTheme.error : editorTheme.surfaceAlt
+        z: 10
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 6
+            Label {
+                Layout.fillWidth: true
+                color: editorTheme.text
+                text: editorBridge.status === "Reconnecting"
+                    ? "Backend disconnected — retry " + editorBridge.retryAttempt + " in " + editorBridge.retryDelayMs + " ms"
+                    : "Backend: " + editorBridge.status
+            }
+            Button { text: "Retry now"; visible: editorBridge.status !== "Closing"; onClicked: editorBridge.retry_backend() }
+            Button { text: "Close"; onClicked: editorBridge.close_backend() }
+        }
+    }
+
     Dialog {
         id: sceneReloadDialog
         modal: true

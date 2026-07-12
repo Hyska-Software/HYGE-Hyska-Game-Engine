@@ -1386,6 +1386,22 @@ For each `Component` on selected entity:
   the affected field, discards unsent values, refreshes the snapshot and never
   retries the obsolete mutation automatically.
 
+### 12.9.4 Recovery, reconnect and shutdown (R-102)
+
+- Session mutations execute behind a Rust-owned generation gate. Reconnect
+  waits for the previous operation to finish, replaces the generation and
+  rejects older requests with `session_replaced`.
+- The Python client retries transient TCP failures with bounded backoff,
+  discards pending mutations, refreshes authoritative snapshots after resume
+  and reopens only known project/scene paths after a backend process restart.
+- Viewport mappings are scoped to `session_id + generation`, expose producer
+  and consumer heartbeat metadata, and are released through an idempotent
+  close path when either owner dies.
+- Shutdown wakes the listener and releases sessions, runtime watchers,
+  transport mappings, project locks and optional frontend children through one
+  idempotent coordinator. Project and scene failures remain structured,
+  actionable `engine_error` diagnostics and never panic the service.
+
 ### 12.10 Theme
 
 - Dark by default, light toggle.

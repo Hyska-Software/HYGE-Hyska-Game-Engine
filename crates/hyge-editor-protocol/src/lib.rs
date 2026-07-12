@@ -108,11 +108,31 @@ mod tests {
     #[test]
     fn error_response_is_machine_readable() {
         let envelope = Envelope::error("7", "invalid_request", "bad payload");
-        assert_eq!(
-            envelope.error.as_ref().expect("error exists").code,
-            "invalid_request"
+        let error = envelope.error.as_ref().expect("error exists");
+        assert_eq!(error.code, "invalid_request");
+        assert!(!error.recoverable);
+        assert_eq!(envelope.message_type, MessageType::EngineError);
+    }
+
+    #[test]
+    fn diagnostic_error_round_trips_recovery_metadata() {
+        let envelope = Envelope::diagnostic_error(
+            "7",
+            "scene_load_failed",
+            "scene could not be decoded",
+            true,
+            Some("main.hyge-world".into()),
+            Some("open_scene".into()),
+            Some("repair the scene and retry".into()),
         );
         assert_eq!(envelope.message_type, MessageType::EngineError);
+        let mut bytes = Vec::new();
+        write_envelope(&mut bytes, &envelope).expect("write diagnostic");
+        let decoded = read_envelope(&mut Cursor::new(bytes)).expect("read diagnostic");
+        let error = decoded.error.expect("diagnostic error");
+        assert!(error.recoverable);
+        assert_eq!(error.path.as_deref(), Some("main.hyge-world"));
+        assert_eq!(error.operation.as_deref(), Some("open_scene"));
     }
 
     #[test]

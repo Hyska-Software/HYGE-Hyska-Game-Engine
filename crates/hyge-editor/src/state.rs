@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::lifecycle::{EditorSessionRuntime, RuntimeHandle};
@@ -18,11 +18,19 @@ pub struct EditorState {
 }
 
 /// Opaque identity and generation for one authenticated connection.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(crate) struct SessionBinding {
     pub(crate) session_id: String,
     generation: u64,
 }
+
+impl PartialEq for SessionBinding {
+    fn eq(&self, other: &Self) -> bool {
+        self.session_id == other.session_id && self.generation == other.generation
+    }
+}
+
+impl Eq for SessionBinding {}
 
 /// Publicly observable session metadata for diagnostics and tests.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,6 +50,7 @@ struct SessionRecord {
     generation: u64,
     connected: bool,
     transport: Option<SharedViewportTransport>,
+    mutation_gate: Arc<Mutex<()>>,
 }
 
 /// In-process source of truth for reconnectable editor sessions.
@@ -83,11 +92,22 @@ impl SessionRegistry {
                 generation,
                 connected: false,
                 transport: None,
+                mutation_gate: Arc::new(Mutex::new(())),
             });
-        record.last_seen = now;
-        record.generation = generation;
-        record.connected = true;
-        record.transport = None;
+        // A reconnect must not invalidate a generation while a mutation from
+        // the previous connection is still executing.  The old connection
+        // therefore completes atomically before the new generation becomes
+        // authoritative.
+        let mutation_gate = Arc::clone(&record.mutation_gate);
+        {
+            let _guard = mutation_gate
+                .lock()
+                .map_err(|_| SessionError::Unavailable)?;
+            record.last_seen = now;
+            record.generation = generation;
+            record.connected = true;
+            record.transport = None;
+        }
         Ok((
             SessionBinding {
                 session_id,
@@ -162,7 +182,10 @@ impl SessionRegistry {
             .map(|session| Arc::clone(&session.runtime))
     }
 
-    pub(crate) fn runtime(&self, binding: &SessionBinding) -> Result<RuntimeHandle, SessionError> {
+    pub(crate) fn mutation_guard(
+        &self,
+        binding: &SessionBinding,
+    ) -> Result<(RuntimeHandle, Arc<Mutex<()>>), SessionError> {
         let record = self
             .sessions
             .get(&binding.session_id)
@@ -170,7 +193,13 @@ impl SessionRegistry {
         if record.generation != binding.generation || !record.connected {
             return Err(SessionError::Replaced);
         }
-        Ok(record.runtime.clone())
+        Ok((record.runtime.clone(), Arc::clone(&record.mutation_gate)))
+    }
+
+    pub(crate) fn is_current(&self, binding: &SessionBinding) -> bool {
+        self.sessions
+            .get(&binding.session_id)
+            .is_some_and(|record| record.generation == binding.generation && record.connected)
     }
 
     pub(crate) fn open_transport(
@@ -230,6 +259,18 @@ impl SessionRegistry {
         self.sessions
             .retain(|_, record| now.duration_since(record.last_seen) <= ttl);
     }
+
+    pub(crate) fn shutdown(&mut self) {
+        let sessions = std::mem::take(&mut self.sessions);
+        for record in sessions.into_values() {
+            let Ok(_mutation_guard) = record.mutation_gate.lock() else {
+                continue;
+            };
+            if let Ok(mut runtime) = record.runtime.lock() {
+                runtime.shutdown();
+            }
+        }
+    }
 }
 
 /// Session lifecycle errors.
@@ -238,6 +279,7 @@ pub(crate) enum SessionError {
     InvalidId,
     NotFound,
     Replaced,
+    Unavailable,
 }
 
 fn new_session_id() -> String {

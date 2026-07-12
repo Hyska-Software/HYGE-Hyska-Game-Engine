@@ -73,12 +73,15 @@ impl SharedMapping {
     }
 
     /// Reads mapping bytes while keeping raw pointer access internal.
-    pub fn with_bytes<R>(&self, read: impl FnOnce(&[u8]) -> R) -> R {
+    pub fn with_bytes<R>(&self, read: impl FnOnce(&[u8]) -> R) -> Result<R, SharedMemoryError> {
         platform::with_bytes(self, read)
     }
 
     /// Mutates mapping bytes while keeping raw pointer access internal.
-    pub fn with_bytes_mut<R>(&mut self, write: impl FnOnce(&mut [u8]) -> R) -> R {
+    pub fn with_bytes_mut<R>(
+        &mut self,
+        write: impl FnOnce(&mut [u8]) -> R,
+    ) -> Result<R, SharedMemoryError> {
         platform::with_bytes_mut(self, write)
     }
 }
@@ -192,18 +195,25 @@ mod platform {
         })
     }
 
-    pub(super) fn with_bytes<R>(mapping: &SharedMapping, read: impl FnOnce(&[u8]) -> R) -> R {
+    pub(super) fn with_bytes<R>(
+        mapping: &SharedMapping,
+        read: impl FnOnce(&[u8]) -> R,
+    ) -> Result<R, SharedMemoryError> {
         // SAFETY: `view` is live for `mapping` and no mutable byte closure can
         // coexist because it requires `&mut SharedMapping`.
-        read(unsafe { std::slice::from_raw_parts(mapping.view, mapping.len) })
+        Ok(read(unsafe {
+            std::slice::from_raw_parts(mapping.view, mapping.len)
+        }))
     }
 
     pub(super) fn with_bytes_mut<R>(
         mapping: &mut SharedMapping,
         write: impl FnOnce(&mut [u8]) -> R,
-    ) -> R {
+    ) -> Result<R, SharedMemoryError> {
         // SAFETY: `&mut SharedMapping` guarantees exclusive scoped access.
-        write(unsafe { std::slice::from_raw_parts_mut(mapping.view, mapping.len) })
+        Ok(write(unsafe {
+            std::slice::from_raw_parts_mut(mapping.view, mapping.len)
+        }))
     }
 
     #[allow(dead_code)]
@@ -220,10 +230,16 @@ mod platform {
     pub(super) fn open(_: &str, _: usize) -> Result<SharedMapping, SharedMemoryError> {
         Err(SharedMemoryError::UnsupportedPlatform)
     }
-    pub(super) fn with_bytes<R>(_: &SharedMapping, _: impl FnOnce(&[u8]) -> R) -> R {
-        panic!("Windows shared memory is unavailable")
+    pub(super) fn with_bytes<R>(
+        _: &SharedMapping,
+        _: impl FnOnce(&[u8]) -> R,
+    ) -> Result<R, SharedMemoryError> {
+        Err(SharedMemoryError::UnsupportedPlatform)
     }
-    pub(super) fn with_bytes_mut<R>(_: &mut SharedMapping, _: impl FnOnce(&mut [u8]) -> R) -> R {
-        panic!("Windows shared memory is unavailable")
+    pub(super) fn with_bytes_mut<R>(
+        _: &mut SharedMapping,
+        _: impl FnOnce(&mut [u8]) -> R,
+    ) -> Result<R, SharedMemoryError> {
+        Err(SharedMemoryError::UnsupportedPlatform)
     }
 }

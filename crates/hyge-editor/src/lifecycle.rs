@@ -612,6 +612,23 @@ impl EditorSessionRuntime {
         self.snapshot = self.make_snapshot(LifecycleState::Failed, vec![message.into()]);
     }
 
+    /// Releases watcher, project-lock, scene and editor runtime resources.
+    ///
+    /// Shutdown is intentionally explicit and idempotent: dropping the
+    /// project releases its OS lock, while clearing the watcher and reload
+    /// queue prevents callbacks from retaining the runtime after disconnect.
+    pub fn shutdown(&mut self) {
+        self.watcher = None;
+        self.reload_queue = None;
+        self.pending_reload = None;
+        self.scene = None;
+        self.project = None;
+        self.snapshot = self.make_snapshot(
+            LifecycleState::Failed,
+            vec!["editor session closed".to_owned()],
+        );
+    }
+
     fn project_root(&self) -> HygeResult<&Path> {
         self.project
             .as_ref()
