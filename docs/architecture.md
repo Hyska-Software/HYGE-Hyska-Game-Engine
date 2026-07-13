@@ -1402,6 +1402,21 @@ For each `Component` on selected entity:
   idempotent coordinator. Project and scene failures remain structured,
   actionable `engine_error` diagnostics and never panic the service.
 
+### 12.9.5 Real project evidence workflow (R-103)
+
+- The server accept loop pumps invalidated session snapshots through the
+  asynchronous engine renderer and publishes only completed RGBA8 frames to
+  the session-owned R-088 mapping. Scene and camera revisions travel with each
+  frame so Qt ignores repeated or stale commits.
+- Reflected `Transform` edits, undo and redo propagate `GlobalTransform`
+  before render extraction. The viewport therefore changes from engine-owned
+  state rather than from a Python-side preview or synthetic UI mutation.
+- `hyge-tools editor --scene ... --external-scene ... --evidence-dir ...`
+  launches the real frontend and enables the bounded R-103 evidence driver.
+  The driver uses production Qt controllers and retains the shell screenshot,
+  before/after viewport PNGs, protocol JSONL, saved scene and assertion
+  manifest. Its checked-in project fixture is copied before every run.
+
 ### 12.10 Theme
 
 - Dark by default, light toggle.

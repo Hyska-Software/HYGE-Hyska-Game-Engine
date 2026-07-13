@@ -138,6 +138,18 @@ pub enum Cmd {
         /// Optional Python frontend entry point to launch as a child process.
         #[arg(long)]
         frontend: Option<PathBuf>,
+
+        /// Optional `.hyge-world` to open after the frontend connects.
+        #[arg(long)]
+        scene: Option<PathBuf>,
+
+        /// Directory in which the frontend stores E2E evidence artifacts.
+        #[arg(long)]
+        evidence_dir: Option<PathBuf>,
+
+        /// Alternate world copied over the active scene by the R-103 evidence workflow.
+        #[arg(long, requires = "evidence_dir", requires = "scene")]
+        external_scene: Option<PathBuf>,
     },
 
     /// Diagnose a project: missing assets, orphan cache files, schema
@@ -184,7 +196,17 @@ impl Cmd {
                 project,
                 port,
                 frontend,
-            } => cmd::editor::run(project, *port, frontend.as_deref()),
+                scene,
+                evidence_dir,
+                external_scene,
+            } => cmd::editor::run(
+                project,
+                *port,
+                frontend.as_deref(),
+                scene.as_deref(),
+                evidence_dir.as_deref(),
+                external_scene.as_deref(),
+            ),
             Self::Doctor { project } => cmd::doctor::run(project),
         }
     }
@@ -261,13 +283,54 @@ mod tests {
                 project,
                 port,
                 frontend,
+                scene,
+                evidence_dir,
+                external_scene,
             } => {
                 assert_eq!(project, PathBuf::from("."));
                 assert_eq!(port, 4000);
                 assert!(frontend.is_none());
+                assert!(scene.is_none());
+                assert!(evidence_dir.is_none());
+                assert!(external_scene.is_none());
             }
             other => panic!("expected Editor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_editor_scene_and_evidence_arguments() {
+        let cli = parse(&[
+            "hyge-tools",
+            "editor",
+            "project",
+            "--scene",
+            "scenes/main.hyge-world",
+            "--frontend",
+            "tools/hyge-editor-python/main.py",
+            "--evidence-dir",
+            "target/r103-evidence",
+            "--external-scene",
+            "external.hyge-world",
+        ])
+        .expect("editor arguments must parse");
+        let Cmd::Editor {
+            scene,
+            frontend,
+            evidence_dir,
+            external_scene,
+            ..
+        } = cli.cmd
+        else {
+            panic!("expected editor command");
+        };
+        assert_eq!(scene, Some(PathBuf::from("scenes/main.hyge-world")));
+        assert_eq!(
+            frontend,
+            Some(PathBuf::from("tools/hyge-editor-python/main.py"))
+        );
+        assert_eq!(evidence_dir, Some(PathBuf::from("target/r103-evidence")));
+        assert_eq!(external_scene, Some(PathBuf::from("external.hyge-world")));
     }
 
     #[test]

@@ -170,6 +170,44 @@ jobs:
           cargo test -p hyge-runtime-test --release --no-run
           echo "=== hyge-runtime-test compiles + links successfully ==="
 
+  editor-r103-e2e:
+    name: editor-r103-e2e / windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install editor frontend
+        run: python -m pip install -e "tools/hyge-editor-python[test]"
+
+      - name: Build editor launcher
+        run: cargo build -p hyge-tools
+
+      - name: Verify Rust workflow
+        run: cargo test -p hyge-editor --test r103_e2e -- --test-threads=1
+
+      - name: Run real Qt editor workflow
+        run: python tools/hyge-editor-python/tests/run_r103_e2e.py
+
+      - name: Upload R-103 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r103-editor-evidence
+          path: target/r103-evidence/
+          if-no-files-found: error
+
   # -------------------------------------------------------------------------
   # Changelog + breaking-change-without-ADR check (implements R-008).
   #

@@ -25,6 +25,9 @@ def test_viewport_consumes_fake_stable_frame_without_gpu():
     controller.open_transport({"mapping_name": "fake", "generation": 1, "width": 2, "height": 1})
     controller.poll()
     assert received == [1]
+    controller._reader.frames[0] = ViewportFrame(1, 2, 1, bytes([0] * 8))
+    controller.poll()
+    assert received == [1]
     assert controller.state == "connected"
     controller._reader.dropped_frames = 2
     controller.poll()

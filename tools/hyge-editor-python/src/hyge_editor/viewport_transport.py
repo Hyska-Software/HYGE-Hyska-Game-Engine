@@ -17,6 +17,8 @@ class ViewportFrame:
     width: int
     height: int
     pixels: bytes
+    scene_revision: int = 0
+    camera_revision: int = 0
 
 class ViewportTransport:
     """Owns a named Windows mapping and records detected dropped frames."""
@@ -41,7 +43,7 @@ class ViewportTransport:
         self.touch_heartbeat()
         offset = 64 + slot * stride
         header = mapping[offset:offset + 64]
-        frame_id, width, height, pixel_format, byte_len, _scene, _camera, sequence = struct.unpack_from("<QIIIIQQQ", header)
+        frame_id, width, height, pixel_format, byte_len, scene, camera, sequence = struct.unpack_from("<QIIIIQQQ", header)
         committed = struct.unpack_from("<Q", header, 48)[0]
         if not frame_id or pixel_format != 1 or not sequence or sequence != committed:
             return None
@@ -54,7 +56,7 @@ class ViewportTransport:
         self._last_frame_id = frame_id
         if len(pixels) != width * height * 4:
             return None
-        return ViewportFrame(frame_id, width, height, pixels)
+        return ViewportFrame(frame_id, width, height, pixels, scene, camera)
 
     def touch_heartbeat(self) -> None:
         """Publish the consumer process identity and heartbeat."""

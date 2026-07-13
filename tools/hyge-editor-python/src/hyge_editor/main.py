@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,7 @@ from typing import Any
 from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
+import blake3
 
 from .models import AssetGraphModel, AssetModel, AssetPreviewModel, ConsoleModel, HierarchyModel, InspectorModel, ProfilerModel
 from .interaction import EditorInteractionController
@@ -18,6 +21,7 @@ from .viewport_item import ViewportController
 from .input_controller import ViewportInputController
 from .layout_state import EditorPreferences
 from .theme import EditorTheme
+from .e2e import EvidenceWorkflow
 
 
 class EditorBridge(QObject):
@@ -137,6 +141,9 @@ def create_application(
     backend.profilerSnapshot.connect(profiler.update_snapshot)
     def prime_frontend(_handshake: Any) -> None:
         backend.open_project(os.environ.get("HYGE_PROJECT", "."))
+        scene = os.environ.get("HYGE_SCENE")
+        if scene:
+            backend.open_scene(scene)
         backend.request("request_asset_snapshot")
         backend.request("request_console_snapshot")
         backend.request("request_profiler_snapshot")
@@ -166,12 +173,96 @@ def create_application(
     return app, engine, backend, viewport
 
 
+def capture_evidence(
+    app: QApplication,
+    engine: QQmlApplicationEngine,
+    viewport: ViewportController,
+    evidence_dir: Path,
+) -> None:
+    """Capture shell, viewport and persisted-scene evidence for an E2E run."""
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    roots = engine.rootObjects()
+    shell_output = evidence_dir / "editor.png"
+    shell_saved = shell_output.is_file() and shell_output.stat().st_size > 8
+    if roots and not shell_saved:
+        shell_image = roots[0].grabWindow()
+        shell_saved = not shell_image.isNull() and shell_image.save(
+            str(shell_output), "PNG"
+        )
+    viewport_output = evidence_dir / "viewport.png"
+    viewport_saved = viewport_output.is_file() and viewport_output.stat().st_size > 8
+    if not viewport_saved:
+        viewport_saved = viewport.save_png(str(viewport_output))
+    scene = os.environ.get("HYGE_SCENE")
+    saved_output = evidence_dir / "saved.hyge-world"
+    if scene and Path(scene).is_file() and not saved_output.exists():
+        shutil.copy2(scene, saved_output)
+    saved_scene = saved_output.is_file()
+    workflow_path = evidence_dir / "workflow.json"
+    workflow_success = False
+    if workflow_path.is_file():
+        workflow_success = bool(json.loads(workflow_path.read_text(encoding="utf-8")).get("success"))
+    workflow = {}
+    if workflow_path.is_file():
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    evidence_files = [shell_output, viewport_output, saved_output]
+    hashes = {
+        path.name: blake3.blake3(path.read_bytes()).hexdigest()
+        for path in evidence_files if path.is_file()
+    }
+    (evidence_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "editor_png": shell_saved,
+                "viewport_png": viewport_saved,
+                "saved_scene": saved_scene,
+                "workflow_success": workflow_success,
+                "viewport_width": viewport.provider._image.width(),
+                "viewport_height": viewport.provider._image.height(),
+                "scene_revision": viewport.last_scene_revision,
+                "camera_revision": viewport.last_camera_revision,
+                "entity": workflow.get("entity"),
+                "scene_node_id": workflow.get("scene_id"),
+                "assertions": {
+                    "workflow": workflow_success,
+                    "persist_on_reload": workflow.get("reload_translation") == [3.0, 1.0, 0.0],
+                },
+                "hash_algorithm": "blake3",
+                "hashes": hashes,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 def main() -> int:
     """Start the Qt application and connect it to the Rust service."""
-    app, engine, session, _viewport = create_application()
+    app, engine, session, viewport = create_application()
     if not engine.rootObjects():
         session.close()
         return 1
+    evidence = os.environ.get("HYGE_EDITOR_EVIDENCE_DIR")
+    if evidence:
+        evidence_dir = Path(evidence)
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        session.enable_trace(str(evidence_dir / "protocol.jsonl"))
+        app.aboutToQuit.connect(lambda: capture_evidence(app, engine, viewport, evidence_dir))
+        if os.environ.get("HYGE_EDITOR_E2E") == "1":
+            scene = Path(os.environ["HYGE_SCENE"])
+            external = Path(os.environ["HYGE_EDITOR_EXTERNAL_SCENE"])
+            workflow = EvidenceWorkflow(
+                app,
+                session,
+                engine.rootContext().contextProperty("editorInteraction"),
+                viewport,
+                scene,
+                external,
+                evidence_dir,
+                lambda: capture_evidence(app, engine, viewport, evidence_dir),
+                engine,
+            )
+            engine.setProperty("r103EvidenceWorkflow", workflow)
     session.connect_async()
     return app.exec()
 

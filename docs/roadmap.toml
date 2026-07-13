@@ -1726,7 +1726,7 @@ title = "Real project end-to-end editor workflow"
 phase = "phase_12"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "high"
 dependencies = ["R-098", "R-099", "R-100", "R-101", "R-102"]
 summary = "Prove the complete editor against a checked-in scene and asset fixture, not mocks alone."
@@ -1738,6 +1738,8 @@ acceptance = [
   "hot-reloads the scene while preserving PersistOnReload",
   "captures protocol trace, screenshot and persisted output as evidence"
 ]
+completed_at = "2026-07-12"
+completion_notes = "Implemented the real R-103 project workflow. SessionRegistry pumps invalidated ECS FrameSnapshots through a session-owned EditorRenderBridge into shared memory, discards stale revisions and reports renderer failures as degraded state. The evidence runner copies the checked-in project, cooks its real glTF mesh/material through hyge-tools import, then hyge-tools editor launches the PySide6/QML frontend; mesh/material handles extracted from the ECS snapshot select the corresponding deterministic cooked slots. The production interaction controller selects Persistent Cube, edits reflected Transform.translation, observes a revision-matched changed renderer frame, performs undo/redo/save, atomically replaces the scene and verifies PersistOnReload restored both SceneNodeId and translation [3,1,0]. Evidence under target/r103-evidence contains editor.png, viewport PNGs, chronologically correlated and recursively redacted protocol.jsonl, saved.hyge-world, workflow.json and a manifest with BLAKE3 hashes, dimensions, revisions, entity identity and assertion results. CI runs the Windows workflow and uploads the artifact. Evidence: run_r103_e2e.py reported complete at 640x360 with distinct before/after frames; cargo fmt --all -- --check, cargo clippy --workspace --all-targets -- --deny warnings, cargo test --workspace -- --test-threads=1, RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps, and the offscreen/software Python suite (24 passed) all succeeded."
 
 [[items]]
 id = "R-104"

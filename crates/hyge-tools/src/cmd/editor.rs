@@ -9,8 +9,21 @@ use hyge_editor::{EditorServer, EditorServerConfig};
 
 /// Starts the loopback editor backend. The backend remains the owner of the
 /// engine state; the optional Python process is only a protocol client.
-pub fn run(project: &Path, port: u16, frontend: Option<&Path>) -> HygeResult<()> {
+pub fn run(
+    project: &Path,
+    port: u16,
+    frontend: Option<&Path>,
+    scene: Option<&Path>,
+    evidence_dir: Option<&Path>,
+    external_scene: Option<&Path>,
+) -> HygeResult<()> {
     let project = validate_project(project)?;
+    let scene = scene
+        .map(|scene| validate_scene(&project, scene))
+        .transpose()?;
+    let external_scene = external_scene
+        .map(|scene| validate_scene(&project, scene))
+        .transpose()?;
     let token = editor_token();
     let server = EditorServer::bind(EditorServerConfig {
         bind_address: format!("127.0.0.1:{port}"),
@@ -22,12 +35,43 @@ pub fn run(project: &Path, port: u16, frontend: Option<&Path>) -> HygeResult<()>
     println!("HYGE_EDITOR_ADDRESS={address}");
 
     let child = frontend
-        .map(|path| spawn_frontend(path, &project, &address.to_string(), &token))
+        .map(|path| {
+            spawn_frontend(
+                path,
+                &project,
+                scene.as_deref(),
+                evidence_dir,
+                external_scene.as_deref(),
+                &address.to_string(),
+                &token,
+            )
+        })
         .transpose()?;
     if let Some(child) = child {
         server.attach_frontend(child)?;
     }
     server.run().map_err(hyge_core::result::HygeError::from)
+}
+
+fn validate_scene(project: &Path, scene: &Path) -> HygeResult<PathBuf> {
+    let candidate = if scene.is_absolute() {
+        scene.to_path_buf()
+    } else {
+        project.join(scene)
+    };
+    let canonical = candidate.canonicalize()?;
+    if !canonical.starts_with(project)
+        || canonical
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("hyge-world")
+    {
+        return Err(hyge_core::result::HygeError::invalid_argument(format!(
+            "editor scene must be a .hyge-world below the project root: {}",
+            canonical.display()
+        )));
+    }
+    Ok(canonical)
 }
 
 fn validate_project(project: &Path) -> HygeResult<PathBuf> {
@@ -62,15 +106,30 @@ fn editor_token() -> String {
 fn spawn_frontend(
     path: &Path,
     project: &Path,
+    scene: Option<&Path>,
+    evidence_dir: Option<&Path>,
+    external_scene: Option<&Path>,
     address: &str,
     token: &str,
 ) -> std::io::Result<Child> {
-    Command::new("python")
+    let mut command = Command::new("python");
+    command
         .arg(path)
         .env("HYGE_EDITOR_ADDRESS", address)
         .env("HYGE_EDITOR_TOKEN", token)
-        .env("HYGE_PROJECT", project)
-        .spawn()
+        .env("HYGE_PROJECT", project);
+    if let Some(scene) = scene {
+        command.env("HYGE_SCENE", scene);
+    }
+    if let Some(evidence_dir) = evidence_dir {
+        command.env("HYGE_EDITOR_EVIDENCE_DIR", evidence_dir);
+    }
+    if let Some(external_scene) = external_scene {
+        command
+            .env("HYGE_EDITOR_E2E", "1")
+            .env("HYGE_EDITOR_EXTERNAL_SCENE", external_scene);
+    }
+    command.spawn()
 }
 
 #[cfg(test)]
@@ -96,5 +155,19 @@ mod tests {
     #[test]
     fn generated_tokens_are_nonempty() {
         assert!(!editor_token().is_empty());
+    }
+
+    #[test]
+    fn validates_scene_below_project() {
+        let root = std::env::temp_dir().join(format!("hyge-editor-scene-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("create temp project");
+        let scene = root.join("main.hyge-world");
+        fs::write(&scene, b"scene").expect("write scene");
+        let canonical_root = root.canonicalize().expect("canonical root");
+        assert_eq!(
+            validate_scene(&canonical_root, Path::new("main.hyge-world")).expect("scene"),
+            scene.canonicalize().expect("canonical scene")
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

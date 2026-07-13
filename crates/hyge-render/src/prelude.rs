@@ -33,7 +33,7 @@ pub use crate::post::{
     TONEMAP_SHADER_SOURCE,
 };
 pub use crate::profiler::{debug_overlay, fps_from_duration, FrameStats, GpuProfiler, PassStats};
-pub use crate::renderer::Renderer;
+pub use crate::renderer::{Renderer, ViewportGeometry};
 pub use crate::shadow::{
     build_cascade_data, AtlasRect, CascadeData, CascadeSplits, ShadowAtlasAllocation,
     ShadowAtlasAllocator, CSM_CASCADE_COUNT,

@@ -44,7 +44,10 @@ pub use transport::{
     CameraCommand, FrameHeader, InputBridge, SharedViewportTransport, TransportState,
     ViewportInput, ViewportInputBatch, ViewportRing,
 };
-pub use viewport::{EditorCameraState, EditorRenderBridge, ViewportRenderState, ViewportState};
+pub use viewport::{
+    load_viewport_geometry, EditorCameraState, EditorRenderBridge, ViewportRenderState,
+    ViewportState,
+};
 
 /// Common editor exports.
 pub mod prelude {

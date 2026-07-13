@@ -143,6 +143,16 @@ impl ViewportRing {
         (slot.header.as_ref()? == expected).then(|| slot.pixels.clone())
     }
 
+    /// Returns the newest committed frame header, if any.
+    #[must_use]
+    pub fn newest_header(&self) -> Option<FrameHeader> {
+        self.slots
+            .iter()
+            .filter_map(|slot| slot.header.as_ref())
+            .max_by_key(|header| header.frame_id)
+            .cloned()
+    }
+
     /// Marks the ring as closing and prevents further writes.
     pub fn close(&mut self) {
         self.state = TransportState::Closed;

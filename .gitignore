@@ -346,3 +346,27 @@ vulkaninfo-output.txt
 
 .hermes/
 
+tools/hyge-editor-python/src/hyge_editor/__pycache__/input_controller.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/interaction.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/layout_state.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/models.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/session.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/theme.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/viewport_item.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/viewport_transport.cpython-314.pyc
+tools/hyge-editor-python/tests/__pycache__/fake_server.cpython-314.pyc
+tools/hyge-editor-python/tests/__pycache__/test_ipc.cpython-314-pytest-9.1.1.pyc
+tools/hyge-editor-python/tests/__pycache__/test_models.cpython-314-pytest-9.1.1.pyc
+tools/hyge-editor-python/tests/__pycache__/test_r100_preferences.cpython-314-pytest-9.1.1.pyc
+tools/hyge-editor-python/tests/__pycache__/test_shell.cpython-314-pytest-9.1.1.pyc
+tools/hyge-editor-python/tests/__pycache__/test_viewport.cpython-314-pytest-9.1.1.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/__init__.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/e2e.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/ipc.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/main.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/__init__.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/ipc.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/main.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/__init__.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/ipc.cpython-314.pyc
+tools/hyge-editor-python/src/hyge_editor/__pycache__/main.cpython-314.pyc

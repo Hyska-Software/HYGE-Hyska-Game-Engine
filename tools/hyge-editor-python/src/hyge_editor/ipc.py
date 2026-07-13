@@ -116,6 +116,7 @@ class EditorClient:
         self._session_id: str | None = None
         self._socket: socket.socket | None = None
         self.lifecycle_statuses: list[Envelope] = []
+        self.last_request: Envelope | None = None
 
     def connect(self) -> Envelope:
         """Connect and complete the authenticated handshake."""
@@ -166,6 +167,7 @@ class EditorClient:
         message_type: str,
         payload: dict[str, Any] | None = None,
         on_event: Callable[[Envelope], None] | None = None,
+        on_request: Callable[[Envelope], None] | None = None,
     ) -> Envelope:
         """Send a request while delivering intermediate envelopes to ``on_event``.
 
@@ -177,6 +179,9 @@ class EditorClient:
         if self._socket is None:
             raise RuntimeError("editor client is not connected")
         envelope = Envelope(str(uuid.uuid4()), message_type, payload or {})
+        self.last_request = envelope
+        if on_request is not None:
+            on_request(envelope)
         self._socket.sendall(envelope.to_bytes())
         try:
             while True:

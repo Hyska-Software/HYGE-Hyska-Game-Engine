@@ -9,6 +9,8 @@ use bevy_ecs::world::World;
 use hyge_asset::{AssetDb, AssetId, AssetResolver, FileWatcher, ReloadQueue};
 use hyge_core::result::{HygeError, HygeResult};
 use hyge_ecs::plugin::HygePlugin;
+use hyge_render::prelude::RenderView;
+use hyge_scene::extract::{render_extract, FrameSnapshot};
 use hyge_scene::{
     load_world_document_from_path, reload_loaded_scene_from_disk_detailed,
     sync_editor_layer_from_world, LoadedSceneState, PrefabId, ScenePlugin, SceneReloadReport,
@@ -103,6 +105,14 @@ pub enum SceneReloadEvent {
     Reloaded(SceneReloadReport),
     /// The external file changed while local state was dirty.
     Conflict(PendingSceneReload),
+}
+
+/// Immutable work submitted by the session-owned viewport pump.
+pub(crate) struct ViewportRenderRequest {
+    pub(crate) revision: u64,
+    pub(crate) camera_revision: u64,
+    pub(crate) view: RenderView,
+    pub(crate) snapshot: FrameSnapshot,
 }
 
 impl EditorSessionRuntime {
@@ -486,6 +496,57 @@ impl EditorSessionRuntime {
         self.viewport.clone()
     }
 
+    /// Produces one real engine render request when the viewport is invalid.
+    ///
+    /// The session keeps ECS ownership while the returned snapshot is consumed
+    /// asynchronously by the renderer thread.
+    pub(crate) fn next_viewport_render(&mut self) -> Option<ViewportRenderRequest> {
+        if self.scene.is_none() || self.viewport.last_frame_revision.is_some() {
+            return None;
+        }
+        let revision = self.snapshot_revision;
+        let camera_revision = self.viewport.camera_revision;
+        let view = self
+            .editor_camera
+            .render_view(self.viewport.width, self.viewport.height);
+        hyge_scene::prelude::transform_propagate_system(&mut self.world);
+        Some(ViewportRenderRequest {
+            revision,
+            camera_revision,
+            view,
+            snapshot: render_extract(&mut self.world),
+        })
+    }
+
+    /// Records a frame that still corresponds to the current scene and camera.
+    pub(crate) fn complete_viewport_render(&mut self, revision: u64, camera_revision: u64) {
+        if self.snapshot_revision == revision && self.viewport.camera_revision == camera_revision {
+            self.viewport.last_frame_revision = Some(revision);
+            self.viewport.state = crate::viewport::ViewportRenderState::Ready;
+        }
+    }
+
+    /// Records a recoverable renderer failure without inventing a viewport frame.
+    pub(crate) fn degrade_viewport(&mut self, message: impl Into<String>) {
+        self.viewport.state = crate::viewport::ViewportRenderState::Degraded;
+        self.viewport.last_frame_revision = Some(self.snapshot_revision);
+        self.snapshot = self.make_snapshot(LifecycleState::Degraded, vec![message.into()]);
+    }
+
+    pub(crate) fn viewport_geometry(
+        &mut self,
+    ) -> Result<hyge_render::prelude::ViewportGeometry, String> {
+        let snapshot = render_extract(&mut self.world);
+        let draw = snapshot.draw_commands.first().ok_or_else(|| {
+            "loaded scene contains no renderable mesh/material handles".to_owned()
+        })?;
+        crate::viewport::load_viewport_geometry(
+            self.project_root().map_err(|error| error.to_string())?,
+            draw.mesh_id,
+            draw.material_id,
+        )
+    }
+
     /// Applies one ordered, rate-limited input batch for a transport generation.
     pub fn apply_viewport_input(
         &mut self,
@@ -557,6 +618,7 @@ impl EditorSessionRuntime {
         self.check_revision(expected_revision)?;
         let command_kind = command.clone();
         let effect = self.history.apply(command, &mut self.world)?;
+        hyge_scene::prelude::transform_propagate_system(&mut self.world);
         self.update_selection_after_command(&command_kind, &effect);
         self.bump_snapshot_revision();
         let snapshot = self
@@ -572,6 +634,7 @@ impl EditorSessionRuntime {
     ) -> Result<(CommandEffect, EditorSnapshot), CommandFailure> {
         self.check_revision(expected_revision)?;
         let effect = self.history.undo(&mut self.world)?;
+        hyge_scene::prelude::transform_propagate_system(&mut self.world);
         self.filter_selection_to_live_entities();
         self.bump_snapshot_revision();
         let snapshot = self
@@ -587,6 +650,7 @@ impl EditorSessionRuntime {
     ) -> Result<(CommandEffect, EditorSnapshot), CommandFailure> {
         self.check_revision(expected_revision)?;
         let effect = self.history.redo(&mut self.world)?;
+        hyge_scene::prelude::transform_propagate_system(&mut self.world);
         self.filter_selection_to_live_entities();
         self.bump_snapshot_revision();
         let snapshot = self

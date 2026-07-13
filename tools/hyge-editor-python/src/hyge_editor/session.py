@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -77,6 +80,7 @@ class EditorSession(QObject):
         self._last_scene: str | None = None
         self._had_connection = False
         self._needs_reopen = False
+        self._trace_path = os.environ.get("HYGE_EDITOR_PROTOCOL_TRACE")
 
     @property
     def state(self) -> str:
@@ -92,6 +96,17 @@ class EditorSession(QObject):
         self._set_state("connecting")
         self._thread = threading.Thread(target=self._run, name="hyge-editor-ipc", daemon=True)
         self._thread.start()
+
+    def enable_trace(self, path: str) -> None:
+        """Enable a token-free JSONL protocol trace at ``path``."""
+        trace_path = os.path.abspath(path)
+        os.makedirs(os.path.dirname(trace_path), exist_ok=True)
+        open(trace_path, "w", encoding="utf-8").close()
+        self._trace_path = trace_path
+
+    def disable_trace(self) -> None:
+        """Stop appending protocol records before evidence hashing."""
+        self._trace_path = None
 
     def request(self, message_type: str, payload: dict[str, Any] | None = None) -> None:
         """Queue a protocol request for the connection worker."""
@@ -209,6 +224,7 @@ class EditorSession(QObject):
                 request.message_type,
                 request.payload,
                 on_event=self._emit_envelope,
+                on_request=lambda envelope: self._record_trace("out", envelope),
             )
             self._emit_envelope(response)
             if response.error is not None:
@@ -228,6 +244,7 @@ class EditorSession(QObject):
             ]
 
     def _emit_envelope(self, envelope: Envelope) -> None:
+        self._record_trace("in", envelope)
         self.envelopeReceived.emit(envelope)
         signal = {
             "lifecycle_status": self.lifecycleStatus,
@@ -251,6 +268,42 @@ class EditorSession(QObject):
         }.get(envelope.message_type)
         if signal is not None:
             signal.emit(envelope)
+
+    def _record_trace(
+        self,
+        direction: str,
+        envelope: Envelope,
+    ) -> None:
+        """Append a token-free protocol trace record when evidence is enabled."""
+        if not self._trace_path:
+            return
+        sensitive = {"session_token", "token", "authorization", "secret"}
+
+        def redact(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {
+                    key: "[REDACTED]" if key.lower() in sensitive else redact(item)
+                    for key, item in value.items()
+                }
+            if isinstance(value, list):
+                return [redact(item) for item in value]
+            return value
+
+        record = {
+            "timestamp_ms": int(time.time() * 1000),
+            "direction": direction,
+            "message_id": envelope.message_id,
+            "correlation_id": envelope.correlation_id,
+            "protocol_version": envelope.protocol_version,
+            "message_type": envelope.message_type,
+            "payload": redact(envelope.payload),
+            "error": redact(envelope.error),
+        }
+        try:
+            with open(self._trace_path, "a", encoding="utf-8") as trace:
+                trace.write(json.dumps(record, sort_keys=True) + "\n")
+        except OSError as error:
+            self.protocolError.emit(f"protocol trace write failed: {error}")
 
     def _set_state(self, state: str) -> None:
         self._state = state

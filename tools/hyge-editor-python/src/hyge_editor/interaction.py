@@ -157,6 +157,9 @@ class EditorInteractionController(QObject):
 
     def _on_selection(self, envelope: Envelope) -> None:
         payload = envelope.payload if hasattr(envelope, "payload") else envelope
+        revision = payload.get("revision") if isinstance(payload, dict) else None
+        if isinstance(revision, int):
+            self._set_revision(revision)
         entities = payload.get("entities", []) if isinstance(payload, dict) else []
         if isinstance(entities, list):
             self._selection = [entity for entity in entities if isinstance(entity, int)]

@@ -5,19 +5,36 @@ use std::time::{Duration, Instant};
 
 use bevy_ecs::world::World;
 use hyge_editor::{EditorCameraState, EditorRenderBridge, EditorSessionRuntime};
-use hyge_render::prelude::{RenderView, RendererConfig};
+use hyge_render::prelude::{GpuMaterial, GpuMesh, RenderView, RendererConfig, ViewportGeometry};
 use hyge_scene::extract::render_extract;
 use hyge_scene::prelude::{LightComponent, MaterialHandle, MeshHandle, WorldTransform};
 
 fn known_scene() -> hyge_scene::extract::FrameSnapshot {
+    scene_at(0.0)
+}
+
+fn scene_at(x: f32) -> hyge_scene::extract::FrameSnapshot {
     let mut world = World::new();
     world.spawn(LightComponent::sun([0.0, -1.0, 0.0], [1.0, 0.95, 0.9], 1.0));
     world.spawn((
         MeshHandle(0),
         MaterialHandle(0),
-        WorldTransform::from_translation(0.0, 0.0, 0.0),
+        WorldTransform::from_translation(x, 0.0, 0.0),
     ));
     render_extract(&mut world)
+}
+
+fn test_geometry() -> ViewportGeometry {
+    ViewportGeometry {
+        vertices: vec![
+            [-1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            [1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.5, 1.0],
+        ],
+        indices: vec![0, 1, 2],
+        mesh: GpuMesh::default(),
+        material: GpuMaterial::default(),
+    }
 }
 
 #[test]
@@ -50,7 +67,7 @@ fn viewport_resize_clamps_and_invalidates_frame() {
 
 #[test]
 fn known_scene_renders_deterministic_editor_frame_and_resizes() {
-    let bridge = match EditorRenderBridge::new(RendererConfig::default()) {
+    let bridge = match EditorRenderBridge::new(RendererConfig::default(), test_geometry()) {
         Ok(bridge) => bridge,
         Err(error) if error.contains("no wgpu adapter") => {
             eprintln!("skipping: no wgpu adapter available");
@@ -92,7 +109,23 @@ fn known_scene_renders_deterministic_editor_frame_and_resizes() {
     );
 
     bridge
-        .submit(8, RenderView::editor_default(16, 12), &snapshot)
+        .submit(8, view, &scene_at(3.0))
+        .expect("submit translated frame");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let translated = loop {
+        if let Some(frame) = bridge.try_receive() {
+            break frame.expect("translated editor frame");
+        }
+        assert!(Instant::now() < deadline, "translated frame timed out");
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert_ne!(
+        translated.hash, first.hash,
+        "translated scene must change pixels"
+    );
+
+    bridge
+        .submit(9, RenderView::editor_default(16, 12), &snapshot)
         .expect("submit resized frame");
     let deadline = Instant::now() + Duration::from_secs(10);
     let second = loop {
@@ -102,6 +135,6 @@ fn known_scene_renders_deterministic_editor_frame_and_resizes() {
         assert!(Instant::now() < deadline, "resized editor frame timed out");
         thread::sleep(Duration::from_millis(10));
     };
-    assert_eq!((second.width, second.height, second.revision), (16, 12, 8));
+    assert_eq!((second.width, second.height, second.revision), (16, 12, 9));
     assert_eq!(second.pixels.len(), 16 * 12 * 4);
 }

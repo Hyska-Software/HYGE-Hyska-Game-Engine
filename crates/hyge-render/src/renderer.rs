@@ -47,13 +47,14 @@
 
 use std::sync::Arc;
 
+use wgpu::util::DeviceExt;
 use winit::window::Window as WinitWindow;
 
 use hyge_core::prelude::*;
 use hyge_render_graph::prelude::*;
 use hyge_window::prelude::Window;
 
-use crate::bindless::{BindlessConfig, BindlessTable};
+use crate::bindless::{BindlessConfig, BindlessTable, GpuMaterial, GpuMesh};
 use crate::clustered_forward::ClusteredForwardPass;
 use crate::config::RendererConfig;
 use crate::ibl::EnvironmentBake;
@@ -61,6 +62,19 @@ use crate::ibl_gpu::{self, IblResources};
 use crate::profiler::{FrameStats, GpuProfiler};
 use crate::triangle::TrianglePass;
 use crate::viewport::{OffscreenTarget, ViewportFrame};
+
+/// Packed geometry and bindless metadata used by an offscreen viewport.
+#[derive(Clone, Debug)]
+pub struct ViewportGeometry {
+    /// Vertices matching the 48-byte `PbrPackedVertex` WGSL layout.
+    pub vertices: Vec<[f32; 12]>,
+    /// Triangle indices.
+    pub indices: Vec<u32>,
+    /// Mesh descriptor written to the referenced bindless slot.
+    pub mesh: GpuMesh,
+    /// Material descriptor written to the referenced bindless slot.
+    pub material: GpuMaterial,
+}
 
 /// The runtime renderer.
 pub struct Renderer {
@@ -124,6 +138,7 @@ pub struct Renderer {
     clustered: Option<ClusteredForwardPass>,
     /// Persistent editor/offscreen target, owned by the renderer.
     offscreen: Option<OffscreenTarget>,
+    viewport_geometry: Option<ViewportGeometry>,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -261,6 +276,7 @@ impl Renderer {
             graph: RenderGraph::new(),
             clustered: None,
             offscreen: None,
+            viewport_geometry: None,
         })
     }
 
@@ -335,7 +351,14 @@ impl Renderer {
             graph: RenderGraph::new(),
             clustered: None,
             offscreen: None,
+            viewport_geometry: None,
         })
+    }
+
+    /// Installs real packed geometry for subsequent offscreen viewport frames.
+    pub fn set_viewport_geometry(&mut self, geometry: ViewportGeometry) {
+        self.viewport_geometry = Some(geometry);
+        self.clustered = None;
     }
 
     /// Begins a frame: acquires the swapchain texture and stores
@@ -560,23 +583,32 @@ impl Renderer {
         // Lazily construct the clustered-forward pass.
         if self.clustered.is_none() {
             let device: Arc<wgpu::Device> = Arc::clone(&self.device);
-            // Size for at least one packed PBR vertex
-            // (48 bytes per vertex from `pbr.wgsl`).
-            let pbr_stride: u64 = 48;
-            let vertex_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("hyge-render/pbr-vertex-buffer"),
-                size: pbr_stride,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::VERTEX,
-                mapped_at_creation: false,
-            }));
-            let index_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("hyge-render/pbr-index-buffer"),
-                size: std::mem::size_of::<u32>() as u64, // 1 index placeholder
-                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
+            let empty_vertices = [[0.0_f32; 12]];
+            let empty_indices = [0_u32];
+            let (vertices, indices) = self.viewport_geometry.as_ref().map_or(
+                (empty_vertices.as_slice(), empty_indices.as_slice()),
+                |geometry| (geometry.vertices.as_slice(), geometry.indices.as_slice()),
+            );
+            let vertex_buffer = Arc::new(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("hyge-render/pbr-vertex-buffer"),
+                    contents: bytemuck::cast_slice(vertices),
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_DST
+                        | wgpu::BufferUsages::VERTEX,
+                },
+            ));
+            let index_buffer = Arc::new(device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("hyge-render/pbr-index-buffer"),
+                    contents: bytemuck::cast_slice(indices),
+                    usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                },
+            ));
+            if let Some(geometry) = self.viewport_geometry.as_ref() {
+                self.bindless.write_mesh(0, &geometry.mesh);
+                self.bindless.write_material(0, &geometry.material);
+            }
             let pass = ClusteredForwardPass::new(
                 Arc::clone(&device),
                 Arc::clone(&self.bindless),
@@ -616,7 +648,10 @@ impl Renderer {
                 material_id: cmd.material_id,
                 first_instance: cmd.first_instance,
                 instance_count: cmd.instance_count,
-                index_count: 3,
+                index_count: self
+                    .viewport_geometry
+                    .as_ref()
+                    .map_or(0, |geometry| geometry.indices.len() as u32),
                 first_index: 0,
                 base_vertex: 0,
             })

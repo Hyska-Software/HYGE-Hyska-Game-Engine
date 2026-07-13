@@ -60,6 +60,9 @@ class ViewportController(QObject):
         self._height = 360
         self._dropped_frames = 0
         self._last_transport_drops = 0
+        self._last_frame_id = 0
+        self._last_scene_revision = 0
+        self._last_camera_revision = 0
         self._provider = ViewportImageProvider()
         self._timer = QTimer(self)
         self._timer.setInterval(16)
@@ -94,6 +97,21 @@ class ViewportController(QObject):
         """Return the cumulative count of dropped or unstable frames."""
         return self._dropped_frames
 
+    @property
+    def last_scene_revision(self) -> int:
+        """Return the authoritative scene revision carried by the last frame."""
+        return self._last_scene_revision
+
+    @property
+    def last_camera_revision(self) -> int:
+        """Return the camera revision carried by the last frame."""
+        return self._last_camera_revision
+
+    def save_png(self, path: str) -> bool:
+        """Persist the last real transport frame for E2E evidence."""
+        image = self._provider._image
+        return not image.isNull() and image.save(path, "PNG")
+
     def open_transport(self, envelope: Any) -> None:
         """Open the mapping described by ``viewport_transport_ready``."""
         self._open(envelope)
@@ -113,6 +131,8 @@ class ViewportController(QObject):
             size = 64 + 3 * (64 + self._width * self._height * 4)
             self._reader = self._reader_factory(self._mapping_name, size)
             self._last_transport_drops = 0
+            self._last_frame_id = 0
+            self._last_scene_revision = 0
             self._timer.start()
             self.transportChanged.emit("connected")
         except (KeyError, OSError, ValueError) as exc:
@@ -135,8 +155,11 @@ class ViewportController(QObject):
         if delta:
             self._dropped_frames += delta
             self.droppedFramesChanged.emit(self._dropped_frames)
-        if newest is None:
+        if newest is None or newest.frame_id <= self._last_frame_id:
             return
+        self._last_frame_id = newest.frame_id
+        self._last_scene_revision = newest.scene_revision
+        self._last_camera_revision = newest.camera_revision
         image = QImage(newest.pixels, newest.width, newest.height, newest.width * 4, QImage.Format.Format_RGBA8888).copy()
         self._provider.set_image(image)
         self.imageChanged.emit()
@@ -149,4 +172,6 @@ class ViewportController(QObject):
             self._reader.close()
             self._reader = None
         self._generation = 0
+        self._last_frame_id = 0
+        self._last_scene_revision = 0
         self.transportChanged.emit("disconnected")

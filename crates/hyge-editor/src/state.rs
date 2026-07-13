@@ -5,8 +5,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use hyge_render::prelude::RendererConfig;
+
 use crate::lifecycle::{EditorSessionRuntime, RuntimeHandle};
 use crate::transport::{SharedViewportTransport, MAX_VIEWPORT_DIMENSION};
+use crate::viewport::EditorRenderBridge;
 
 /// Mutable metadata owned by one editor session.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -50,6 +53,9 @@ struct SessionRecord {
     generation: u64,
     connected: bool,
     transport: Option<SharedViewportTransport>,
+    render_bridge: Option<EditorRenderBridge>,
+    render_in_flight: bool,
+    render_revisions: Option<(u64, u64)>,
     mutation_gate: Arc<Mutex<()>>,
 }
 
@@ -92,6 +98,9 @@ impl SessionRegistry {
                 generation,
                 connected: false,
                 transport: None,
+                render_bridge: None,
+                render_in_flight: false,
+                render_revisions: None,
                 mutation_gate: Arc::new(Mutex::new(())),
             });
         // A reconnect must not invalidate a generation while a mutation from
@@ -107,6 +116,9 @@ impl SessionRegistry {
             record.generation = generation;
             record.connected = true;
             record.transport = None;
+            record.render_bridge = None;
+            record.render_in_flight = false;
+            record.render_revisions = None;
         }
         Ok((
             SessionBinding {
@@ -205,6 +217,8 @@ impl SessionRegistry {
     pub(crate) fn open_transport(
         &mut self,
         binding: &SessionBinding,
+        width: u32,
+        height: u32,
     ) -> Result<(String, u64), SessionError> {
         let record = self
             .sessions
@@ -217,11 +231,33 @@ impl SessionRegistry {
             "Local\\hyge-editor-{}-{}",
             binding.session_id, binding.generation
         );
-        let bytes = 64 + 3 * (64 + 640 * 360 * 4);
+        if width == 0
+            || height == 0
+            || width > MAX_VIEWPORT_DIMENSION
+            || height > MAX_VIEWPORT_DIMENSION
+        {
+            return Err(SessionError::Unavailable);
+        }
+        let geometry = record
+            .runtime
+            .lock()
+            .map_err(|_| SessionError::Unavailable)?
+            .viewport_geometry()
+            .map_err(|_| SessionError::RendererUnavailable)?;
+        let bridge = if let Some(bridge) = record.render_bridge.take() {
+            bridge
+        } else {
+            EditorRenderBridge::new(RendererConfig::default(), geometry)
+                .map_err(|_| SessionError::RendererUnavailable)?
+        };
+        let bytes = 64 + 3 * (64 + width as usize * height as usize * 4);
         record.transport = Some(
             SharedViewportTransport::create(name.clone(), binding.generation, bytes)
                 .map_err(|_| SessionError::NotFound)?,
         );
+        record.render_bridge = Some(bridge);
+        record.render_in_flight = false;
+        record.render_revisions = None;
         Ok((name, binding.generation))
     }
 
@@ -234,6 +270,8 @@ impl SessionRegistry {
             return Err(SessionError::Replaced);
         }
         record.transport = None;
+        record.render_in_flight = false;
+        record.render_revisions = None;
         Ok(())
     }
 
@@ -251,7 +289,78 @@ impl SessionRegistry {
             return Err(SessionError::NotFound);
         }
         self.close_transport(binding)?;
-        self.open_transport(binding)
+        self.open_transport(binding, width, height)
+    }
+
+    /// Pumps real extracted ECS frames through each session transport.
+    pub(crate) fn pump_viewports(&mut self) {
+        for record in self.sessions.values_mut() {
+            if !record.connected {
+                continue;
+            }
+            let (Some(transport), Some(bridge)) =
+                (record.transport.as_mut(), record.render_bridge.as_ref())
+            else {
+                continue;
+            };
+            if let Some(result) = bridge.try_receive() {
+                record.render_in_flight = false;
+                let revisions = record.render_revisions.take();
+                match result {
+                    Ok(frame) => {
+                        let Ok(mut runtime) = record.runtime.lock() else {
+                            continue;
+                        };
+                        let (scene_revision, camera_revision) = revisions
+                            .unwrap_or((frame.revision, runtime.viewport_state().camera_revision));
+                        let current = runtime.viewport_state();
+                        if current.scene_revision != scene_revision
+                            || current.camera_revision != camera_revision
+                        {
+                            continue;
+                        }
+                        if let Err(error) = transport.publish(
+                            frame.width,
+                            frame.height,
+                            scene_revision,
+                            camera_revision,
+                            &frame.pixels,
+                        ) {
+                            runtime
+                                .degrade_viewport(format!("viewport transport publish: {error}"));
+                        } else {
+                            runtime.complete_viewport_render(frame.revision, camera_revision);
+                        }
+                    }
+                    Err(error) => {
+                        if let Ok(mut runtime) = record.runtime.lock() {
+                            runtime.degrade_viewport(format!("viewport render: {error}"));
+                        }
+                    }
+                }
+            }
+            if record.render_in_flight {
+                continue;
+            }
+            let request = record
+                .runtime
+                .lock()
+                .ok()
+                .and_then(|mut runtime| runtime.next_viewport_render());
+            if let Some(request) = request {
+                match bridge.submit(request.revision, request.view, &request.snapshot) {
+                    Ok(()) => {
+                        record.render_in_flight = true;
+                        record.render_revisions = Some((request.revision, request.camera_revision));
+                    }
+                    Err(error) => {
+                        if let Ok(mut runtime) = record.runtime.lock() {
+                            runtime.degrade_viewport(format!("viewport submit: {error}"));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub(crate) fn expire(&mut self, ttl: Duration) {
@@ -280,6 +389,7 @@ pub(crate) enum SessionError {
     NotFound,
     Replaced,
     Unavailable,
+    RendererUnavailable,
 }
 
 fn new_session_id() -> String {
@@ -294,6 +404,61 @@ fn new_session_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn renderable_project() -> std::path::PathBuf {
+        use hyge_asset::importer::material::MaterialData;
+        use hyge_asset::importer::mesh::{MeshData, Vertex};
+
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/r103-editor-project");
+        let root = std::env::temp_dir().join(format!(
+            "hyge-r103-pump-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("assets/cook")).expect("create project");
+        std::fs::copy(
+            fixture.join("main.hyge-world"),
+            root.join("main.hyge-world"),
+        )
+        .expect("copy world");
+        std::fs::copy(
+            fixture.join("assets/persistent-cube.hyge-prefab"),
+            root.join("assets/persistent-cube.hyge-prefab"),
+        )
+        .expect("copy prefab");
+        let vertices = vec![
+            Vertex {
+                position: [-1.0, -1.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                uv: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.0, -1.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                uv: [1.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, 1.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+                uv: [0.5, 1.0],
+            },
+        ];
+        hyge_asset::importer::mesh::write(
+            &root.join("assets/cook/000.hyge-mesh"),
+            &MeshData::from_triangle_list(vertices, vec![0, 1, 2]),
+        )
+        .expect("cook mesh");
+        hyge_asset::importer::material::write(
+            &root.join("assets/cook/000.hyge-mat"),
+            &MaterialData::default(),
+        )
+        .expect("cook material");
+        root
+    }
 
     #[test]
     fn reconnect_reuses_state_and_replaces_old_generation() {
@@ -337,16 +502,122 @@ mod tests {
     fn viewport_transport_is_session_owned_and_replaced_on_reconnect() {
         let mut registry = SessionRegistry::default();
         let (first, _) = registry.bind(None, Duration::from_secs(300)).expect("bind");
-        let (name, generation) = registry.open_transport(&first).expect("open transport");
+        let (name, generation) = match registry.open_transport(&first, 640, 360) {
+            Ok(value) => value,
+            Err(SessionError::RendererUnavailable) => return,
+            Err(error) => panic!("open transport: {error:?}"),
+        };
         assert!(name.contains(&first.session_id));
         assert_eq!(generation, first.generation);
         let (second, resumed) = registry
             .bind(Some(&first.session_id), Duration::from_secs(300))
             .expect("reconnect");
         assert!(resumed);
-        assert_eq!(registry.open_transport(&first), Err(SessionError::Replaced));
-        let (_, next_generation) = registry.open_transport(&second).expect("reopen transport");
+        assert_eq!(
+            registry.open_transport(&first, 640, 360),
+            Err(SessionError::Replaced)
+        );
+        let (_, next_generation) = match registry.open_transport(&second, 640, 360) {
+            Ok(value) => value,
+            Err(SessionError::RendererUnavailable) => return,
+            Err(error) => panic!("reopen transport: {error:?}"),
+        };
         assert_ne!(generation, next_generation);
         registry.close_transport(&second).expect("close transport");
+    }
+
+    #[test]
+    fn real_session_pump_publishes_consumable_rgba_frame() {
+        let root = renderable_project();
+        let mut registry = SessionRegistry::default();
+        let (binding, _) = registry.bind(None, Duration::from_secs(300)).expect("bind");
+        let runtime = registry
+            .runtime_handle(&binding.session_id)
+            .expect("runtime");
+        {
+            let mut runtime = runtime.lock().expect("runtime lock");
+            runtime.open_project(&root).expect("open project");
+            runtime
+                .open_scene(&root.join("main.hyge-world"))
+                .expect("open scene");
+            runtime.set_viewport_size(32, 24);
+        }
+        match registry.open_transport(&binding, 32, 24) {
+            Ok(_) => {}
+            Err(SessionError::RendererUnavailable) => return,
+            Err(error) => panic!("open transport: {error:?}"),
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let (header, pixels) = loop {
+            registry.pump_viewports();
+            let record = registry.sessions.get(&binding.session_id).expect("session");
+            if let Some(transport) = record.transport.as_ref() {
+                if let Some(header) = transport.ring.newest_header() {
+                    let pixels = transport.ring.consume(&header).expect("consume frame");
+                    break (header, pixels);
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "viewport frame timed out"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!((header.width, header.height), (32, 24));
+        assert_eq!(pixels.len(), 32 * 24 * 4);
+        assert!(pixels.iter().any(|pixel| *pixel != 0));
+        assert!(header.scene_revision > 0);
+        assert!(header.camera_revision > 0);
+
+        {
+            use crate::commands::{EditComponentsCommand, EditorCommand};
+            let mut runtime = runtime.lock().expect("runtime lock");
+            let snapshot = runtime.editor_snapshot().expect("snapshot");
+            let node = snapshot
+                .hierarchy
+                .iter()
+                .find(|node| node.name == "Persistent Cube")
+                .expect("persistent node");
+            let transform = snapshot
+                .component_catalog
+                .iter()
+                .find(|component| component.short_name == "Transform")
+                .expect("Transform descriptor");
+            runtime
+                .apply_command(
+                    snapshot.revision,
+                    EditorCommand::EditComponents(EditComponentsCommand::new(
+                        vec![node.entity],
+                        transform.type_path.clone(),
+                        Some("translation".into()),
+                        serde_json::json!([2.0, 0.0, 0.0]),
+                    )),
+                )
+                .expect("edit Transform");
+        }
+        let second = loop {
+            registry.pump_viewports();
+            let record = registry.sessions.get(&binding.session_id).expect("session");
+            if let Some(transport) = record.transport.as_ref() {
+                if let Some(candidate) = transport.ring.newest_header() {
+                    if candidate.frame_id > header.frame_id {
+                        let pixels = transport
+                            .ring
+                            .consume(&candidate)
+                            .expect("consume edited frame");
+                        break (candidate, pixels);
+                    }
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "edited frame timed out"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(second.0.scene_revision > header.scene_revision);
+        assert_eq!(second.0.camera_revision, header.camera_revision);
+        assert_ne!(blake3::hash(&pixels), blake3::hash(&second.1));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

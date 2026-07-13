@@ -1,11 +1,15 @@
 //! Editor-owned camera state and asynchronous renderer bridge.
 
+use std::fs;
+use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
+use hyge_asset::{MaterialAsset, MeshAsset};
 use hyge_core::prelude::{Mat4, Quat, Vec3};
 use hyge_render::prelude::{
     pod_collect_to_vec, RenderView, RenderViewMode, Renderer, RendererConfig, ViewportFrame,
+    ViewportGeometry,
 };
 use hyge_scene::extract::FrameSnapshot;
 
@@ -184,7 +188,7 @@ pub struct EditorRenderBridge {
 
 impl EditorRenderBridge {
     /// Starts a headless renderer worker.
-    pub fn new(config: RendererConfig) -> Result<Self, String> {
+    pub fn new(config: RendererConfig, geometry: ViewportGeometry) -> Result<Self, String> {
         let (commands, command_rx) = mpsc::channel();
         let (frame_tx, frames) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
@@ -192,7 +196,8 @@ impl EditorRenderBridge {
             .name("hyge-editor-render".into())
             .spawn(move || {
                 let mut renderer = match Renderer::new_headless(&config) {
-                    Ok(renderer) => {
+                    Ok(mut renderer) => {
+                        renderer.set_viewport_geometry(geometry);
                         let _ = ready_tx.send(Ok(()));
                         renderer
                     }
@@ -256,6 +261,91 @@ impl EditorRenderBridge {
         }
         newest
     }
+}
+
+/// Loads the first deterministic cooked mesh and material from a project.
+///
+/// # Errors
+///
+/// Returns an error when the cook directory is absent, contains no matching
+/// assets, or either cooked representation is invalid.
+pub fn load_viewport_geometry(
+    project_root: &Path,
+    mesh_slot: u32,
+    material_slot: u32,
+) -> Result<ViewportGeometry, String> {
+    let cook = project_root.join("assets").join("cook");
+    let mut paths = fs::read_dir(&cook)
+        .map_err(|error| format!("read cooked assets {}: {error}", cook.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    paths.sort();
+    let mesh_path = paths
+        .iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "hyge-mesh"))
+        .nth(mesh_slot as usize)
+        .ok_or_else(|| {
+            format!(
+                "mesh handle {mesh_slot} is not present in {}",
+                cook.display()
+            )
+        })?;
+    let material_path = paths
+        .iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "hyge-mat"))
+        .nth(material_slot as usize)
+        .ok_or_else(|| {
+            format!(
+                "material handle {material_slot} is not present in {}",
+                cook.display()
+            )
+        })?;
+    let mesh = hyge_asset::importer::mesh::from_bytes(
+        &fs::read(mesh_path).map_err(|error| format!("read {}: {error}", mesh_path.display()))?,
+    )
+    .map_err(|error| format!("decode {}: {error}", mesh_path.display()))?;
+    let material = serde_json::from_slice(
+        &fs::read(material_path)
+            .map_err(|error| format!("read {}: {error}", material_path.display()))?,
+    )
+    .map_err(|error| format!("decode {}: {error}", material_path.display()))?;
+    let base_indices = mesh.meshlets.first().map_or(&[][..], |meshlet| {
+        let start = meshlet.index_offset as usize;
+        let end = start
+            .saturating_add(meshlet.index_count as usize)
+            .min(mesh.indices.len());
+        &mesh.indices[start..end]
+    });
+    if mesh.vertices.is_empty() || base_indices.is_empty() {
+        return Err("cooked viewport mesh contains no renderable geometry".into());
+    }
+    let vertices = mesh
+        .vertices
+        .iter()
+        .map(|vertex| {
+            [
+                vertex.position[0],
+                vertex.position[1],
+                vertex.position[2],
+                vertex.normal[0],
+                vertex.normal[1],
+                vertex.normal[2],
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                vertex.uv[0],
+                vertex.uv[1],
+            ]
+        })
+        .collect();
+    Ok(ViewportGeometry {
+        vertices,
+        indices: base_indices.to_vec(),
+        mesh: MeshAsset::to_gpu(&mesh).0,
+        material: MaterialAsset::to_gpu(&material).0,
+    })
 }
 
 impl Drop for EditorRenderBridge {

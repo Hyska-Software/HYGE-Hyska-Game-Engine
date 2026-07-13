@@ -152,6 +152,7 @@ impl EditorServer {
             }
             if let Ok(mut sessions) = self.sessions.lock() {
                 sessions.expire(self.config.session_ttl);
+                sessions.pump_viewports();
             }
             match self.listener.accept() {
                 Ok((stream, _)) => {
@@ -574,17 +575,39 @@ fn viewport_open_transport(
     sessions: &Arc<Mutex<SessionRegistry>>,
     binding: &crate::state::SessionBinding,
 ) -> Vec<Envelope> {
+    let dimensions = sessions
+        .lock()
+        .ok()
+        .and_then(|registry| registry.runtime_handle(&binding.session_id))
+        .and_then(|runtime| runtime.lock().ok().map(|runtime| runtime.viewport_state()))
+        .map(|viewport| (viewport.width, viewport.height));
+    let Some((width, height)) = dimensions else {
+        return vec![Envelope::error(
+            &envelope.message_id,
+            "viewport_transport_unavailable",
+            "could not resolve the session viewport",
+        )];
+    };
     match sessions
         .lock()
         .ok()
-        .and_then(|mut registry| registry.open_transport(binding).ok())
+        .map(|mut registry| registry.open_transport(binding, width, height))
     {
-        Some((name, generation)) => vec![Envelope::new(
+        Some(Ok((name, generation))) => vec![Envelope::new(
             &envelope.message_id,
             MessageType::ViewportTransportReady,
-            serde_json::json!({"mapping_name":name,"generation":generation,"width":640,"height":360,"pixel_format":"rgba8_srgb","ring_slots":3}),
+            serde_json::json!({"mapping_name":name,"generation":generation,"width":width,"height":height,"pixel_format":"rgba8_srgb","ring_slots":3}),
         )],
-        None => vec![Envelope::error(
+        Some(Err(SessionError::RendererUnavailable)) => vec![Envelope::diagnostic_error(
+            &envelope.message_id,
+            "viewport_render_unavailable",
+            "the engine renderer could not acquire a viewport adapter",
+            true,
+            None,
+            Some("open_viewport_transport".to_owned()),
+            Some("run the editor on a machine with a supported graphics adapter".to_owned()),
+        )],
+        _ => vec![Envelope::error(
             &envelope.message_id,
             "viewport_transport_unavailable",
             "could not open session viewport mapping",
@@ -633,14 +656,23 @@ fn viewport_reset_transport(
     match sessions
         .lock()
         .ok()
-        .and_then(|mut registry| registry.reset_transport(binding, width, height).ok())
+        .map(|mut registry| registry.reset_transport(binding, width, height))
     {
-        Some((name, generation)) => vec![Envelope::new(
+        Some(Ok((name, generation))) => vec![Envelope::new(
             &envelope.message_id,
             MessageType::ViewportTransportReset,
             serde_json::json!({"mapping_name":name,"generation":generation,"width":width,"height":height}),
         )],
-        None => vec![Envelope::error(
+        Some(Err(SessionError::RendererUnavailable)) => vec![Envelope::diagnostic_error(
+            &envelope.message_id,
+            "viewport_render_unavailable",
+            "the engine renderer could not acquire a viewport adapter",
+            true,
+            None,
+            Some("viewport_transport_reset".to_owned()),
+            Some("run the editor on a machine with a supported graphics adapter".to_owned()),
+        )],
+        _ => vec![Envelope::error(
             &envelope.message_id,
             "viewport_transport_unavailable",
             "could not reset session viewport mapping",
@@ -1565,6 +1597,7 @@ fn session_error_code(error: SessionError) -> &'static str {
         SessionError::NotFound => "session_not_found",
         SessionError::Replaced => "session_replaced",
         SessionError::Unavailable => "session_unavailable",
+        SessionError::RendererUnavailable => "viewport_render_unavailable",
     }
 }
 
@@ -1574,6 +1607,7 @@ fn session_error_message(error: SessionError) -> &'static str {
         SessionError::NotFound => "editor session was not found",
         SessionError::Replaced => "editor session was replaced by a newer connection",
         SessionError::Unavailable => "editor session is temporarily unavailable",
+        SessionError::RendererUnavailable => "the engine renderer is unavailable",
     }
 }
 
