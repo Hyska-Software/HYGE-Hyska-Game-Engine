@@ -208,6 +208,49 @@ jobs:
           path: target/r103-evidence/
           if-no-files-found: error
 
+  editor-r104-package:
+    name: editor-r104-package / windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Load MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build standalone editor package
+        shell: pwsh
+        run: .\scripts\build_editor_windows.ps1
+
+      - name: Run clean-machine package smoke
+        shell: pwsh
+        run: >-
+          .\scripts\r104_clean_machine_smoke.ps1
+          -PackageDirectory target\editor-windows\HygeEditor
+          -FixtureDirectory crates\hyge-editor\tests\fixtures\r103-editor-project
+          -EvidenceDirectory target\r104-evidence
+
+      - name: Upload R-104 package and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r104-editor-windows
+          path: |
+            target/editor-windows/
+            target/r104-evidence/
+          if-no-files-found: error
+
   # -------------------------------------------------------------------------
   # Changelog + breaking-change-without-ADR check (implements R-008).
   #

@@ -37,6 +37,8 @@ This directory contains the Architecture Decision Records for the Hyge engine. E
 | [0015](0015-python-qt-editor.md) | External PySide6/QML editor | Accepted | Editor |
 | [0016](0016-persistent-editor-scene-layer.md) | Persistent editor scene layer | Accepted | Editor/Scene |
 | [0018](0018-editor-scene-hot-reload.md) | Editor scene hot-reload ownership and conflict policy | Accepted | Editor/Scene |
+| [0019](0019-editor-recovery-shutdown.md) | Editor recovery, generation fencing and shutdown | Accepted | Editor |
+| [0020](0020-editor-windows-distribution.md) | Standalone Windows editor distribution | Accepted | Editor/Build |
 
 ## Conventions
 

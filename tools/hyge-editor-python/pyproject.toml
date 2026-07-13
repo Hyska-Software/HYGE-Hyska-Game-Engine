@@ -6,11 +6,33 @@ build-backend = "setuptools.build_meta"
 name = "hyge-editor-python"
 version = "0.1.0"
 description = "PySide6/QML frontend for the Hyge Rust editor service"
-requires-python = ">=3.10"
-dependencies = ["PySide6>=6.8,<7", "blake3>=1.0,<2"]
+requires-python = ">=3.12,<3.13"
+dependencies = ["PySide6>=6.9,<6.10", "blake3>=1.0,<2"]
 
 [project.optional-dependencies]
 test = ["pytest>=8", "jsonschema>=4.23"]
+build = ["nuitka>=4,<5", "ordered-set>=4,<5", "zstandard>=0.23,<1"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+
+[tool.pyside6-project]
+files = [
+    "main.py",
+    "src/hyge_editor/__init__.py",
+    "src/hyge_editor/e2e.py",
+    "src/hyge_editor/input_controller.py",
+    "src/hyge_editor/interaction.py",
+    "src/hyge_editor/ipc.py",
+    "src/hyge_editor/layout_state.py",
+    "src/hyge_editor/main.py",
+    "src/hyge_editor/models.py",
+    "src/hyge_editor/session.py",
+    "src/hyge_editor/theme.py",
+    "src/hyge_editor/viewport_item.py",
+    "src/hyge_editor/viewport_transport.py",
+    "qml/__init__.py",
+    "qml/qml.qrc",
+    "select_project.ps1",
+    "README.txt",
+]

@@ -1747,7 +1747,7 @@ title = "PySide6/QML packaging and Windows distribution"
 phase = "phase_12"
 owner = "editor"
 priority = "P0"
-status = "not_started"
+status = "complete"
 risk = "medium"
 dependencies = ["R-103"]
 summary = "Produce a reproducible editor package with Python, Qt plugins, QML resources and the Rust backend launcher."
@@ -1758,6 +1758,8 @@ acceptance = [
   "packaged editor locates QML, Qt plugins and hyge-tools without PATH assumptions",
   "test: clean-machine smoke script launches the packaged editor and connects"
 ]
+completed_at = "2026-07-13"
+completion_notes = "Implemented the standalone Windows editor distribution. The PySide6 project pins Python 3.12 and PySide6 6.9, enumerates the source/QRC set, and loads packaged QML from qrc:/qml/Main.qml with a source-checkout fallback. Added pysidedeploy.spec, package-relative HygeEditor.cmd with native project selection and dynamic port 0, select_project.ps1, README.txt, build_editor_windows.ps1 with clean-venv deployment, release hyge-tools.exe assembly and SHA-256 manifest, plus r104_clean_machine_smoke.ps1. hyge-tools validates frontend paths and launches .exe frontends directly while preserving .py compatibility. The frozen frontend now gives an explicit launcher diagnostic instead of retrying forever when opened without a backend. Evidence: pyside6-project build and pyside6-deploy standalone succeeded; package is target/editor-windows/HygeEditor with package-manifest.json; clean-machine smoke returned status=complete in target/r104-evidence/r104-smoke.json and verified QML/plugins, TCP readiness, protocol trace, PNGs, saved scene and workflow. Added Rust/Python packaging tests, ADR-0020, architecture/goal docs and Windows CI packaging job."
 
 [[items]]
 id = "R-105"

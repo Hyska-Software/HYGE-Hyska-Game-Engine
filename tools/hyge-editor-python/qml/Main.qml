@@ -78,9 +78,11 @@ ApplicationWindow {
                 color: editorTheme.text
                 text: editorBridge.status === "Reconnecting"
                     ? "Backend disconnected — retry " + editorBridge.retryAttempt + " in " + editorBridge.retryDelayMs + " ms"
+                    : editorBridge.status === "Launch HygeEditor.cmd"
+                        ? "Open HygeEditor.cmd to select a project and start the backend"
                     : "Backend: " + editorBridge.status
             }
-            Button { text: "Retry now"; visible: editorBridge.status !== "Closing"; onClicked: editorBridge.retry_backend() }
+            Button { text: "Retry now"; visible: editorBridge.status !== "Closing" && editorBridge.status !== "Launch HygeEditor.cmd"; onClicked: editorBridge.retry_backend() }
             Button { text: "Close"; onClicked: editorBridge.close_backend() }
         }
     }

@@ -1422,6 +1422,26 @@ For each `Component` on selected entity:
 - Dark by default, light toggle.
 - Uses a QML theme aligned with Hyge brand.
 
+### 12.11 Windows distribution (R-104)
+
+- The distributed editor is a standalone directory containing the frozen
+  `HygeEditor.exe`, Qt libraries/plugins and QML resources, `bin/hyge-tools.exe`
+  and the package-relative `HygeEditor.cmd` launcher.
+- Packaged QML loads from `qrc:/qml/Main.qml`; source-checkout development may
+  use the filesystem fallback under `tools/hyge-editor-python/qml/`.
+- `hyge-tools editor` launches `.py` frontends through the development Python
+  command and executes `.exe` frontends directly. The packaged path never
+  discovers Python, cargo or the backend through `PATH`.
+- Package creation uses the checked-in PySide6 project and `pysidedeploy.spec`,
+  followed by a release `hyge-tools.exe` copy and deterministic package
+  manifest. Clean-machine smoke uses the R-103 fixture and retains connection,
+  trace, screenshot and saved-scene evidence.
+- `HygeEditor.cmd` is the user-facing entrypoint. With no project argument it
+  opens the native Windows folder selector, requires a directory containing a
+  `.hyge-world`, and starts `hyge-tools editor` with port `0`. The frozen
+  `HygeEditor.exe` remains an internal protocol client; when opened directly it
+  stops without retrying and instructs the user to launch the command file.
+
 ---
 
 ## 13. Tools (`hyge-tools`)

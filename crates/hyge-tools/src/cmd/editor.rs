@@ -1,5 +1,6 @@
 //! `hyge-tools editor` — start the Rust editor service and optional PySide6 UI.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -24,6 +25,7 @@ pub fn run(
     let external_scene = external_scene
         .map(|scene| validate_scene(&project, scene))
         .transpose()?;
+    let frontend = frontend.map(validate_frontend).transpose()?;
     let token = editor_token();
     let server = EditorServer::bind(EditorServerConfig {
         bind_address: format!("127.0.0.1:{port}"),
@@ -37,7 +39,7 @@ pub fn run(
     let child = frontend
         .map(|path| {
             spawn_frontend(
-                path,
+                path.as_path(),
                 &project,
                 scene.as_deref(),
                 evidence_dir,
@@ -103,6 +105,34 @@ fn editor_token() -> String {
     blake3::hash(material.as_bytes()).to_hex().to_string()
 }
 
+fn validate_frontend(path: &Path) -> HygeResult<PathBuf> {
+    let canonical = path.canonicalize().map_err(|error| {
+        hyge_core::result::HygeError::invalid_argument(format!(
+            "editor frontend does not exist: {} ({error})",
+            path.display()
+        ))
+    })?;
+    if !canonical.is_file() {
+        return Err(hyge_core::result::HygeError::invalid_argument(format!(
+            "editor frontend is not a file: {}",
+            canonical.display()
+        )));
+    }
+    Ok(canonical)
+}
+
+fn frontend_invocation(path: &Path) -> (OsString, Vec<OsString>) {
+    let is_executable = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"));
+    if is_executable {
+        (path.as_os_str().to_owned(), Vec::new())
+    } else {
+        (OsString::from("python"), vec![path.as_os_str().to_owned()])
+    }
+}
+
 fn spawn_frontend(
     path: &Path,
     project: &Path,
@@ -112,9 +142,10 @@ fn spawn_frontend(
     address: &str,
     token: &str,
 ) -> std::io::Result<Child> {
-    let mut command = Command::new("python");
+    let (program, args) = frontend_invocation(path);
+    let mut command = Command::new(program);
     command
-        .arg(path)
+        .args(args)
         .env("HYGE_EDITOR_ADDRESS", address)
         .env("HYGE_EDITOR_TOKEN", token)
         .env("HYGE_PROJECT", project);
@@ -168,6 +199,35 @@ mod tests {
             validate_scene(&canonical_root, Path::new("main.hyge-world")).expect("scene"),
             scene.canonicalize().expect("canonical scene")
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn packaged_executable_is_launched_directly() {
+        let (program, args) = frontend_invocation(Path::new("package/HygeEditor.exe"));
+        assert_eq!(program, OsString::from("package/HygeEditor.exe"));
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn source_frontend_keeps_python_compatibility() {
+        let (program, args) = frontend_invocation(Path::new("tools/main.py"));
+        assert_eq!(program, OsString::from("python"));
+        assert_eq!(args, vec![OsString::from("tools/main.py")]);
+    }
+
+    #[test]
+    fn validates_frontend_files() {
+        let root =
+            std::env::temp_dir().join(format!("hyge-editor-frontend-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("create frontend directory");
+        let file = root.join("HygeEditor.exe");
+        fs::write(&file, b"fixture").expect("write frontend fixture");
+        assert_eq!(
+            validate_frontend(&file).expect("frontend"),
+            file.canonicalize().expect("canonical")
+        );
+        assert!(validate_frontend(&root.join("missing.exe")).is_err());
         let _ = fs::remove_dir_all(root);
     }
 }

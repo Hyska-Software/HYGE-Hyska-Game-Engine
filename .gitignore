@@ -346,6 +346,11 @@ vulkaninfo-output.txt
 
 .hermes/
 
+tools/hyge-editor-python/.venv-r104/
+tools/hyge-editor-python/deployment/
+tools/hyge-editor-python/qml/rc_qml.py
+tools/hyge-editor-python/src/hyge_editor_python.egg-info/
+
 tools/hyge-editor-python/src/hyge_editor/__pycache__/input_controller.cpython-314.pyc
 tools/hyge-editor-python/src/hyge_editor/__pycache__/interaction.cpython-314.pyc
 tools/hyge-editor-python/src/hyge_editor/__pycache__/layout_state.cpython-314.pyc
